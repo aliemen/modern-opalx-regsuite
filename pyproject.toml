@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modern-opalx-regsuite"
+version = "0.1.0"
+description = "Modern, portable regression suite and static dashboard for OPALX."
+authors = [{ name = "OPALX maintainers" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "typer[all]>=0.12.0",
+  "pydantic>=2.0.0",
+  "jinja2>=3.1.0",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = ["black", "ruff", "mypy"]
+
+[project.scripts]
+opalx-regsuite = "modern_opalx_regsuite.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modern_opalx_regsuite*"]
+

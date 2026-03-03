@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>
+      Run {{ run_id }} ({{ branch }}/{{ arch }}) - OPALX Regression
+    </title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        margin: 0;
+        padding: 2rem;
+        background: #020617;
+        color: #e5e7eb;
+      }
+      h1 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+      }
+      .col {
+        flex: 1 1 260px;
+      }
+      .card {
+        background: #020617;
+        border-radius: 0.75rem;
+        padding: 1rem 1.2rem;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        margin-bottom: 1rem;
+      }
+      .muted {
+        color: #9ca3af;
+        font-size: 0.85rem;
+      }
+      .status-badge {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+      }
+      .status-passed {
+        background: rgba(22, 163, 74, 0.15);
+        border-color: rgba(22, 163, 74, 0.9);
+      }
+      .status-failed {
+        background: rgba(220, 38, 38, 0.15);
+        border-color: rgba(220, 38, 38, 0.9);
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 0.5rem;
+      }
+      th,
+      td {
+        border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+        padding: 0.4rem 0.6rem;
+        text-align: left;
+        font-size: 0.85rem;
+      }
+      th {
+        font-weight: 600;
+        color: #d1d5db;
+      }
+      details {
+        margin-top: 0.5rem;
+      }
+      summary {
+        cursor: pointer;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        font-size: 0.8rem;
+      }
+      a {
+        color: #38bdf8;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      img {
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <a href="../../index.html" class="muted">&larr; Back to branch</a>
+    <h1>Run {{ run_id }}</h1>
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <h2 style="font-size: 1rem">Summary</h2>
+          <div class="muted">
+            Branch: <strong>{{ branch }}</strong><br />
+            Arch: <strong>{{ arch }}</strong><br />
+            Started: {{ meta.started_at }}<br />
+            Finished: {{ meta.finished_at or "-" }}<br />
+          </div>
+          <div style="margin-top: 0.5rem">
+            {% set cls = "status-badge" %}
+            {% if meta.status == "passed" %}
+            {% set cls = cls + " status-passed" %}
+            {% elif meta.status != "running" %}
+            {% set cls = cls + " status-failed" %}
+            {% endif %}
+            <span class="{{ cls }}">{{ meta.status }}</span>
+          </div>
+          <div class="muted" style="margin-top: 0.5rem">
+            Unit failures: {{ meta.unit_tests_failed }}<br />
+            Regression failures: {{ meta.regression_failed }}<br />
+            Regression broken: {{ meta.regression_broken }}
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <h2 style="font-size: 1rem">Artifacts</h2>
+          <ul class="muted">
+            <li>
+              <a href="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/run-meta.json"
+                >run-meta.json</a
+              >
+            </li>
+            <li>
+              <a
+                href="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/unit-tests.json"
+                >unit-tests.json</a
+              >
+            </li>
+            <li>
+              <a
+                href="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/regression-tests.json"
+                >regression-tests.json</a
+              >
+            </li>
+            <li>
+              <a
+                href="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/logs/pipeline.log"
+                >pipeline.log (if present)</a
+              >
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 1rem">Unit tests</h2>
+      {% if unit.tests %}
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Duration (s)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in unit.tests %}
+          <tr>
+            <td>{{ t.name }}</td>
+            <td>
+              {% set tcls = "status-badge" %}
+              {% if t.status|lower == "passed" %}
+              {% set tcls = tcls + " status-passed" %}
+              {% elif t.status|lower == "failed" %}
+              {% set tcls = tcls + " status-failed" %}
+              {% endif %}
+              <span class="{{ tcls }}">{{ t.status }}</span>
+            </td>
+            <td>{{ t.duration_seconds or "-" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No unit test data recorded.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 1rem">Regression tests</h2>
+      {% if regression.simulations %}
+      {% for sim in regression.simulations %}
+      <details open>
+        <summary>
+          <strong>{{ sim.name }}</strong>
+          {% if sim.description %}
+          <span class="muted">— {{ sim.description }}</span>
+          {% endif %}
+        </summary>
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Mode</th>
+              <th>Status</th>
+              <th>Eps</th>
+              <th>Delta</th>
+              <th>Values</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in sim.metrics %}
+            <tr>
+              <td>{{ m.metric }}</td>
+              <td>{{ m.mode }}</td>
+              <td>
+                {% set mcls = "status-badge" %}
+                {% if m.state|lower == "passed" %}
+                {% set mcls = mcls + " status-passed" %}
+                {% elif m.state|lower != "running" %}
+                {% set mcls = mcls + " status-failed" %}
+                {% endif %}
+                <span class="{{ mcls }}">{{ m.state }}</span>
+              </td>
+              <td>{{ m.eps or "-" }}</td>
+              <td>{{ m.delta or "-" }}</td>
+              <td>
+                {% if m.reference_value is not none or m.current_value is not none %}
+                ref={{ m.reference_value or "-" }}, cur={{ m.current_value or "-" }}
+                {% else %} - {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% for m in sim.metrics if m.plot %}
+        <div style="margin-top: 0.5rem">
+          <div class="muted">Plot: {{ m.metric }}</div>
+          <img
+            src="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/{{ m.plot }}"
+            alt="Plot for {{ sim.name }} / {{ m.metric }}"
+          />
+        </div>
+        {% endfor %}
+      </details>
+      {% endfor %}
+      {% else %}
+      <p class="muted">No regression test data recorded.</p>
+      {% endif %}
+    </div>
+  </body>
+</html>
+

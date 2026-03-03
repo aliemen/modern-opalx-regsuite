@@ -28,6 +28,8 @@ class RegressionMetric(BaseModel):
 class RegressionSimulation(BaseModel):
     name: str
     description: Optional[str] = None
+    state: Optional[str] = None
+    log_file: Optional[str] = None
     metrics: List[RegressionMetric] = Field(default_factory=list)
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
@@ -102,6 +103,25 @@ def generate_site(
     branch_tmpl = env.get_template("branch.html.j2")
     run_tmpl = env.get_template("run.html.j2")
 
+    def mirror_run_artifacts(run_root: Path, site_run_root: Path) -> None:
+        site_run_root.mkdir(parents=True, exist_ok=True)
+        for fname in ["run-meta.json", "unit-tests.json", "regression-tests.json"]:
+            src = run_root / fname
+            if src.is_file():
+                dst = site_run_root / fname
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+
+        logs_src = run_root / "logs"
+        if logs_src.is_dir():
+            logs_dst = site_run_root / "logs"
+            shutil.copytree(logs_src, logs_dst, dirs_exist_ok=True)
+
+        plots_src = run_root / "plots"
+        if plots_src.is_dir():
+            plots_dst = site_run_root / "plots"
+            shutil.copytree(plots_src, plots_dst, dirs_exist_ok=True)
+
     for branch, archs in branches.items():
         branch_dir = out_dir / "branch" / branch
         branch_dir.mkdir(parents=True, exist_ok=True)
@@ -124,6 +144,8 @@ def generate_site(
 
                 # Load detailed JSON files for this run.
                 run_root = data_root / "runs" / branch / arch / r.run_id
+                site_run_root = out_dir / "runs" / branch / arch / r.run_id
+                mirror_run_artifacts(run_root, site_run_root)
                 meta = json.loads((run_root / "run-meta.json").read_text("utf-8"))
                 unit = json.loads((run_root / "unit-tests.json").read_text("utf-8"))
                 reg = json.loads(

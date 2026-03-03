@@ -29,6 +29,10 @@ class SuiteConfig(BaseModel):
         "master",
         description="Branch name to use for the regression-tests-x repository.",
     )
+    regtests_subdir: str = Field(
+        "RegressionTests",
+        description="Subdirectory inside regression-tests-x that contains tests.",
+    )
 
     default_branch: str = "master"
     default_architectures: List[str] = Field(
@@ -59,6 +63,21 @@ class SuiteConfig(BaseModel):
     build_command: str = Field(
         default="make -j2",
         description="Build command executed in the build directory after CMake.",
+    )
+    opalx_executable_relpath: str = Field(
+        "src/opalx",
+        description=(
+            "Path to the opalx executable relative to the build directory. "
+            "Fallbacks to 'opalx' in the build root."
+        ),
+    )
+    opalx_args: List[str] = Field(
+        default_factory=list,
+        description="Extra arguments to pass to OPALX for regression tests.",
+    )
+    keep_work_dirs: bool = Field(
+        False,
+        description="If true, retain per-test temporary work directories after a run.",
     )
 
     @property
@@ -111,6 +130,8 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
         if isinstance(value, str):
             escaped = value.replace("\\", "\\\\").replace('"', '\\"')
             lines.append(f'{key} = "{escaped}"')
+        elif isinstance(value, bool):
+            lines.append(f"{key} = {'true' if value else 'false'}")
         elif isinstance(value, list):
             parts: list[str] = []
             for item in value:
@@ -128,6 +149,7 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     add_kv("data_root", str(data["data_root"]))
     add_kv("regtests_repo_root", str(data["regtests_repo_root"]))
     add_kv("regtests_branch", data.get("regtests_branch", "master"))
+    add_kv("regtests_subdir", data.get("regtests_subdir", "RegressionTests"))
     add_kv("default_branch", data.get("default_branch", "master"))
     add_kv("default_architectures", data.get("default_architectures", []))
     add_kv("unit_test_command", data.get("unit_test_command", "ctest --output-on-failure"))
@@ -135,6 +157,9 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
         add_kv("regression_test_command", data["regression_test_command"])
     add_kv("cmake_args", data.get("cmake_args", []))
     add_kv("build_command", data.get("build_command", "make -j2"))
+    add_kv("opalx_executable_relpath", data.get("opalx_executable_relpath", "src/opalx"))
+    add_kv("opalx_args", data.get("opalx_args", []))
+    add_kv("keep_work_dirs", data.get("keep_work_dirs", False))
 
     text = "\n".join(lines) + "\n"
     with config_path.open("w", encoding="utf-8") as f:
@@ -146,6 +171,7 @@ def init_default_config(
     opalx_repo_root: Path,
     builds_root: Path,
     data_root: Path,
+    regtests_repo_root: Path,
     default_branch: str = "master",
     default_architectures: Optional[List[str]] = None,
     path: Optional[Path] = None,
@@ -154,6 +180,7 @@ def init_default_config(
         opalx_repo_root=opalx_repo_root,
         builds_root=builds_root,
         data_root=data_root,
+        regtests_repo_root=regtests_repo_root,
         default_branch=default_branch,
         default_architectures=default_architectures
         or ["cpu-serial"],

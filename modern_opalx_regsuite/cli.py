@@ -44,6 +44,11 @@ def init(
         prompt=True,
         help="Path to regression-tests-x source checkout.",
     ),
+    regtests_branch: str = typer.Option(
+        "master",
+        prompt=True,
+        help="Branch to use for regression-tests-x.",
+    ),
     default_branch: str = typer.Option(
         "master",
         prompt=True,
@@ -67,6 +72,7 @@ def init(
         builds_root=_resolve_path(builds_root),
         data_root=_resolve_path(data_root),
         regtests_repo_root=_resolve_path(regtests_repo_root),
+        regtests_branch=regtests_branch,
         default_branch=default_branch,
         default_architectures=[default_arch],
     )

@@ -92,7 +92,7 @@
     </style>
   </head>
   <body>
-    <a href="../../index.html" class="muted">&larr; Back to branch</a>
+    <a href="../../../index.html" class="muted">&larr; Back to branch</a>
     <h1>Run {{ run_id }}</h1>
     <div class="row">
       <div class="col">
@@ -144,10 +144,14 @@
             <li>
               <a
                 href="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/logs/pipeline.log"
-                >pipeline.log (if present)</a
+                >pipeline.log</a
               >
             </li>
           </ul>
+          <div class="muted">
+            Artifacts are served from the static site under
+            <code>/runs/{{ branch }}/{{ arch }}/{{ run_id }}/...</code>.
+          </div>
         </div>
       </div>
     </div>
@@ -233,6 +237,13 @@
             {% endfor %}
           </tbody>
         </table>
+        {% if sim.log_file %}
+        <div class="muted" style="margin-top: 0.5rem">
+          <a href="../../../../runs/{{ branch }}/{{ arch }}/{{ run_id }}/{{ sim.log_file }}"
+            >Test log: {{ sim.log_file }}</a
+          >
+        </div>
+        {% endif %}
         {% for m in sim.metrics if m.plot %}
         <div style="margin-top: 0.5rem">
           <div class="muted">Plot: {{ m.metric }}</div>

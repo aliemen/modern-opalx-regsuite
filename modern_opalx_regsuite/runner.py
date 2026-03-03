@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,13 +14,15 @@ from typing import Optional, Tuple
 
 from .config import SuiteConfig
 from .data_model import (
-    RunMeta,
-    UnitTestsReport,
+    RegressionMetric,
+    RegressionSimulation,
     RegressionTestsReport,
     RunIndexEntry,
+    RunMeta,
+    UnitTestsReport,
     branches_index_path,
-    runs_index_path,
     run_dir,
+    runs_index_path,
 )
 
 
@@ -26,6 +31,7 @@ class RunPaths:
     root: Path
     logs_dir: Path
     plots_dir: Path
+    work_dir: Path
     pipeline_log_path: Path
     meta_path: Path
     unit_json_path: Path
@@ -38,12 +44,15 @@ def _ensure_run_paths(data_root: Path, branch: str, arch: str, run_id: str) -> R
     root = run_dir(data_root, branch, arch, run_id)
     logs_dir = root / "logs"
     plots_dir = root / "plots"
+    work_dir = root / "work"
     logs_dir.mkdir(parents=True, exist_ok=True)
     plots_dir.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
     return RunPaths(
         root=root,
         logs_dir=logs_dir,
         plots_dir=plots_dir,
+        work_dir=work_dir,
         pipeline_log_path=logs_dir / "pipeline.log",
         meta_path=root / "run-meta.json",
         unit_json_path=root / "unit-tests.json",
@@ -65,7 +74,19 @@ def _append_pipeline_line(pipeline_log_path: Path, line: str) -> None:
         f.write(line + "\n")
 
 
-def _git_update_repo(repo_path: Path, branch: str, pipeline_log_path: Path) -> None:
+def _start_pipeline_log(pipeline_log_path: Path, branch: str, arch: str, run_id: str) -> None:
+    pipeline_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with pipeline_log_path.open("w", encoding="utf-8") as f:
+        f.write(
+            f"# OPALX regression run\n"
+            f"branch={branch}\n"
+            f"arch={arch}\n"
+            f"run_id={run_id}\n"
+            f"started_at={datetime.utcnow().isoformat()}Z\n\n"
+        )
+
+
+def _git_update_repo(repo_path: Path, branch: str, pipeline_log_path: Path) -> bool:
     """Fetch, checkout, and pull a given branch if this looks like a git repo."""
     git_dir = repo_path / ".git"
     if not git_dir.exists():
@@ -73,30 +94,56 @@ def _git_update_repo(repo_path: Path, branch: str, pipeline_log_path: Path) -> N
             pipeline_log_path,
             f"[git] Skipping update; {repo_path} is not a git repository.",
         )
-        return
+        return False
 
-    def run_git(args: str) -> None:
+    def run_git(args: str) -> bool:
         cmd = f"git {args}"
         _append_pipeline_line(pipeline_log_path, f"[git] {cmd}")
-        _run_command(
+        rc, _ = _run_command(
             cmd,
             cwd=repo_path,
-            log_path=pipeline_log_path,  # per-command output is fine in pipeline log
+            log_path=pipeline_log_path,
             pipeline_log_path=pipeline_log_path,
+            append_log=True,
         )
+        return rc == 0
 
-    run_git(f"fetch origin {branch}")
-    run_git(f"checkout {branch}")
-    run_git(f"pull --ff-only origin {branch}")
+    ok = True
+    ok = run_git(f"fetch origin {branch}") and ok
+    ok = run_git(f"checkout {branch}") and ok
+    ok = run_git(f"pull --ff-only origin {branch}") and ok
+    return ok
+
+
+def _git_head_short(repo_path: Path) -> Optional[str]:
+    git_dir = repo_path / ".git"
+    if not git_dir.exists():
+        return None
+    proc = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=str(repo_path),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
 
 
 def _run_command(
-    cmd: str, cwd: Path, log_path: Path, pipeline_log_path: Path | None = None
+    cmd: str,
+    cwd: Path,
+    log_path: Path,
+    pipeline_log_path: Path | None = None,
+    env: Optional[dict[str, str]] = None,
+    append_log: bool = False,
 ) -> Tuple[int, str]:  # returncode, output
     cmd_list = shlex.split(cmd)
     proc = subprocess.Popen(
         cmd_list,
         cwd=str(cwd),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -104,14 +151,19 @@ def _run_command(
     )
     assert proc.stdout is not None
     lines: list[str] = []
-    with log_path.open("w", encoding="utf-8") as log_file, (
+    log_mode = "a" if append_log else "w"
+    with log_path.open(log_mode, encoding="utf-8") as log_file, (
         pipeline_log_path.open("a", encoding="utf-8")
-        if pipeline_log_path is not None
+        if pipeline_log_path is not None and pipeline_log_path != log_path
         else open(os.devnull, "a", encoding="utf-8")
     ) as pipe_log:
+        header = f"$ {cmd}\n"
+        log_file.write(header)
+        if pipeline_log_path is not None and pipeline_log_path != log_path:
+            pipe_log.write(header)
         for line in proc.stdout:
             log_file.write(line)
-            if pipeline_log_path is not None:
+            if pipeline_log_path is not None and pipeline_log_path != log_path:
                 pipe_log.write(line)
             lines.append(line)
     proc.wait()
@@ -162,6 +214,378 @@ def _parse_regression_output(output: str) -> RegressionTestsReport:
     return RegressionTestsReport(simulations=[sim])
 
 
+def _discover_regression_tests(tests_root: Path) -> list[str]:
+    tests: list[str] = []
+    if not tests_root.is_dir():
+        return tests
+    for entry in sorted(tests_root.iterdir()):
+        if entry.name.startswith(".") or not entry.is_dir():
+            continue
+        test = entry.name
+        if (entry / "disabled").exists():
+            continue
+        if not (entry / f"{test}.in").is_file():
+            continue
+        if not (entry / "reference" / f"{test}.stat").is_file():
+            continue
+        tests.append(test)
+    return tests
+
+
+def _parse_rt_file(rt_path: Path) -> tuple[Optional[str], list[tuple[str, str, float]]]:
+    if not rt_path.is_file():
+        return None, []
+    lines = [l.strip() for l in rt_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if not lines:
+        return None, []
+    description = lines[0].strip().strip('"')
+    checks: list[tuple[str, str, float]] = []
+    for line in lines[1:]:
+        if not line.startswith("stat"):
+            continue
+        m = re.match(r'^stat\s+"([^"]+)"\s+(\S+)\s+(\S+)\s*$', line)
+        if not m:
+            continue
+        var = m.group(1)
+        mode = m.group(2)
+        try:
+            eps = float(m.group(3))
+        except ValueError:
+            continue
+        checks.append((var, mode, eps))
+    return description, checks
+
+
+def _extract_local_run_command(local_script: Path) -> Optional[str]:
+    """Extract the effective run command from a legacy *.local script.
+
+    These files usually contain:
+    - shebang
+    - cd to script directory
+    - mpirun/opalx invocation
+    """
+    if not local_script.is_file():
+        return None
+    lines = local_script.read_text(encoding="utf-8", errors="replace").splitlines()
+    for raw in reversed(lines):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("cd "):
+            continue
+        return line
+    return None
+
+
+def _parse_sdds_kv(block: str, key: str) -> Optional[str]:
+    m = re.search(rf"{key}=([^,]+)", block)
+    if not m:
+        return None
+    return m.group(1).strip().strip('"')
+
+
+def _read_stat_data(path: Path, var_name: str) -> tuple[Optional[str], list[float], list[float], Optional[str]]:
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    columns: dict[str, dict[str, int | str]] = {}
+    params: dict[str, int] = {}
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if "&column" in line:
+            block = line
+            while "&end" not in lines[i] and i + 1 < len(lines):
+                i += 1
+                block += lines[i]
+            name = _parse_sdds_kv(block, "name")
+            unit = _parse_sdds_kv(block, "units")
+            if name:
+                columns[name] = {"column": len(columns), "units": unit or ""}
+        elif "&parameter" in line:
+            block = line
+            while "&end" not in lines[i] and i + 1 < len(lines):
+                i += 1
+                block += lines[i]
+            name = _parse_sdds_kv(block, "name")
+            if name:
+                params[name] = len(params)
+        elif "&data" in line:
+            while "&end" not in lines[i] and i + 1 < len(lines):
+                i += 1
+            i += 1
+            break
+        i += 1
+
+    header_lines = i
+    rev_line = params.get("revision")
+    revision: Optional[str] = None
+    if rev_line is not None and header_lines + rev_line < len(lines):
+        revision = lines[header_lines + rev_line]
+        m = re.search(r"(.* git rev\. )#([A-Za-z0-9]{7})[A-Za-z0-9]*", revision)
+        if m:
+            revision = f"{m.group(1)}{m.group(2)}"
+
+    if "s" not in columns or var_name not in columns:
+        return revision, [], [], None
+
+    s_col = int(columns["s"]["column"])
+    var_col = int(columns[var_name]["column"])
+    var_unit = str(columns[var_name].get("units", "")).strip('"')
+
+    data_start = header_lines + len(params)
+    s_vals: list[float] = []
+    values: list[float] = []
+    for row in lines[data_start:]:
+        parts = row.split()
+        if len(parts) <= max(s_col, var_col):
+            continue
+        try:
+            s_vals.append(float(parts[s_col]))
+            values.append(float(parts[var_col]))
+        except ValueError:
+            continue
+
+    return revision, s_vals, values, var_unit
+
+
+def _compute_delta(mode: str, values: list[float], ref_values: list[float]) -> Optional[float]:
+    if not values or not ref_values or len(values) != len(ref_values):
+        return None
+    if mode == "last":
+        return abs(values[-1] - ref_values[-1])
+    if mode == "avg":
+        sq = sum((values[i] - ref_values[i]) ** 2 for i in range(len(values)))
+        return math.sqrt(sq) / len(values)
+    return None
+
+
+def _write_stat_plot(
+    s_vals: list[float],
+    values: list[float],
+    ref_values: list[float],
+    out_path: Path,
+    test_name: str,
+    var_name: str,
+    var_unit: str,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax1 = plt.subplots(figsize=(9, 4.5))
+    ax2 = ax1.twinx()
+    diffs = [values[i] - ref_values[i] for i in range(min(len(values), len(ref_values)))]
+
+    ax1.plot(s_vals[: len(values)], values, label="current", linewidth=2)
+    ax1.plot(s_vals[: len(ref_values)], ref_values, label="reference", linewidth=2)
+    ax2.plot(s_vals[: len(diffs)], diffs, label="difference", linewidth=1.5)
+
+    pretty_var = var_name.replace("_", "(")
+    if "(" in pretty_var and not pretty_var.endswith(")"):
+        pretty_var += ")"
+    y_unit = f" [{var_unit}]" if var_unit else ""
+
+    ax1.set_title(test_name)
+    ax1.set_xlabel("s [m]")
+    ax1.set_ylabel(f"{pretty_var}{y_unit}")
+    ax2.set_ylabel(f"delta {pretty_var}{y_unit}")
+    ax1.legend(loc="lower left")
+    ax2.legend(loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
+def _find_opalx_executable(build_dir: Path, relpath: str) -> Optional[Path]:
+    candidate = build_dir / relpath
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return candidate
+    fallback = build_dir / "opalx"
+    if fallback.is_file() and os.access(fallback, os.X_OK):
+        return fallback
+    which = shutil.which("opalx")
+    if which:
+        return Path(which)
+    return None
+
+
+def _run_regression_suite(
+    cfg: SuiteConfig,
+    paths: RunPaths,
+    build_dir: Path,
+    pipeline_log_path: Path,
+) -> RegressionTestsReport:
+    tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
+    tests = _discover_regression_tests(tests_root)
+    report = RegressionTestsReport(simulations=[])
+
+    opalx_exe = _find_opalx_executable(build_dir, cfg.opalx_executable_relpath)
+    if opalx_exe is None:
+        _append_pipeline_line(
+            pipeline_log_path,
+            "[regression] opalx executable not found; skipping regression tests.",
+        )
+        return report
+
+    reg_lines: list[str] = []
+    reg_lines.append(f"Running {len(tests)} regression tests from {tests_root}")
+    reg_lines.append(f"OPALX executable: {opalx_exe}")
+
+    for test_name in tests:
+        src_test_dir = tests_root / test_name
+        work_test_dir = paths.work_dir / test_name
+        if work_test_dir.exists():
+            shutil.rmtree(work_test_dir)
+        shutil.copytree(src_test_dir, work_test_dir)
+
+        local_script = work_test_dir / f"{test_name}.local"
+        test_input = work_test_dir / f"{test_name}.in"
+        rt_file = work_test_dir / f"{test_name}.rt"
+        generated_stat = work_test_dir / f"{test_name}.stat"
+        reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
+
+        test_log_local = work_test_dir / f"{test_name}-RT.o"
+        test_log_run = paths.logs_dir / f"{test_name}-RT.o"
+        env = os.environ.copy()
+        env["OPALX_EXE_PATH"] = str(opalx_exe.parent)
+
+        if local_script.is_file():
+            os.chmod(local_script, 0o755)
+            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
+            local_cmd = _extract_local_run_command(local_script)
+            if local_cmd:
+                _append_pipeline_line(
+                    pipeline_log_path,
+                    f"[regression] {test_name} local command: {local_cmd}",
+                )
+            # Run via bash to preserve the exact script semantics.
+            cmd = f"bash {shlex.quote(local_script.name)}" + (
+                f" {extra_args}" if extra_args else ""
+            )
+        else:
+            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
+            cmd = (
+                f"{shlex.quote(str(opalx_exe))} "
+                f"{extra_args} {shlex.quote(test_input.name)}"
+            ).strip()
+
+        _append_pipeline_line(pipeline_log_path, f"[regression] START {test_name}")
+        rc, _output = _run_command(
+            cmd,
+            cwd=work_test_dir,
+            log_path=test_log_local,
+            pipeline_log_path=pipeline_log_path,
+            env=env,
+        )
+        if test_log_local.exists():
+            shutil.copy2(test_log_local, test_log_run)
+            out_file = work_test_dir / f"{test_name}.out"
+            if not out_file.exists():
+                shutil.copy2(test_log_local, out_file)
+
+        description, checks = _parse_rt_file(rt_file)
+        sim_metrics: list[RegressionMetric] = []
+
+        if checks:
+            for var_name, mode, eps in checks:
+                rev, s_vals, values, unit = _read_stat_data(generated_stat, var_name) if generated_stat.exists() else (None, [], [], None)
+                _ref_rev, ref_s_vals, ref_values, _ = _read_stat_data(reference_stat, var_name) if reference_stat.exists() else (None, [], [], None)
+                delta = _compute_delta(mode, values, ref_values)
+
+                state = "broken"
+                if delta is not None:
+                    state = "passed" if delta < eps else "failed"
+                elif rc != 0:
+                    state = "failed"
+
+                plot_rel: Optional[str] = None
+                if (
+                    delta is not None
+                    and s_vals
+                    and ref_s_vals
+                    and len(s_vals) == len(values)
+                    and len(ref_s_vals) == len(ref_values)
+                ):
+                    plot_name = f"{test_name}_{var_name}.png"
+                    plot_path = paths.plots_dir / plot_name
+                    try:
+                        _write_stat_plot(
+                            s_vals=s_vals,
+                            values=values,
+                            ref_values=ref_values,
+                            out_path=plot_path,
+                            test_name=test_name,
+                            var_name=var_name,
+                            var_unit=unit or "",
+                        )
+                        plot_rel = f"plots/{plot_name}"
+                    except Exception as exc:
+                        _append_pipeline_line(
+                            pipeline_log_path,
+                            f"[regression] plot failed for {test_name}:{var_name}: {exc}",
+                        )
+
+                current_value = values[-1] if values else None
+                reference_value = ref_values[-1] if ref_values else None
+                sim_metrics.append(
+                    RegressionMetric(
+                        metric=var_name,
+                        mode=mode,
+                        eps=eps,
+                        delta=delta,
+                        state=state,
+                        reference_value=reference_value,
+                        current_value=current_value,
+                        plot=plot_rel,
+                    )
+                )
+        else:
+            # Legacy behavior when .rt is absent: one synthetic check.
+            has_stat = generated_stat.exists()
+            state = "passed" if rc == 0 and has_stat else ("failed" if rc != 0 else "broken")
+            sim_metrics.append(
+                RegressionMetric(
+                    metric="run",
+                    mode="presence",
+                    eps=None,
+                    delta=None,
+                    state=state,
+                    reference_value=None,
+                    current_value=None,
+                    plot=None,
+                )
+            )
+
+        sim_state = "passed"
+        if any(m.state == "failed" for m in sim_metrics):
+            sim_state = "failed"
+        elif any(m.state == "broken" for m in sim_metrics):
+            sim_state = "broken"
+
+        sim = RegressionSimulation(
+            name=test_name,
+            description=description,
+            state=sim_state,
+            log_file=f"logs/{test_name}-RT.o",
+            metrics=sim_metrics,
+        )
+        report.simulations.append(sim)
+        _append_pipeline_line(
+            pipeline_log_path,
+            f"[regression] END {test_name} state={sim_state} metrics={len(sim_metrics)}",
+        )
+        reg_lines.append(f"{test_name}: {sim_state} ({len(sim_metrics)} checks)")
+
+    if not cfg.keep_work_dirs and paths.work_dir.exists():
+        shutil.rmtree(paths.work_dir)
+        _append_pipeline_line(pipeline_log_path, "[regression] Removed temporary work directory.")
+
+    paths.reg_log_path.write_text("\n".join(reg_lines) + "\n", encoding="utf-8")
+    return report
+
+
 def run_pipeline(
     cfg: SuiteConfig,
     branch: str,
@@ -183,6 +607,7 @@ def run_pipeline(
 
     data_root = cfg.resolved_data_root
     paths = _ensure_run_paths(data_root, branch, arch, run_id)
+    _start_pipeline_log(paths.pipeline_log_path, branch, arch, run_id)
 
     meta = RunMeta(
         branch=branch,
@@ -205,7 +630,7 @@ def run_pipeline(
     _append_pipeline_line(
         paths.pipeline_log_path, f"== Updating OPALX repo at {opalx_repo} =="
     )
-    _git_update_repo(
+    opalx_git_ok = _git_update_repo(
         repo_path=opalx_repo,
         branch=branch,
         pipeline_log_path=paths.pipeline_log_path,
@@ -214,11 +639,13 @@ def run_pipeline(
         paths.pipeline_log_path,
         f"== Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch}) ==",
     )
-    _git_update_repo(
+    reg_git_ok = _git_update_repo(
         repo_path=regtests_repo,
         branch=cfg.regtests_branch,
         pipeline_log_path=paths.pipeline_log_path,
     )
+    meta.opalx_commit = _git_head_short(opalx_repo)
+    meta.tests_repo_commit = _git_head_short(regtests_repo)
 
     # Configure and build with CMake and make.
     cmake_cmd = " ".join(
@@ -227,7 +654,7 @@ def run_pipeline(
     _append_pipeline_line(
         paths.pipeline_log_path, f"== Configuring build: {cmake_cmd} =="
     )
-    _run_command(
+    cmake_rc, _ = _run_command(
         cmake_cmd,
         cwd=build_dir,
         log_path=paths.logs_dir / "cmake.log",
@@ -238,18 +665,23 @@ def run_pipeline(
     _append_pipeline_line(
         paths.pipeline_log_path, f"== Building: {build_cmd} =="
     )
-    _run_command(
+    build_rc, _ = _run_command(
         build_cmd,
         cwd=build_dir,
         log_path=paths.logs_dir / "build.log",
         pipeline_log_path=paths.pipeline_log_path,
     )
+    build_ok = cmake_rc == 0 and build_rc == 0
+    if not build_ok:
+        meta.status = "failed"
+    if not (opalx_git_ok and reg_git_ok):
+        meta.status = "failed"
 
     unit_report = UnitTestsReport()
     reg_report = RegressionTestsReport()
 
     # Unit tests
-    if not skip_unit and cfg.unit_test_command:
+    if build_ok and not skip_unit and cfg.unit_test_command:
         rc, output = _run_command(
             cfg.unit_test_command,
             cwd=build_dir,
@@ -265,19 +697,24 @@ def run_pipeline(
     _write_json(paths.unit_json_path, unit_report.model_dump())
 
     # Regression tests
-    if not skip_regression and cfg.regression_test_command:
-        rc, output = _run_command(
-            cfg.regression_test_command,
-            cwd=build_dir,
-            log_path=paths.reg_log_path,
+    if build_ok and not skip_regression:
+        reg_report = _run_regression_suite(
+            cfg=cfg,
+            paths=paths,
+            build_dir=build_dir,
             pipeline_log_path=paths.pipeline_log_path,
         )
-        reg_report = _parse_regression_output(output)
         meta.regression_total = reg_report.total
         meta.regression_failed = reg_report.failed
         meta.regression_broken = reg_report.broken
-        if rc != 0 and meta.status == "running":
+        if (
+            meta.regression_failed > 0 or meta.regression_broken > 0
+        ) and meta.status == "running":
             meta.status = "failed"
+    elif skip_regression:
+        _append_pipeline_line(paths.pipeline_log_path, "[regression] Skipped by user.")
+    else:
+        _append_pipeline_line(paths.pipeline_log_path, "[regression] Skipped because build failed.")
 
     _write_json(paths.reg_json_path, reg_report.model_dump())
 

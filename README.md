@@ -33,6 +33,7 @@ opalx-regsuite init
 Follow the prompts to set:
 
 - OPALX repository root
+- Regression tests repository root
 - Builds root (per-branch/per-arch build directories)
 - Data root for regression data
 
@@ -44,10 +45,13 @@ opalx-regsuite run --branch master --arch cpu-serial
 
 This will:
 
-- Ensure a build directory for the given branch/arch
+- Update and check out the requested branch in your OPALX repo
+- Update and check out the configured branch in your regression-tests-x repo
+- Configure the build directory with CMake (using `cmake_args`)
+- Build OPALX (using `build_command`, default `make -j2`)
 - Run unit tests (CTest or a configured command)
-- Run regression tests via a configurable command or Python hook
-- Write JSON data and logs under the data root
+- Run regression tests via a configured command or hook
+- Write JSON data and logs (including `pipeline.log`) under the data root
 
 3. **Generate static site**
 
@@ -68,9 +72,14 @@ Configuration is stored in a small `config.toml` file, by default in the project
 The config includes:
 
 - `opalx_repo_root`: Path to your OPALX source checkout.
+- `regtests_repo_root`: Path to your regression-tests-x checkout.
+- `regtests_branch`: Branch for the regression-tests-x repo (set once).
 - `builds_root`: Root directory for per-branch/per-architecture builds.
 - `data_root`: Root directory for regression and unit test data.
-- Optional command templates for unit and regression test invocation.
+- `cmake_args`: Extra arguments for the CMake configure step (e.g. build type, platforms, unit-test flags).
+- `build_command`: Build command to run in the build directory (default `make -j2`).
+- `unit_test_command`: Command to execute unit tests in the build directory.
+- `regression_test_command`: Command to execute regression tests (optional).
 
 ### Extending
 

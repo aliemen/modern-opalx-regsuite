@@ -39,6 +39,11 @@ def init(
         prompt=True,
         help="Root directory for regression/unit test data.",
     ),
+    regtests_repo_root: str = typer.Option(
+        ...,
+        prompt=True,
+        help="Path to regression-tests-x source checkout.",
+    ),
     default_branch: str = typer.Option(
         "master",
         prompt=True,
@@ -57,14 +62,15 @@ def init(
     ),
 ) -> None:
     """Initialize a new configuration file."""
-    cfg_path = config_mod.init_default_config(
+    cfg = config_mod.SuiteConfig(
         opalx_repo_root=_resolve_path(opalx_repo_root),
         builds_root=_resolve_path(builds_root),
         data_root=_resolve_path(data_root),
+        regtests_repo_root=_resolve_path(regtests_repo_root),
         default_branch=default_branch,
         default_architectures=[default_arch],
-        path=config,
     )
+    cfg_path = config_mod.save_config(cfg, path=config)
     typer.echo(f"Configuration written to {cfg_path}")
 
 

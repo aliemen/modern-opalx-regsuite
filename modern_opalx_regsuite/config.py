@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import List, Optional
 
 import tomllib
-import tomli_w
 from pydantic import BaseModel, Field
 
 
@@ -20,6 +19,15 @@ class SuiteConfig(BaseModel):
     )
     data_root: Path = Field(
         ..., description="Root directory for regression and unit-test data."
+    )
+
+    regtests_repo_root: Path = Field(
+        ...,
+        description="Path to regression-tests-x source checkout.",
+    )
+    regtests_branch: str = Field(
+        "master",
+        description="Branch name to use for the regression-tests-x repository.",
     )
 
     default_branch: str = "master"
@@ -40,6 +48,19 @@ class SuiteConfig(BaseModel):
         ),
     )
 
+    cmake_args: List[str] = Field(
+        default_factory=lambda: [
+            "-DBUILD_TYPE=Debug",
+            "-DPLATFORMS=SERIAL",
+            "-DOPALX_ENABLE_UNIT_TESTS=ON",
+        ],
+        description="Additional arguments for the CMake configure step.",
+    )
+    build_command: str = Field(
+        default="make -j2",
+        description="Build command executed in the build directory after CMake.",
+    )
+
     @property
     def resolved_opalx_repo_root(self) -> Path:
         return self.opalx_repo_root.expanduser().resolve()
@@ -51,6 +72,10 @@ class SuiteConfig(BaseModel):
     @property
     def resolved_data_root(self) -> Path:
         return self.data_root.expanduser().resolve()
+
+    @property
+    def resolved_regtests_repo_root(self) -> Path:
+        return self.regtests_repo_root.expanduser().resolve()
 
 
 def _find_config_path(explicit: Optional[Path] = None) -> Path:
@@ -76,8 +101,44 @@ def load_config(path: Optional[Path] = None) -> SuiteConfig:
 def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     config_path = _find_config_path(path)
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with config_path.open("wb") as f:
-        tomli_w.dump(cfg.model_dump(mode="json"), f)
+
+    # We keep the writer dependency-free by emitting a minimal TOML
+    # representation manually. The schema here is simple and stable.
+    data = cfg.model_dump(mode="json")
+    lines: list[str] = []
+
+    def add_kv(key: str, value) -> None:
+        if isinstance(value, str):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'{key} = "{escaped}"')
+        elif isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    esc = item.replace("\\", "\\\\").replace('"', '\\"')
+                    parts.append(f'"{esc}"')
+                else:
+                    parts.append(str(item))
+            lines.append(f"{key} = [{', '.join(parts)}]")
+        else:
+            lines.append(f"{key} = {value}")
+
+    add_kv("opalx_repo_root", str(data["opalx_repo_root"]))
+    add_kv("builds_root", str(data["builds_root"]))
+    add_kv("data_root", str(data["data_root"]))
+    add_kv("regtests_repo_root", str(data["regtests_repo_root"]))
+    add_kv("regtests_branch", data.get("regtests_branch", "master"))
+    add_kv("default_branch", data.get("default_branch", "master"))
+    add_kv("default_architectures", data.get("default_architectures", []))
+    add_kv("unit_test_command", data.get("unit_test_command", "ctest --output-on-failure"))
+    if data.get("regression_test_command") is not None:
+        add_kv("regression_test_command", data["regression_test_command"])
+    add_kv("cmake_args", data.get("cmake_args", []))
+    add_kv("build_command", data.get("build_command", "make -j2"))
+
+    text = "\n".join(lines) + "\n"
+    with config_path.open("w", encoding="utf-8") as f:
+        f.write(text)
     return config_path
 
 

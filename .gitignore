@@ -1,2 +1,5 @@
 .venv/
 modern_opalx_regsuite.egg-info/
+config.toml
+site/
+*/__pycache__/

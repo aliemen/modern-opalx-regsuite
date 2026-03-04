@@ -404,6 +404,7 @@ def _write_stat_plot(
     ax2.set_ylabel(f"delta {pretty_var}{y_unit}")
     ax1.legend(loc="lower left")
     ax2.legend(loc="lower right")
+    ax1.grid(True)
     fig.tight_layout()
     fig.savefig(out_path)
     plt.close(fig)

@@ -92,7 +92,7 @@
     </style>
   </head>
   <body>
-    <a href="../../../index.html" class="muted">&larr; Back to branch</a>
+    <a href="../../index.html" class="muted">&larr; Back to branch</a>
     <h1>Run {{ run_id }}</h1>
     <div class="row">
       <div class="col">
@@ -114,9 +114,9 @@
             <span class="{{ cls }}">{{ meta.status }}</span>
           </div>
           <div class="muted" style="margin-top: 0.5rem">
-            Unit failures: {{ meta.unit_tests_failed }}<br />
-            Regression failures: {{ meta.regression_failed }}<br />
-            Regression broken: {{ meta.regression_broken }}
+            {% if meta.unit_tests_total %}Unit: {{ meta.unit_tests_total - meta.unit_tests_failed }}/{{ meta.unit_tests_total }} passed{% else %}Unit: {% if meta.unit_tests_failed %}{{ meta.unit_tests_failed }} failed{% else %}-{% endif %}{% endif %}<br />
+            {% if meta.regression_total %}Regression: {{ meta.regression_passed }}/{{ meta.regression_total }} passed{% if meta.regression_broken %}, {{ meta.regression_broken }} broken{% endif %}{% else %}Regression: {% if meta.regression_failed or meta.regression_broken %}{{ meta.regression_failed }} failed, {{ meta.regression_broken }} broken{% else %}-{% endif %}{% endif %}<br />
+            {% if meta.regression_failed %}Regression failures: {{ meta.regression_failed }}{% endif %}
           </div>
         </div>
       </div>
@@ -159,32 +159,43 @@
     <div class="card">
       <h2 style="font-size: 1rem">Unit tests</h2>
       {% if unit.tests %}
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Status</th>
-            <th>Duration (s)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in unit.tests %}
-          <tr>
-            <td>{{ t.name }}</td>
-            <td>
-              {% set tcls = "status-badge" %}
-              {% if t.status|lower == "passed" %}
-              {% set tcls = tcls + " status-passed" %}
-              {% elif t.status|lower == "failed" %}
-              {% set tcls = tcls + " status-failed" %}
-              {% endif %}
-              <span class="{{ tcls }}">{{ t.status }}</span>
-            </td>
-            <td>{{ t.duration_seconds or "-" }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      {% set ut_passed = unit.tests|selectattr("status", "equalto", "passed")|list|length %}
+      {% set ut_failed = unit.tests|length - ut_passed %}
+      <details>
+        <summary>
+          <span class="status-badge status-passed">{{ ut_passed }} passed</span>
+          {% if ut_failed %}
+          <span class="status-badge status-failed">{{ ut_failed }} failed</span>
+          {% endif %}
+          <span class="muted">({{ unit.tests|length }} total)</span>
+        </summary>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Duration (s)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in unit.tests %}
+            <tr>
+              <td>{{ t.name }}</td>
+              <td>
+                {% set tcls = "status-badge" %}
+                {% if t.status|lower == "passed" %}
+                {% set tcls = tcls + " status-passed" %}
+                {% elif t.status|lower == "failed" %}
+                {% set tcls = tcls + " status-failed" %}
+                {% endif %}
+                <span class="{{ tcls }}">{{ t.status }}</span>
+              </td>
+              <td>{{ t.duration_seconds or "-" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
       {% else %}
       <p class="muted">No unit test data recorded.</p>
       {% endif %}

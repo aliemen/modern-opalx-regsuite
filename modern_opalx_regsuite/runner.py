@@ -171,21 +171,29 @@ def _run_command(
 
 
 def _parse_unit_output(output: str) -> UnitTestsReport:
-    # Minimal placeholder parser: treat whole run as a single test.
-    # You can replace this with a CTest log parser that yields per-test results.
-    status = "passed"
-    lowered = output.lower()
-    if "failed" in lowered or "error" in lowered:
-        status = "failed"
-    return UnitTestsReport(
-        tests=[
-            {
-                "name": "unit-suite",
-                "status": status,
-                "output_snippet": output[-4000:],
-            }
-        ]
-    )  # type: ignore[arg-type]
+    from .data_model import UnitTestCase
+
+    _CTEST_LINE = re.compile(
+        r"^\s*\d+/\d+\s+Test\s+#\d+:\s+(\S+)\s+\.+\s+"
+        r"(Passed|\*{0,3}Failed\*{0,3}|Not Run)\s+([\d.]+)\s+sec",
+    )
+    cases: list[UnitTestCase] = []
+    for line in output.splitlines():
+        m = _CTEST_LINE.match(line)
+        if m:
+            name = m.group(1)
+            raw_status = m.group(2).strip("*")
+            status = "passed" if raw_status == "Passed" else "failed"
+            duration = float(m.group(3))
+            cases.append(UnitTestCase(name=name, status=status, duration_seconds=duration))
+
+    if not cases:
+        status = "passed"
+        if "failed" in output.lower() or "error" in output.lower():
+            status = "failed"
+        cases.append(UnitTestCase(name="unit-suite", status=status, output_snippet=output[-4000:]))
+
+    return UnitTestsReport(tests=cases)
 
 
 def _parse_regression_output(output: str) -> RegressionTestsReport:
@@ -362,6 +370,7 @@ def _compute_delta(mode: str, values: list[float], ref_values: list[float]) -> O
 def _write_stat_plot(
     s_vals: list[float],
     values: list[float],
+    ref_s_vals: list[float],
     ref_values: list[float],
     out_path: Path,
     test_name: str,
@@ -376,11 +385,13 @@ def _write_stat_plot(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax1 = plt.subplots(figsize=(9, 4.5))
     ax2 = ax1.twinx()
-    diffs = [values[i] - ref_values[i] for i in range(min(len(values), len(ref_values)))]
+    n_common = min(len(values), len(ref_values))
+    diffs = [values[i] - ref_values[i] for i in range(n_common)]
 
     ax1.plot(s_vals[: len(values)], values, label="current", linewidth=2)
-    ax1.plot(s_vals[: len(ref_values)], ref_values, label="reference", linewidth=2)
-    ax2.plot(s_vals[: len(diffs)], diffs, "--", color="grey", label="difference", linewidth=1.0)
+    ref_s = ref_s_vals if len(ref_s_vals) == len(ref_values) else s_vals[: len(ref_values)]
+    ax1.plot(ref_s, ref_values, label="reference", linewidth=2)
+    ax2.plot(s_vals[:n_common], diffs, "--", color="grey", label="difference", linewidth=1.0)
 
     pretty_var = var_name.replace("_", "(")
     if "(" in pretty_var and not pretty_var.endswith(")"):
@@ -501,19 +512,20 @@ def _run_regression_suite(
                     state = "failed"
 
                 plot_rel: Optional[str] = None
-                if (
-                    delta is not None
-                    and s_vals
-                    and ref_s_vals
+                can_plot = (
+                    s_vals and values and ref_s_vals and ref_values
                     and len(s_vals) == len(values)
                     and len(ref_s_vals) == len(ref_values)
-                ):
-                    plot_name = f"{test_name}_{var_name}.png"
+                    and min(len(values), len(ref_values)) > 1
+                )
+                if can_plot:
+                    plot_name = f"{test_name}_{var_name}.svg"
                     plot_path = paths.plots_dir / plot_name
                     try:
                         _write_stat_plot(
                             s_vals=s_vals,
                             values=values,
+                            ref_s_vals=ref_s_vals,
                             ref_values=ref_values,
                             out_path=plot_path,
                             test_name=test_name,
@@ -705,6 +717,7 @@ def run_pipeline(
             pipeline_log_path=paths.pipeline_log_path,
         )
         meta.regression_total = reg_report.total
+        meta.regression_passed = reg_report.passed
         meta.regression_failed = reg_report.failed
         meta.regression_broken = reg_report.broken
         if (
@@ -748,7 +761,10 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
         started_at=meta.started_at,
         finished_at=meta.finished_at,
         status=meta.status,
+        unit_tests_total=meta.unit_tests_total,
         unit_tests_failed=meta.unit_tests_failed,
+        regression_total=meta.regression_total,
+        regression_passed=meta.regression_passed,
         regression_failed=meta.regression_failed,
         regression_broken=meta.regression_broken,
     )

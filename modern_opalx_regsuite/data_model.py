@@ -90,6 +90,7 @@ class RunMeta(BaseModel):
     unit_tests_failed: int = 0
 
     regression_total: int = 0
+    regression_passed: int = 0
     regression_failed: int = 0
     regression_broken: int = 0
 
@@ -107,9 +108,12 @@ class RunIndexEntry(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime]
     status: str
-    unit_tests_failed: int
-    regression_failed: int
-    regression_broken: int
+    unit_tests_total: int = 0
+    unit_tests_failed: int = 0
+    regression_total: int = 0
+    regression_passed: int = 0
+    regression_failed: int = 0
+    regression_broken: int = 0
 
 
 class BranchIndex(BaseModel):

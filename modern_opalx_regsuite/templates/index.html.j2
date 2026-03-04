@@ -78,8 +78,8 @@
           Started: {{ run.started_at }}
         </div>
         <div class="muted">
-          Failed: unit={{ run.unit_tests_failed }}, reg={{ run.regression_failed }},
-          broken={{ run.regression_broken }}
+          {% if run.unit_tests_total %}Unit: {{ run.unit_tests_total - run.unit_tests_failed }}/{{ run.unit_tests_total }} passed{% else %}Unit: {% if run.unit_tests_failed %}{{ run.unit_tests_failed }} failed{% else %}-{% endif %}{% endif %}<br/>
+          {% if run.regression_total %}Reg: {{ run.regression_passed }}/{{ run.regression_total }} passed{% if run.regression_broken %}, {{ run.regression_broken }} broken{% endif %}{% else %}Reg: {% if run.regression_failed or run.regression_broken %}{{ run.regression_failed }} failed, {{ run.regression_broken }} broken{% else %}-{% endif %}{% endif %}
         </div>
         <div style="margin-top: 0.6rem">
           <a href="branch/{{ run.branch }}/">Branch overview</a>

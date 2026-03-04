@@ -26,7 +26,10 @@ class RunSummary:
     status: str
     started_at: str
     finished_at: str | None
+    unit_tests_total: int
     unit_tests_failed: int
+    regression_total: int
+    regression_passed: int
     regression_failed: int
     regression_broken: int
 
@@ -66,7 +69,10 @@ def _load_runs_for_arch(data_root: Path, branch: str, arch: str) -> List[RunSumm
             status=e.status,
             started_at=e.started_at.isoformat(),
             finished_at=e.finished_at.isoformat() if e.finished_at else None,
+            unit_tests_total=e.unit_tests_total,
             unit_tests_failed=e.unit_tests_failed,
+            regression_total=e.regression_total,
+            regression_passed=e.regression_passed,
             regression_failed=e.regression_failed,
             regression_broken=e.regression_broken,
         )

@@ -380,7 +380,7 @@ def _write_stat_plot(
 
     ax1.plot(s_vals[: len(values)], values, label="current", linewidth=2)
     ax1.plot(s_vals[: len(ref_values)], ref_values, label="reference", linewidth=2)
-    ax2.plot(s_vals[: len(diffs)], diffs, label="difference", linewidth=1.5)
+    ax2.plot(s_vals[: len(diffs)], diffs, "--", color="grey", label="difference", linewidth=1.0)
 
     pretty_var = var_name.replace("_", "(")
     if "(" in pretty_var and not pretty_var.endswith(")"):

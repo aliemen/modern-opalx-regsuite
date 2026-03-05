@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
+import fnmatch
+import json
+import shutil
 
 import typer
 
 from . import config as config_mod
 from .config import SuiteConfig
+from .data_model import run_dir, runs_index_path
 from .runner import run_pipeline
 from .sitegen import generate_site
 
@@ -154,6 +158,89 @@ def gen_data_site(
     typer.echo(f"Generating site from {data_root} into {out_dir} ...")
     generate_site(data_root=data_root, out_dir=out_dir, package_root=package_root)
     typer.echo("Site generation complete.")
+
+
+@app.command("del-test")
+def del_test(
+    run_id: str = typer.Argument(
+        ...,
+        help="Run identifier or glob pattern (e.g. '20260305-131529' or '2026*').",
+    ),
+    branch: Optional[str] = typer.Option(
+        None,
+        "--branch",
+        "-b",
+        help="Branch to operate on (defaults to config.default_branch).",
+    ),
+    arch: Optional[str] = typer.Option(
+        None,
+        "--arch",
+        "-a",
+        help="Architecture to operate on (defaults to first config.default_architectures entry).",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml (defaults to ./config.toml or $OPALX_REGSUITE_CONFIG).",
+    ),
+) -> None:
+    """Delete one or more test runs from the data directory."""
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+
+    branch = branch or cfg.default_branch
+    if arch is not None:
+        archs = [arch]
+    else:
+        archs = cfg.default_architectures or ["cpu-serial"]
+
+    total_deleted = 0
+
+    for current_arch in archs:
+        index_path = runs_index_path(data_root, branch, current_arch)
+        if not index_path.is_file():
+            continue
+
+        with index_path.open("r", encoding="utf-8") as f:
+            try:
+                entries = json.load(f)
+            except json.JSONDecodeError:
+                typer.echo(f"Warning: could not parse runs index {index_path}, skipping.")
+                continue
+
+        if not isinstance(entries, list):
+            typer.echo(f"Warning: unexpected structure in {index_path}, skipping.")
+            continue
+
+        kept_entries = []
+        deleted_ids: list[str] = []
+
+        for entry in entries:
+            rid = entry.get("run_id")
+            if isinstance(rid, str) and fnmatch.fnmatch(rid, run_id):
+                deleted_ids.append(rid)
+                run_path = run_dir(data_root, branch, current_arch, rid)
+                if run_path.exists():
+                    shutil.rmtree(run_path)
+            else:
+                kept_entries.append(entry)
+
+        if deleted_ids:
+            with index_path.open("w", encoding="utf-8") as f:
+                json.dump(kept_entries, f, indent=2)
+
+            total_deleted += len(deleted_ids)
+            typer.echo(
+                f"Deleted {len(deleted_ids)} run(s) for branch={branch}, arch={current_arch}: "
+                + ", ".join(sorted(deleted_ids))
+            )
+
+    if total_deleted == 0:
+        typer.echo(
+            f"No runs matched pattern '{run_id}' "
+            f"(branch={branch}, archs={', '.join(archs)})."
+        )
 
 
 if __name__ == "__main__":

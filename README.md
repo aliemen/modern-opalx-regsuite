@@ -69,7 +69,22 @@ This will:
   - plots are generated via matplotlib in `plots/<TestName>_<var>.png`
 - Write JSON data and logs (including `pipeline.log`) under the data root
 
-3. **Generate static site**
+3. **Delete old runs**
+
+You can delete one or more runs (both their data directories and the corresponding index entries) using:
+
+```bash
+opalx-regsuite del-test 20260305-131529
+opalx-regsuite del-test "2026*"
+```
+
+By default this operates on `config.default_branch` and all `config.default_architectures`. You can override:
+
+```bash
+opalx-regsuite del-test "2026*" --branch master --arch cpu-serial
+```
+
+4. **Generate static site**
 
 ```bash
 opalx-regsuite gen-data-site --out-dir site

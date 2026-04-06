@@ -65,6 +65,9 @@ function TestTrackerPanel({
   const brokenCount = tests.filter((t) => t.status === "broken").length;
   const runningCount = tests.filter((t) => t.status === "running").length;
 
+  const totalCount = tests.length;
+  const doneCount = passedCount + failedCount + brokenCount;
+
   return (
     <div className="flex flex-col h-[60vh]">
       <div className="flex items-center justify-between mb-2">
@@ -80,6 +83,35 @@ function TestTrackerPanel({
           </p>
         )}
       </div>
+
+      {/* Post-run summary bar */}
+      {finalStatus && finalStatus !== "running" && tests.length > 0 && (
+        <div className={`flex items-center justify-between text-xs px-3 py-2 rounded-md mb-2 border ${
+          failedCount > 0 || brokenCount > 0
+            ? "bg-failed/10 border-failed/30 text-failed"
+            : "bg-passed/10 border-passed/30 text-passed"
+        }`}>
+          <span className="font-medium">
+            {passedCount}/{totalCount} passed
+          </span>
+          <span className="text-muted tabular-nums">
+            {failedCount > 0 && `${failedCount} failed`}
+            {failedCount > 0 && brokenCount > 0 && " · "}
+            {brokenCount > 0 && `${brokenCount} broken`}
+            {failedCount === 0 && brokenCount === 0 && "all passed"}
+          </span>
+        </div>
+      )}
+
+      {/* Progress bar while running */}
+      {!finalStatus && totalCount > 0 && (
+        <div className="h-1 bg-border rounded-full mb-2 overflow-hidden">
+          <div
+            className="h-full bg-accent transition-all duration-500"
+            style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }}
+          />
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto bg-surface border border-border rounded-md px-3 py-3 space-y-1">
         {tests.length === 0 ? (

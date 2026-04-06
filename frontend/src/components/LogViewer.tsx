@@ -8,17 +8,25 @@ interface Props {
 }
 
 const MAX_LINES = 5_000;
-const FLUSH_MS = 100; // batch SSE lines and re-render at most 10×/sec
+const FLUSH_MS = 250; // flush at most 4×/sec; cheap because DOM is updated directly
 
 export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [truncated, setTruncated] = useState(0); // lines dropped from the top
+  // Minimal React state — only what affects rendered structure, not log content.
+  const [hasLines, setHasLines] = useState(false);
+  const [truncated, setTruncated] = useState(0);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  // Lines are stored in a plain ref and written directly into the <pre> DOM node,
+  // completely bypassing React's reconciler for text updates.
+  const preRef = useRef<HTMLPreElement>(null);
   const autoScrollRef = useRef(true);
-  // Buffer for incoming lines between flushes.
   const bufRef = useRef<string[]>([]);
+  const linesRef = useRef<string[]>([]);
+  const truncatedRef = useRef(0);
+  const hasLinesRef = useRef(false);
   const flushTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Keep a stable ref so flush() can call the latest callback without stale closure.
+
+  // Keep a stable ref so the flush closure always calls the latest callback.
   const onLogLineRef = useRef(onLogLine);
   useEffect(() => { onLogLineRef.current = onLogLine; }, [onLogLine]);
 
@@ -27,18 +35,39 @@ export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
     const url = `/api/runs/current/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
     const es = new EventSource(url);
 
-    // Flush buffered lines into React state.
-    function flush() {
-      const incoming = bufRef.current.splice(0);
+    function applyLines(incoming: string[]) {
       if (incoming.length === 0) return;
+
       incoming.forEach((line) => onLogLineRef.current?.(line));
-      setLines((prev) => {
-        const combined = [...prev, ...incoming];
-        if (combined.length <= MAX_LINES) return combined;
-        const dropped = combined.length - MAX_LINES;
-        setTruncated((t) => t + dropped);
-        return combined.slice(-MAX_LINES);
-      });
+
+      linesRef.current.push(...incoming);
+      if (linesRef.current.length > MAX_LINES) {
+        const dropped = linesRef.current.length - MAX_LINES;
+        truncatedRef.current += dropped;
+        linesRef.current = linesRef.current.slice(-MAX_LINES);
+        setTruncated(truncatedRef.current); // rare, triggers React update for notice
+      }
+
+      // Direct DOM write — no React reconciliation, no diffing.
+      if (preRef.current) {
+        preRef.current.textContent = linesRef.current.join("\n");
+      }
+
+      // Swap "Waiting…" placeholder once.
+      if (!hasLinesRef.current) {
+        hasLinesRef.current = true;
+        setHasLines(true);
+      }
+
+      // Auto-scroll if at the bottom.
+      const el = containerRef.current;
+      if (el && autoScrollRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+
+    function flush() {
+      applyLines(bufRef.current.splice(0));
     }
 
     flushTimer.current = setInterval(flush, FLUSH_MS);
@@ -57,8 +86,7 @@ export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
         } else if (event.type === "phase" && event.phase) {
           onPhaseChange?.(event.phase);
         } else if (event.type === "status" && event.status) {
-          // Flush whatever is buffered before signalling done.
-          flush();
+          flush(); // drain buffer before signalling done
           onStatusChange?.(event.status);
           es.close();
         }
@@ -78,13 +106,6 @@ export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll only when at bottom.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || !autoScrollRef.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [lines]);
-
   function handleScroll() {
     const el = containerRef.current;
     if (!el) return;
@@ -102,14 +123,13 @@ export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="log-viewer bg-bg rounded-md border border-border p-4 h-[60vh] overflow-y-auto text-fg font-mono text-xs leading-5"
+        className="log-viewer bg-bg rounded-md border border-border p-4 h-[60vh] overflow-y-auto font-mono text-xs leading-5"
       >
-        {lines.length === 0 ? (
+        {!hasLines ? (
           <span className="text-muted">Waiting for output…</span>
         ) : (
-          lines.map((ln, i) => (
-            <div key={i}>{ln || "\u00a0"}</div>
-          ))
+          /* Single <pre> node — React never touches its content after mount. */
+          <pre ref={preRef} className="text-fg whitespace-pre-wrap m-0 font-mono" />
         )}
       </div>
     </div>

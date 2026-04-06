@@ -97,6 +97,12 @@ async def stream_current_run(
                     payload = json.dumps({"type": "log", "line": ln})
                 yield f"id: {i}\ndata: {payload}\n\n"
 
+        # If the run already finished, send the final status and close.
+        if run.status != "running":
+            yield f"data: {json.dumps({'type': 'status', 'status': run.status})}\n\n"
+            unsubscribe_sse(q)
+            return
+
         # Then stream live events from the queue.
         try:
             while True:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, XCircle } from "lucide-react";
@@ -153,15 +153,38 @@ function TestTrackerPanel({
   );
 }
 
+// ── Persist / restore live-view state across navigation ─────────────────────
+
+const LIVE_STATE_KEY = "live-run-state";
+
+interface StoredLiveState {
+  runId: string;
+  tests: TestInfo[];
+  phase: string;
+  finalStatus: string | null;
+}
+
+function loadLiveState(): StoredLiveState | null {
+  try {
+    const raw = sessionStorage.getItem(LIVE_STATE_KEY);
+    return raw ? (JSON.parse(raw) as StoredLiveState) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export function LiveRunPage() {
   const navigate = useNavigate();
-  const [phase, setPhase] = useState("git");
-  const [finalStatus, setFinalStatus] = useState<string | null>(null);
+
+  // Synchronously restore persisted state so the tracker appears instantly.
+  const [initSnap] = useState(loadLiveState);
+
+  const [phase, setPhase] = useState(initSnap?.phase ?? "git");
+  const [finalStatus, setFinalStatus] = useState<string | null>(initSnap?.finalStatus ?? null);
   const [cancelling, setCancelling] = useState(false);
-  const [tests, setTests] = useState<TestInfo[]>([]);
-  const restoredRef = useRef(false);
+  const [tests, setTests] = useState<TestInfo[]>(initSnap?.tests ?? []);
 
   const { data: run, isLoading } = useQuery({
     queryKey: ["current-run"],
@@ -178,26 +201,24 @@ export function LiveRunPage() {
     }
   }, [run, isLoading, navigate]);
 
-  // Restore test list from sessionStorage once run_id is known (survives navigation).
+  // If restored state is from a different run, clear it.
   useEffect(() => {
-    if (!run?.run_id || restoredRef.current) return;
-    restoredRef.current = true;
-    try {
-      const saved = sessionStorage.getItem("live-tests");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.runId === run.run_id && Array.isArray(parsed.tests)) {
-          setTests(parsed.tests);
-        }
-      }
-    } catch { /* ignore */ }
-  }, [run?.run_id]);
+    if (!run?.run_id || !initSnap) return;
+    if (initSnap.runId !== run.run_id) {
+      setTests([]);
+      setPhase("git");
+      setFinalStatus(null);
+    }
+  }, [run?.run_id, initSnap]);
 
-  // Persist test list to sessionStorage whenever it changes.
+  // Persist live-view state to sessionStorage on every change.
   useEffect(() => {
     if (!run?.run_id) return;
-    sessionStorage.setItem("live-tests", JSON.stringify({ runId: run.run_id, tests }));
-  }, [tests, run?.run_id]);
+    sessionStorage.setItem(
+      LIVE_STATE_KEY,
+      JSON.stringify({ runId: run.run_id, tests, phase, finalStatus } satisfies StoredLiveState),
+    );
+  }, [tests, phase, finalStatus, run?.run_id]);
 
   // Parse regression test START/END lines from the log stream.
   const handleLogLine = useCallback((line: string) => {
@@ -217,7 +238,9 @@ export function LiveRunPage() {
       const state = endMatch[2] as TestStatus;
       setTests((prev) =>
         prev.map((t) =>
-          t.name === name
+          // Only update tests still marked "running" — avoids SSE replay
+          // overwriting correct durations on tests restored from storage.
+          t.name === name && t.status === "running"
             ? { ...t, status: state, durationMs: Date.now() - t.startTime }
             : t
         )

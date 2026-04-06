@@ -34,7 +34,11 @@ async def _lifespan(app: FastAPI):
 
 
 def _heal_stale_runs(data_root: Path) -> None:
-    """Find any run-meta.json with status='running' and mark it 'failed'."""
+    """Find any run-meta.json with status='running' and mark it 'failed'.
+
+    Also patches the corresponding runs_index.json so the dashboard doesn't
+    show a stale 'running' badge after a server crash.
+    """
     runs_root = data_root / "runs"
     if not runs_root.is_dir():
         return
@@ -43,13 +47,40 @@ def _heal_stale_runs(data_root: Path) -> None:
             with meta_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             if data.get("status") == "running":
+                import datetime as _dt
+                finished = _dt.datetime.now(_dt.timezone.utc).isoformat()
                 data["status"] = "failed"
-                import datetime
-                data.setdefault("finished_at", datetime.datetime.now(datetime.timezone.utc).isoformat())
+                data.setdefault("finished_at", finished)
                 with meta_path.open("w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, default=str)
+                # Patch the runs index entry to match.
+                _heal_index_entry(data_root, data)
         except Exception:
             pass
+
+
+def _heal_index_entry(data_root: Path, meta: dict) -> None:
+    """Update a single entry in runs_index.json to reflect healed status."""
+    branch = meta.get("branch", "")
+    arch = meta.get("arch", "")
+    run_id = meta.get("run_id", "")
+    if not (branch and arch and run_id):
+        return
+    idx_path = data_root / "runs" / branch / arch / "runs_index.json"
+    if not idx_path.is_file():
+        return
+    try:
+        with idx_path.open("r", encoding="utf-8") as f:
+            entries = json.load(f)
+        for entry in entries:
+            if entry.get("run_id") == run_id:
+                entry["status"] = "failed"
+                entry.setdefault("finished_at", meta.get("finished_at"))
+                break
+        with idx_path.open("w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2, default=str)
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, XCircle } from "lucide-react";
@@ -140,6 +140,7 @@ export function LiveRunPage() {
   const [finalStatus, setFinalStatus] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [tests, setTests] = useState<TestInfo[]>([]);
+  const restoredRef = useRef(false);
 
   const { data: run, isLoading } = useQuery({
     queryKey: ["current-run"],
@@ -155,6 +156,27 @@ export function LiveRunPage() {
       navigate("/trigger");
     }
   }, [run, isLoading, navigate]);
+
+  // Restore test list from sessionStorage once run_id is known (survives navigation).
+  useEffect(() => {
+    if (!run?.run_id || restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const saved = sessionStorage.getItem("live-tests");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.runId === run.run_id && Array.isArray(parsed.tests)) {
+          setTests(parsed.tests);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [run?.run_id]);
+
+  // Persist test list to sessionStorage whenever it changes.
+  useEffect(() => {
+    if (!run?.run_id) return;
+    sessionStorage.setItem("live-tests", JSON.stringify({ runId: run.run_id, tests }));
+  }, [tests, run?.run_id]);
 
   // Parse regression test START/END lines from the log stream.
   const handleLogLine = useCallback((line: string) => {

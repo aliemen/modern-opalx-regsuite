@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Modern, portable regression suite and static dashboard for OPALX."
 authors = [{ name = "OPALX maintainers" }]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<4"
 dependencies = [
   "typer[all]>=0.12.0",
   "pydantic>=2.0.0",
@@ -16,6 +16,11 @@ dependencies = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
   "matplotlib>=3.8.0",
+  "python-jose[cryptography]>=3.3.0",
+  "bcrypt>=4.0.0",
+  "aiofiles>=23.0.0",
+  "python-multipart>=0.0.9",
+  "tomli>=2.0.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -27,4 +32,7 @@ opalx-regsuite = "modern_opalx_regsuite.cli:app"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["modern_opalx_regsuite*"]
+
+[tool.setuptools.package-data]
+"modern_opalx_regsuite" = ["static/**/*", "templates/**/*"]
 

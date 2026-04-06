@@ -1,0 +1,253 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
+import { getRunDetail, type RegressionSimulation } from "../../api/results";
+import { StatusBadge } from "../../components/StatusBadge";
+
+function fmtNum(n: number | null | undefined, digits = 4) {
+  if (n === null || n === undefined) return "—";
+  return n.toExponential(digits);
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return "—";
+  return new Date(d).toLocaleString();
+}
+
+function duration(start: string, end: string | null) {
+  if (!end) return "—";
+  const s = Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000);
+  const m = Math.floor(s / 60);
+  return `${m}m ${(s % 60).toString().padStart(2, "0")}s`;
+}
+
+function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
+  const [open, setOpen] = useState(sim.state !== "passed");
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-3 px-4 py-3 bg-surface hover:bg-surface/80 text-left transition-colors"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="text-white font-medium text-sm flex-1">{sim.name}</span>
+        {sim.description && (
+          <span className="text-muted text-xs hidden sm:inline mr-3 truncate max-w-xs">
+            {sim.description}
+          </span>
+        )}
+        {sim.state && <StatusBadge status={sim.state} />}
+        {sim.log_file && (
+          <a
+            href={`/data/${runPath}/${sim.log_file}`}
+            target="_blank"
+            rel="noopener"
+            onClick={(e) => e.stopPropagation()}
+            className="text-muted hover:text-white ml-2"
+            title="View log"
+          >
+            <ExternalLink size={12} />
+          </a>
+        )}
+      </button>
+
+      {open && (
+        <div className="border-t border-border px-4 py-4 space-y-4">
+          {/* Metrics table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-muted text-left">
+                <tr>
+                  <th className="pb-2 font-medium">Metric</th>
+                  <th className="pb-2 font-medium">Mode</th>
+                  <th className="pb-2 font-medium">ε</th>
+                  <th className="pb-2 font-medium">δ</th>
+                  <th className="pb-2 font-medium">Reference</th>
+                  <th className="pb-2 font-medium">Current</th>
+                  <th className="pb-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sim.metrics.map((m) => (
+                  <tr key={m.metric} className="border-t border-border/50">
+                    <td className="py-1.5 font-mono text-white">{m.metric}</td>
+                    <td className="py-1.5 text-muted">{m.mode}</td>
+                    <td className="py-1.5 text-muted font-mono">{fmtNum(m.eps)}</td>
+                    <td className={`py-1.5 font-mono ${m.delta !== null && m.eps !== null && m.delta < m.eps ? "text-passed" : "text-failed"}`}>
+                      {fmtNum(m.delta)}
+                    </td>
+                    <td className="py-1.5 font-mono text-muted">{fmtNum(m.reference_value)}</td>
+                    <td className="py-1.5 font-mono text-muted">{fmtNum(m.current_value)}</td>
+                    <td className="py-1.5">
+                      <StatusBadge status={m.state} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Plots */}
+          {sim.metrics.filter((m) => m.plot).length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {sim.metrics
+                .filter((m) => m.plot)
+                .map((m) => (
+                  <div key={m.metric}>
+                    <p className="text-muted text-xs mb-1">{m.metric}</p>
+                    <img
+                      src={`/data/${runPath}/${m.plot}`}
+                      alt={`${sim.name} ${m.metric}`}
+                      className="w-full rounded border border-border"
+                      loading="lazy"
+                    />
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RunDetailPage() {
+  const { branch, arch, runId } = useParams<{
+    branch: string;
+    arch: string;
+    runId: string;
+  }>();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["run-detail", branch, arch, runId],
+    queryFn: () => getRunDetail(branch!, arch!, runId!),
+    enabled: !!branch && !!arch && !!runId,
+  });
+
+  const [showUnitDetails, setShowUnitDetails] = useState(false);
+
+  if (isLoading) return <div className="p-8 text-muted">Loading…</div>;
+  if (error || !data)
+    return <div className="p-8 text-failed">Failed to load run data.</div>;
+
+  const { meta, unit, regression } = data;
+  const runPath = `runs/${branch}/${arch}/${runId}`;
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <Link
+        to={`/results/${branch}/${arch}`}
+        className="flex items-center gap-1.5 text-muted hover:text-white text-sm transition-colors"
+      >
+        <ArrowLeft size={14} /> {branch} / {arch}
+      </Link>
+
+      {/* Meta card */}
+      <div className="bg-surface border border-border rounded-xl p-5 grid sm:grid-cols-2 gap-4 text-sm">
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Run ID</p>
+          <p className="font-mono text-white">{meta.run_id}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Status</p>
+          <StatusBadge status={meta.status} size="md" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Branch / Arch</p>
+          <p className="text-white">{meta.branch} / {meta.arch}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Duration</p>
+          <p className="text-white">{duration(meta.started_at, meta.finished_at)}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Started</p>
+          <p className="text-white">{fmtDate(meta.started_at)}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Commits</p>
+          <p className="font-mono text-xs text-muted">
+            opalx: {meta.opalx_commit ?? "—"} · tests: {meta.tests_repo_commit ?? "—"}
+          </p>
+        </div>
+        <div className="sm:col-span-2">
+          <a
+            href={`/data/${runPath}/logs/pipeline.log`}
+            target="_blank"
+            rel="noopener"
+            className="flex items-center gap-1 text-accent text-xs hover:underline"
+          >
+            <ExternalLink size={11} /> pipeline.log
+          </a>
+        </div>
+      </div>
+
+      {/* Unit tests */}
+      {unit.tests.length > 0 && (
+        <div className="bg-surface border border-border rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowUnitDetails(!showUnitDetails)}
+            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-surface/80 transition-colors text-left"
+          >
+            {showUnitDetails ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span className="text-white font-medium">Unit Tests</span>
+            <span className="text-muted text-sm ml-auto">
+              {meta.unit_tests_total - meta.unit_tests_failed}/{meta.unit_tests_total} passed
+              {meta.unit_tests_failed > 0 && (
+                <span className="text-failed ml-2">{meta.unit_tests_failed} failed</span>
+              )}
+            </span>
+          </button>
+          {showUnitDetails && (
+            <div className="border-t border-border p-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted">
+                  <tr>
+                    <th className="text-left pb-2">Test</th>
+                    <th className="text-left pb-2">Status</th>
+                    <th className="text-left pb-2">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unit.tests.map((t) => (
+                    <tr key={t.name} className="border-t border-border/40">
+                      <td className="py-1.5 font-mono text-white">{t.name}</td>
+                      <td className="py-1.5">
+                        <StatusBadge status={t.status} />
+                      </td>
+                      <td className="py-1.5 text-muted">
+                        {t.duration_seconds != null ? `${t.duration_seconds.toFixed(2)}s` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Regression tests */}
+      {regression.simulations.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-white font-medium">
+            Regression Tests
+            <span className="text-muted font-normal text-sm ml-2">
+              {meta.regression_passed}/{meta.regression_total} passed
+              {meta.regression_failed > 0 && (
+                <span className="text-failed ml-1">· {meta.regression_failed} failed</span>
+              )}
+              {meta.regression_broken > 0 && (
+                <span className="text-broken ml-1">· {meta.regression_broken} broken</span>
+              )}
+            </span>
+          </h2>
+          {regression.simulations.map((sim) => (
+            <SimCard key={sim.name} sim={sim} runPath={runPath} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

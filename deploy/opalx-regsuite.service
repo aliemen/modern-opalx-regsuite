@@ -1,0 +1,27 @@
+[Unit]
+Description=OPALX Regression Suite Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=opalx
+WorkingDirectory=/home/opalx/modern-opalx-regsuite
+
+# Sensitive values live in this file (mode 600, owned by opalx):
+#   OPALX_SECRET_KEY=<256-bit hex>
+EnvironmentFile=/etc/opalx/secrets
+
+# Override data_root without editing config.toml (optional):
+# Environment=OPALX_DATA_ROOT=/srv/opalx/test-data
+
+Environment=OPALX_REGSUITE_CONFIG=/home/opalx/config.toml
+
+ExecStart=/home/opalx/.venv/bin/opalx-regsuite serve --host 0.0.0.0 --port 8000
+
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

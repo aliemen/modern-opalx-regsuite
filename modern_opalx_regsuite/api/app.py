@@ -1,0 +1,130 @@
+"""FastAPI application factory."""
+from __future__ import annotations
+
+import json
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request, Response, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from ..config import load_config
+from .auth import REFRESH_COOKIE_NAME, TokenResponse
+from .tokens import create_access_token, verify_refresh_token
+from .branches import router as branches_router
+from .results import router as results_router
+from .runs import router as runs_router
+from .state import clear_active_run, get_active_run
+from .stream import router as stream_router
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """On startup, heal any stale 'running' runs left by a previous crash."""
+    try:
+        cfg = load_config()
+        data_root = cfg.resolved_data_root
+        _heal_stale_runs(data_root)
+    except Exception:
+        pass  # Config might not be initialised yet; non-fatal.
+    clear_active_run()
+    yield
+
+
+def _heal_stale_runs(data_root: Path) -> None:
+    """Find any run-meta.json with status='running' and mark it 'failed'."""
+    runs_root = data_root / "runs"
+    if not runs_root.is_dir():
+        return
+    for meta_path in runs_root.glob("*/*/*/run-meta.json"):
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("status") == "running":
+                data["status"] = "failed"
+                import datetime
+                data.setdefault("finished_at", datetime.datetime.utcnow().isoformat() + "Z")
+                with meta_path.open("w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, default=str)
+        except Exception:
+            pass
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="OPALX Regression Suite",
+        description="Web interface for running and browsing OPALX regression tests.",
+        version="1.0.0",
+        lifespan=_lifespan,
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+    )
+
+    # Allow all origins in development; in production nginx handles CORS.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Register API routers.
+    app.include_router(runs_router)
+    app.include_router(stream_router)
+    app.include_router(results_router)
+    app.include_router(branches_router)
+
+    # Auth router — login, logout endpoints.
+    from .auth import router as auth_router
+    app.include_router(auth_router)
+
+    # Inline /api/auth/refresh-cookie endpoint (needs raw Request to read cookies).
+    @app.post("/api/auth/refresh-cookie", response_model=TokenResponse)
+    async def refresh_cookie(request: Request, response: Response):
+        token = request.cookies.get(REFRESH_COOKIE_NAME)
+        if token is None:
+            return JSONResponse(
+                {"detail": "No refresh token cookie."},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        cfg = load_config()
+        username = verify_refresh_token(token)
+        if username is None:
+            return JSONResponse(
+                {"detail": "Invalid or expired refresh token."},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        access_token = create_access_token(username, cfg)
+        return TokenResponse(access_token=access_token)
+
+    # Serve the data directory so the frontend can access logs and plots.
+    try:
+        cfg = load_config()
+        data_root = cfg.resolved_data_root
+        if data_root.is_dir():
+            app.mount("/data", StaticFiles(directory=str(data_root)), name="data")
+    except Exception:
+        pass  # data_root might not exist at app creation time.
+
+    # Serve the built React frontend.  The frontend's index.html handles all
+    # client-side routing via the catch-all below.
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    if static_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            index = static_dir / "index.html"
+            if index.is_file():
+                from fastapi.responses import FileResponse
+                return FileResponse(str(index))
+            return JSONResponse(
+                {"detail": "Frontend not built. Run 'make build-frontend'."},
+                status_code=404,
+            )
+
+    return app

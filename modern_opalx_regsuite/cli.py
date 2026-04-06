@@ -15,7 +15,7 @@ from .runner import run_pipeline
 from .sitegen import generate_site
 
 
-app = typer.Typer(help="Modern OPALX regression suite CLI.")
+app = typer.Typer(help="Modern OPALX regression suite CLI.", no_args_is_help=True)
 
 
 def _resolve_path(p: str) -> Path:
@@ -241,6 +241,88 @@ def del_test(
             f"No runs matched pattern '{run_id}' "
             f"(branch={branch}, archs={', '.join(archs)})."
         )
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(None, "--host", help="Bind host (overrides config)."),
+    port: int = typer.Option(None, "--port", help="Bind port (overrides config)."),
+    workers: int = typer.Option(
+        1,
+        "--workers",
+        help="Number of uvicorn workers. Must be 1 for the run-state singleton.",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml.",
+    ),
+) -> None:
+    """Start the OPALX regression suite web server."""
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo("uvicorn is required. Install it with: pip install 'uvicorn[standard]'")
+        raise typer.Exit(1)
+
+    cfg = _load_config_option(config)
+    bind_host = host or cfg.host
+    bind_port = port or cfg.port
+
+    if workers != 1:
+        typer.echo(
+            "Warning: --workers > 1 is not supported (run-state singleton requires a single process).",
+            err=True,
+        )
+        workers = 1
+
+    typer.echo(f"Starting OPALX regression suite at http://{bind_host}:{bind_port}")
+    uvicorn.run(
+        "modern_opalx_regsuite.api.app:create_app",
+        factory=True,
+        host=bind_host,
+        port=bind_port,
+        workers=workers,
+        log_level="info",
+    )
+
+
+@app.command("user-add")
+def user_add(
+    username: str = typer.Option(..., "--username", "-u", prompt=True),
+    password: str = typer.Option(
+        ...,
+        "--password",
+        "-p",
+        prompt=True,
+        hide_input=True,
+        confirmation_prompt=True,
+    ),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Add or update a user in the users.json file."""
+    from .api.auth import add_user
+
+    cfg = _load_config_option(config)
+    add_user(cfg, username, password)
+    typer.echo(f"User '{username}' saved to {cfg.resolved_users_file}")
+
+
+@app.command("user-del")
+def user_del(
+    username: str = typer.Option(..., "--username", "-u", prompt=True),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Remove a user from the users.json file."""
+    from .api.auth import delete_user
+
+    cfg = _load_config_option(config)
+    if delete_user(cfg, username):
+        typer.echo(f"User '{username}' removed.")
+    else:
+        typer.echo(f"User '{username}' not found.", err=True)
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

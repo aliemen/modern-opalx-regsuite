@@ -1,123 +1,171 @@
 ## modern-opalx-regsuite
 
-Modern, portable regression test orchestration and reporting suite for OPALX.
+Modern, portable regression test orchestration and web dashboard for OPALX.
 
 ### Features
 
-- **Config-driven**: Minimal `config.toml` defining OPALX repo, builds root, and data root.
-- **CLI-first**: `opalx-regsuite` command to run tests, inspect runs, and generate a static site.
-- **File-based data model**: JSON + logs + plots on disk, no database required.
-- **Static dashboard**: `gen-data-site` turns the data directory into a static HTML dashboard.
-- **Optional trigger service**: Small HTTP service can wrap the CLI for ad-hoc triggering and live log viewing.
+- **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), and results browsing.
+- **Config-driven**: `config.toml` with per-architecture overrides (`[[arch_configs]]`) and optional Slurm support.
+- **File-based data model**: JSON + logs + SVG plots on disk, no database. Results live in a separate git repo (`opalx-regsuite-test-data`).
+- **Single-command server**: `opalx-regsuite serve` starts the full stack.
+- **CLI still works**: All CLI commands (`run`, `gen-data-site`, `del-test`, …) remain available.
 
-### Data vs site directories
+---
 
-- **`data_root`** is the canonical run database created by `opalx-regsuite run`.
-  - Example: `runs/<branch>/<arch>/<run_id>/run-meta.json`, `unit-tests.json`,
-    `regression-tests.json`, `logs/*.log`, `plots/*.png`.
-- **`site` (or any `--out-dir`)** is a deployable static snapshot created by
-  `opalx-regsuite gen-data-site`.
-  - The generator mirrors required artifacts into `site/runs/...` and writes
-    HTML pages under `site/index.html` and `site/branch/...`.
-  - Deploy **the `site` directory** as your web root. Downloads are served from
-    links such as `/runs/<branch>/<arch>/<run_id>/logs/pipeline.log`.
-
-### Installation
-
-From the project root:
+### Setup (production — Proxmox LXC)
 
 ```bash
-python -m venv .venv
+# 1. Clone the repo and install
+git clone <this-repo> /home/opalx/modern-opalx-regsuite
+cd /home/opalx/modern-opalx-regsuite
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+make install          # builds frontend + installs Python package
+
+# 2. Configure
+opalx-regsuite init   # creates config.toml interactively
+
+# 3. Set the JWT secret key (required)
+export OPALX_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+# Or put it in /etc/opalx/secrets (see deploy/setup.sh)
+
+# 4. Add your first user
+opalx-regsuite user-add --username admin
+
+# 5. Start the server
+opalx-regsuite serve --host 0.0.0.0 --port 8000
 ```
 
-This installs the `opalx-regsuite` CLI.
+For a fully automated setup (creates system user, secrets file, systemd unit):
+```bash
+sudo bash deploy/setup.sh
+```
 
-### Quick start
+See [deploy/nginx.conf](deploy/nginx.conf) for the nginx reverse proxy config (required for SSE to work correctly).
 
-1. **Initialize configuration**
+---
+
+### Quick start (local development)
 
 ```bash
+# Install dependencies
+make install
+
+# Generate a secret key and export it
+export OPALX_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+
+# Configure
 opalx-regsuite init
+
+# Add a user
+opalx-regsuite user-add --username dev
+
+# Start the server (serves the built frontend + API on :8000)
+opalx-regsuite serve
+
+# Or run frontend dev server with HMR + API proxy:
+cd frontend && npm run dev   # frontend on :5173, proxies /api → :8000
 ```
 
-Follow the prompts to set:
+---
 
-- OPALX repository root
-- Regression tests repository root
-- Builds root (per-branch/per-arch build directories)
-- Data root for regression data
+### CLI Commands
 
-2. **Run tests**
+| Command | Description |
+|---|---|
+| `opalx-regsuite init` | Interactive config.toml setup |
+| `opalx-regsuite serve` | Start the web server |
+| `opalx-regsuite run` | Run pipeline from the CLI |
+| `opalx-regsuite user-add` | Add/update a web user |
+| `opalx-regsuite user-del` | Remove a web user |
+| `opalx-regsuite gen-data-site` | Generate offline static HTML snapshot |
+| `opalx-regsuite del-test` | Delete run data |
+
+---
+
+### Configuration (`config.toml`)
+
+Core fields (set by `init`):
+
+```toml
+opalx_repo_root      = "/path/to/opalx"
+builds_root          = "/path/to/builds"
+data_root            = "/path/to/opalx-regsuite-test-data"
+regtests_repo_root   = "/path/to/regression-tests-x"
+```
+
+Per-architecture overrides (optional, can have multiple):
+
+```toml
+[[arch_configs]]
+arch           = "cpu-serial"
+execution_mode = "local"      # "local" or "slurm"
+build_jobs     = 4
+mpi_ranks      = 1
+cmake_args     = ["-DBUILD_TYPE=Release", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON"]
+
+[[arch_configs]]
+arch           = "gpu-cuda-a100"
+execution_mode = "slurm"
+build_jobs     = 8
+mpi_ranks      = 1
+slurm_args     = ["--partition=gpu", "--gres=gpu:1", "--time=02:00:00"]
+module_loads   = ["gcc/15.2.0", "openmpi/4.1.6_slurm", "cuda/12.0"]
+cmake_args     = ["-DBUILD_TYPE=Release", "-DPLATFORMS=CUDA", "-DARCH=AMPERE80"]
+```
+
+Web server:
+```toml
+host = "0.0.0.0"
+port = 8000
+users_file = "users.json"
+# secret_key is read from OPALX_SECRET_KEY env var (never put it in this file)
+```
+
+---
+
+### Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `OPALX_SECRET_KEY` | JWT signing key (required, 256-bit hex) |
+| `OPALX_REGSUITE_CONFIG` | Path to config.toml (optional) |
+| `OPALX_DATA_ROOT` | Override `data_root` at runtime (optional) |
+
+---
+
+### Importing old run data
 
 ```bash
-opalx-regsuite run --branch master --arch cpu-serial
+git clone <opalx-regsuite-test-data> /srv/opalx/test-data
+# Set data_root = "/srv/opalx/test-data" in config.toml
+# All old runs appear in the dashboard immediately — no migration needed.
 ```
 
-This will:
+---
 
-- Update and check out the requested branch in your OPALX repo
-- Update and check out the configured branch in your regression-tests-x repo
-- Configure the build directory with CMake (using `cmake_args`)
-- Build OPALX (using `build_command`, default `make -j2`)
-- Run unit tests (CTest or a configured command)
-- Run regression-tests-x tests discovered from `regtests_subdir`:
-  - each test runs in `runs/<branch>/<arch>/<run_id>/work/<TestName>/`
-  - each test gets its own log `logs/<TestName>-RT.o`
-  - `.rt` checks are parsed and compared against `reference/*.stat`
-  - plots are generated via matplotlib in `plots/<TestName>_<var>.png`
-- Write JSON data and logs (including `pipeline.log`) under the data root
+### Data layout
 
-3. **Delete old runs**
-
-You can delete one or more runs (both their data directories and the corresponding index entries) using:
-
-```bash
-opalx-regsuite del-test 20260305-131529
-opalx-regsuite del-test "2026*"
+```
+data_root/
+  runs/<branch>/<arch>/<run_id>/
+    run-meta.json
+    unit-tests.json
+    regression-tests.json
+    logs/pipeline.log, cmake.log, build.log, <TestName>-RT.o, ...
+    plots/<TestName>_<var>.svg
+  runs-index/<branch>/<arch>.json
+  branches.json
 ```
 
-By default this operates on `config.default_branch` and all `config.default_architectures`. You can override:
+---
 
-```bash
-opalx-regsuite del-test "2026*" --branch master --arch cpu-serial
-```
+### Web pages
 
-4. **Generate static site**
-
-```bash
-opalx-regsuite gen-data-site --out-dir site
-```
-
-The `site` directory can be served by any static HTTP server, for example:
-
-```bash
-python -m http.server --directory site
-```
-
-### Configuration
-
-Configuration is stored in a small `config.toml` file, by default in the project root. You can override its location with `--config` on each command or by setting `OPALX_REGSUITE_CONFIG`.
-
-The config includes:
-
-- `opalx_repo_root`: Path to your OPALX source checkout.
-- `regtests_repo_root`: Path to your regression-tests-x checkout.
-- `regtests_branch`: Branch for the regression-tests-x repo (set once).
-- `regtests_subdir`: Subdirectory containing test folders (default `RegressionTests`).
-- `builds_root`: Root directory for per-branch/per-architecture builds.
-- `data_root`: Root directory for regression and unit test data.
-- `cmake_args`: Extra arguments for the CMake configure step (e.g. build type, platforms, unit-test flags).
-- `build_command`: Build command to run in the build directory (default `make -j2`).
-- `opalx_executable_relpath`: Path to `opalx` relative to the build directory (default `src/opalx`).
-- `opalx_args`: Optional extra OPALX args for regression runs.
-- `keep_work_dirs`: Keep or delete temporary regression work dirs after runs.
-- `unit_test_command`: Command to execute unit tests in the build directory.
-
-### Extending
-
-- **Unit tests**: Adjust the configured unit test command to match your CTest invocation or custom harness.
-- **Regression tests**: Plug in your own regression runner and have it emit JSON and plots according to the data model.
-- **Dashboard**: Extend or re-style the Jinja2 templates under `modern_opalx_regsuite/templates`.
-
+| Route | Description |
+|---|---|
+| `/` | Dashboard — latest run per branch/arch |
+| `/trigger` | Start a new run |
+| `/live` | Live log streaming for the active run |
+| `/results/:branch/:arch` | Run history table |
+| `/results/:branch/:arch/:run_id` | Detailed results with plots and metrics |

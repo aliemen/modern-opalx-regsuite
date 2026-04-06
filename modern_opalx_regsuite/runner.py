@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -84,6 +85,11 @@ def _start_pipeline_log(pipeline_log_path: Path, branch: str, arch: str, run_id:
             f"run_id={run_id}\n"
             f"started_at={datetime.utcnow().isoformat()}Z\n\n"
         )
+
+
+def _phase(pipeline_log_path: Path, name: str) -> None:
+    """Emit a structured phase marker that the SSE tailer can detect."""
+    _append_pipeline_line(pipeline_log_path, f"== PHASE: {name} ==")
 
 
 def _git_update_repo(repo_path: Path, branch: str, pipeline_log_path: Path) -> bool:
@@ -428,6 +434,8 @@ def _run_regression_suite(
     paths: RunPaths,
     build_dir: Path,
     pipeline_log_path: Path,
+    mpi_ranks: int = 1,
+    cancel_event: Optional[threading.Event] = None,
 ) -> RegressionTestsReport:
     tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
     tests = _discover_regression_tests(tests_root)
@@ -446,6 +454,13 @@ def _run_regression_suite(
     reg_lines.append(f"OPALX executable: {opalx_exe}")
 
     for test_name in tests:
+        if cancel_event is not None and cancel_event.is_set():
+            _append_pipeline_line(
+                pipeline_log_path,
+                "[regression] CANCELLED by user — stopping regression tests.",
+            )
+            break
+
         src_test_dir = tests_root / test_name
         work_test_dir = paths.work_dir / test_name
         if work_test_dir.exists():
@@ -478,8 +493,9 @@ def _run_regression_suite(
             )
         else:
             extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
+            mpi_prefix = f"mpirun -np {mpi_ranks} " if mpi_ranks > 1 else ""
             cmd = (
-                f"{shlex.quote(str(opalx_exe))} "
+                f"{mpi_prefix}{shlex.quote(str(opalx_exe))} "
                 f"{extra_args} {shlex.quote(test_input.name)}"
             ).strip()
 
@@ -606,14 +622,14 @@ def run_pipeline(
     run_id: Optional[str] = None,
     skip_unit: bool = False,
     skip_regression: bool = False,
+    cancel_event: Optional[threading.Event] = None,
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
 
-    This function is intentionally conservative and only assumes that:
-    - There is an existing build directory for (branch, arch), or the user
-      prepares it outside this function.
-    - Unit tests and regression tests can be executed via configured shell
-      commands inside that build tree.
+    Pass *cancel_event* (a :class:`threading.Event`) to allow callers to
+    interrupt the pipeline between phases.  The event is checked after git
+    updates, after cmake+build, after unit tests, and between each regression
+    test.
     """
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -631,6 +647,11 @@ def run_pipeline(
     )
     _write_json(paths.meta_path, meta.model_dump())
 
+    # Resolve arch-specific overrides.
+    ac = cfg.get_arch_config(arch)
+    effective_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
+    build_cmd = f"make -j{ac.build_jobs}"
+
     # Resolve repositories.
     opalx_repo = cfg.resolved_opalx_repo_root
     regtests_repo = cfg.resolved_regtests_repo_root
@@ -639,9 +660,10 @@ def run_pipeline(
     build_dir = cfg.resolved_builds_root / branch / arch / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Update and check out repositories.
+    # ── Phase: git ────────────────────────────────────────────────────────────
+    _phase(paths.pipeline_log_path, "git")
     _append_pipeline_line(
-        paths.pipeline_log_path, f"== Updating OPALX repo at {opalx_repo} =="
+        paths.pipeline_log_path, f"Updating OPALX repo at {opalx_repo}"
     )
     opalx_git_ok = _git_update_repo(
         repo_path=opalx_repo,
@@ -650,7 +672,7 @@ def run_pipeline(
     )
     _append_pipeline_line(
         paths.pipeline_log_path,
-        f"== Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch}) ==",
+        f"Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch})",
     )
     reg_git_ok = _git_update_repo(
         repo_path=regtests_repo,
@@ -659,13 +681,16 @@ def run_pipeline(
     )
     meta.opalx_commit = _git_head_short(opalx_repo)
     meta.tests_repo_commit = _git_head_short(regtests_repo)
+    _write_json(paths.meta_path, meta.model_dump())
 
-    # Configure and build with CMake and make.
-    cmake_cmd = " ".join(
-        ["cmake", *cfg.cmake_args, str(opalx_repo)]
-    )
+    if cancel_event is not None and cancel_event.is_set():
+        return _cancel_run(meta, paths, data_root)
+
+    # ── Phase: cmake ──────────────────────────────────────────────────────────
+    _phase(paths.pipeline_log_path, "cmake")
+    cmake_cmd = " ".join(["cmake", *effective_cmake_args, str(opalx_repo)])
     _append_pipeline_line(
-        paths.pipeline_log_path, f"== Configuring build: {cmake_cmd} =="
+        paths.pipeline_log_path, f"Configuring build: {cmake_cmd}"
     )
     cmake_rc, _ = _run_command(
         cmake_cmd,
@@ -674,10 +699,9 @@ def run_pipeline(
         pipeline_log_path=paths.pipeline_log_path,
     )
 
-    build_cmd = cfg.build_command
-    _append_pipeline_line(
-        paths.pipeline_log_path, f"== Building: {build_cmd} =="
-    )
+    # ── Phase: build ──────────────────────────────────────────────────────────
+    _phase(paths.pipeline_log_path, "build")
+    _append_pipeline_line(paths.pipeline_log_path, f"Building: {build_cmd}")
     build_rc, _ = _run_command(
         build_cmd,
         cwd=build_dir,
@@ -690,10 +714,14 @@ def run_pipeline(
     if not (opalx_git_ok and reg_git_ok):
         meta.status = "failed"
 
+    if cancel_event is not None and cancel_event.is_set():
+        return _cancel_run(meta, paths, data_root)
+
     unit_report = UnitTestsReport()
     reg_report = RegressionTestsReport()
 
-    # Unit tests
+    # ── Phase: unit ───────────────────────────────────────────────────────────
+    _phase(paths.pipeline_log_path, "unit")
     if build_ok and not skip_unit and cfg.unit_test_command:
         rc, output = _run_command(
             cfg.unit_test_command,
@@ -706,16 +734,26 @@ def run_pipeline(
         meta.unit_tests_failed = unit_report.failed
         if rc != 0 and meta.status == "running":
             meta.status = "failed"
+    elif skip_unit:
+        _append_pipeline_line(paths.pipeline_log_path, "[unit] Skipped by user.")
+    else:
+        _append_pipeline_line(paths.pipeline_log_path, "[unit] Skipped because build failed.")
 
     _write_json(paths.unit_json_path, unit_report.model_dump())
 
-    # Regression tests
+    if cancel_event is not None and cancel_event.is_set():
+        return _cancel_run(meta, paths, data_root)
+
+    # ── Phase: regression ─────────────────────────────────────────────────────
+    _phase(paths.pipeline_log_path, "regression")
     if build_ok and not skip_regression:
         reg_report = _run_regression_suite(
             cfg=cfg,
             paths=paths,
             build_dir=build_dir,
             pipeline_log_path=paths.pipeline_log_path,
+            mpi_ranks=ac.mpi_ranks,
+            cancel_event=cancel_event,
         )
         meta.regression_total = reg_report.total
         meta.regression_passed = reg_report.passed
@@ -732,7 +770,11 @@ def run_pipeline(
 
     _write_json(paths.reg_json_path, reg_report.model_dump())
 
-    # Finalize meta and indexes.
+    # Check one more time after regression (cancel may have fired mid-loop).
+    if cancel_event is not None and cancel_event.is_set():
+        return _cancel_run(meta, paths, data_root)
+
+    # ── Phase: done ───────────────────────────────────────────────────────────
     if meta.status == "running":
         if meta.unit_tests_failed or meta.regression_failed or meta.regression_broken:
             meta.status = "failed"
@@ -740,8 +782,18 @@ def run_pipeline(
             meta.status = "passed"
 
     meta.finished_at = datetime.utcnow()
+    _phase(paths.pipeline_log_path, f"done status={meta.status}")
     _write_json(paths.meta_path, meta.model_dump())
+    _update_indexes(data_root, meta)
+    return meta
 
+
+def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:
+    """Finalise a cancelled run and persist it."""
+    _append_pipeline_line(paths.pipeline_log_path, "== PHASE: done status=cancelled ==")
+    meta.status = "cancelled"
+    meta.finished_at = datetime.utcnow()
+    _write_json(paths.meta_path, meta.model_dump())
     _update_indexes(data_root, meta)
     return meta
 

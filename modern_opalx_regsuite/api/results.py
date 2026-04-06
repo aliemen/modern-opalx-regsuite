@@ -1,7 +1,8 @@
-"""Read-only endpoints for browsing historical run data."""
+"""Endpoints for browsing and managing historical run data."""
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
@@ -19,6 +20,7 @@ from ..data_model import (
     runs_index_path,
 )
 from .deps import get_config, require_auth
+from .state import get_active_run
 
 router = APIRouter(prefix="/api/results", tags=["results"])
 
@@ -87,3 +89,35 @@ def get_run(
         unit=UnitTestsReport.model_validate(unit_data) if unit_data else UnitTestsReport(),
         regression=RegressionTestsReport.model_validate(reg_data) if reg_data else RegressionTestsReport(),
     )
+
+
+@router.delete("/branches/{branch}/archs/{arch}/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_run(
+    branch: str,
+    arch: str,
+    run_id: str,
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> None:
+    # Refuse to delete the currently active run.
+    active = get_active_run()
+    if active is not None and active.run_id == run_id and active.status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a run that is currently in progress.",
+        )
+
+    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
+    if not rdir.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+
+    shutil.rmtree(rdir)
+
+    # Remove the entry from the runs index.
+    idx_path = runs_index_path(cfg.resolved_data_root, branch, arch)
+    if idx_path.is_file():
+        with idx_path.open("r", encoding="utf-8") as f:
+            entries = json.load(f)
+        entries = [e for e in entries if e.get("run_id") != run_id]
+        with idx_path.open("w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2)

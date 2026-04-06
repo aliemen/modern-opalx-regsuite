@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Clock, FlaskConical, Cpu } from "lucide-react";
+import { Clock, FlaskConical, Cpu, Radio } from "lucide-react";
 import { getBranches, getRuns, type RunIndexEntry } from "../api/results";
 import { getCurrentRun } from "../api/runs";
 import { StatusBadge } from "../components/StatusBadge";
@@ -86,7 +86,7 @@ export function DashboardPage() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      {activeRun && activeRun.status === "running" && (
+      {activeRun && activeRun.status === "running" ? (
         <Link
           to="/live"
           className="flex items-center gap-3 bg-accent/10 border border-accent/30 rounded-xl px-5 py-3 mb-6 text-accent text-sm hover:bg-accent/20 transition-colors"
@@ -94,6 +94,13 @@ export function DashboardPage() {
           <span className="w-2 h-2 rounded-full bg-accent animate-ping inline-block" />
           Run in progress — {activeRun.branch} / {activeRun.arch} — phase: {activeRun.phase}
           <span className="ml-auto text-xs underline">View live output →</span>
+        </Link>
+      ) : (
+        <Link
+          to="/live"
+          className="flex items-center gap-2 text-muted hover:text-white text-sm mb-6 w-fit transition-colors"
+        >
+          <Radio size={13} /> Latest run log
         </Link>
       )}
 

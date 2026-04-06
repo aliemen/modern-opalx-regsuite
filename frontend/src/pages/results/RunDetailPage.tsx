@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
-import { getRunDetail, type RegressionSimulation } from "../../api/results";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Trash2 } from "lucide-react";
+import { deleteRun, getRunDetail, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 
 function fmtNum(n: number | null | undefined, digits = 4) {
@@ -112,12 +112,32 @@ function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string 
   );
 }
 
+const OPALX_COMMIT_BASE = "https://github.com/OPALX-project/OPALX/commit";
+const REGTESTS_COMMIT_BASE = "https://github.com/OPALX-project/regression-tests-x/commit";
+
+function CommitLink({ hash, base }: { hash: string | null; base: string }) {
+  if (!hash) return <span className="text-muted">—</span>;
+  const short = hash.slice(0, 10);
+  return (
+    <a
+      href={`${base}/${hash}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-mono text-accent hover:underline"
+    >
+      {short}
+    </a>
+  );
+}
+
 export function RunDetailPage() {
   const { branch, arch, runId } = useParams<{
     branch: string;
     arch: string;
     runId: string;
   }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["run-detail", branch, arch, runId],
@@ -125,7 +145,17 @@ export function RunDetailPage() {
     enabled: !!branch && !!arch && !!runId,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteRun(branch!, arch!, runId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
+      queryClient.invalidateQueries({ queryKey: ["branches"] });
+      navigate(`/results/${branch}/${arch}`);
+    },
+  });
+
   const [showUnitDetails, setShowUnitDetails] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (isLoading) return <div className="p-8 text-muted">Loading…</div>;
   if (error || !data)
@@ -136,12 +166,41 @@ export function RunDetailPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <Link
-        to={`/results/${branch}/${arch}`}
-        className="flex items-center gap-1.5 text-muted hover:text-white text-sm transition-colors"
-      >
-        <ArrowLeft size={14} /> {branch} / {arch}
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          to={`/results/${branch}/${arch}`}
+          className="flex items-center gap-1.5 text-muted hover:text-white text-sm transition-colors"
+        >
+          <ArrowLeft size={14} /> {branch} / {arch}
+        </Link>
+
+        {confirmDelete ? (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted">Delete this run?</span>
+            <button
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+              className="px-3 py-1 rounded bg-failed/20 border border-failed/40 text-failed hover:bg-failed/30 transition disabled:opacity-50"
+            >
+              {deleteMutation.isPending ? "Deleting…" : "Confirm"}
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="px-3 py-1 rounded border border-border text-muted hover:text-white transition"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 text-muted hover:text-failed text-sm transition-colors"
+            title="Delete run"
+          >
+            <Trash2 size={14} /> Delete run
+          </button>
+        )}
+      </div>
 
       {/* Meta card */}
       <div className="bg-surface border border-border rounded-xl p-5 grid sm:grid-cols-2 gap-4 text-sm">
@@ -167,9 +226,16 @@ export function RunDetailPage() {
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Commits</p>
-          <p className="font-mono text-xs text-muted">
-            opalx: {meta.opalx_commit ?? "—"} · tests: {meta.tests_repo_commit ?? "—"}
-          </p>
+          <div className="text-xs space-y-0.5">
+            <p>
+              <span className="text-muted">opalx: </span>
+              <CommitLink hash={meta.opalx_commit} base={OPALX_COMMIT_BASE} />
+            </p>
+            <p>
+              <span className="text-muted">tests: </span>
+              <CommitLink hash={meta.tests_repo_commit} base={REGTESTS_COMMIT_BASE} />
+            </p>
+          </div>
         </div>
         <div className="sm:col-span-2">
           <a

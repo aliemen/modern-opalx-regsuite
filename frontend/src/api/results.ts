@@ -100,3 +100,11 @@ export async function getRunDetail(
   );
   return res.data;
 }
+
+export async function deleteRun(
+  branch: string,
+  arch: string,
+  runId: string
+): Promise<void> {
+  await api.delete(`/api/results/branches/${branch}/archs/${arch}/runs/${runId}`);
+}

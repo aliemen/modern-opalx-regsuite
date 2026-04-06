@@ -1,10 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Annotated, Iterable, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+
+def _ensure_utc(v: object) -> object:
+    """Coerce a naive datetime to UTC so aware/naive comparisons never raise."""
+    if isinstance(v, datetime) and v.tzinfo is None:
+        return v.replace(tzinfo=timezone.utc)
+    return v
+
+
+# Use this instead of bare `datetime` for any timestamp field that may be
+# serialised/deserialised from JSON files written before timezone support.
+UtcDatetime = Annotated[datetime, BeforeValidator(_ensure_utc)]
 
 
 class UnitTestCase(BaseModel):
@@ -80,8 +92,8 @@ class RunMeta(BaseModel):
     branch: str
     arch: str
     run_id: str
-    started_at: datetime
-    finished_at: Optional[datetime] = None
+    started_at: UtcDatetime
+    finished_at: Optional[UtcDatetime] = None
     status: str = "unknown"  # "running" | "passed" | "failed" | "broken" | "unknown"
 
     opalx_commit: Optional[str] = None
@@ -106,8 +118,8 @@ class RunIndexEntry(BaseModel):
     branch: str
     arch: str
     run_id: str
-    started_at: datetime
-    finished_at: Optional[datetime]
+    started_at: UtcDatetime
+    finished_at: Optional[UtcDatetime]
     status: str
     unit_tests_total: int = 0
     unit_tests_failed: int = 0

@@ -4,9 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
-    <script type="module" crossorigin src="/assets/index-s-G1YJD1.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BGP8ZYqd.css">
+    <title>OPALX Reg Suite</title>
+    <!-- Initialise dark/light class before first paint to avoid flash -->
+    <script>
+      (function () {
+        var saved = localStorage.getItem("opalx-theme");
+        if (saved !== "light") document.documentElement.classList.add("dark");
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-Lp8OQQqx.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CNvIeggc.css">
   </head>
   <body>
     <div id="root"></div>

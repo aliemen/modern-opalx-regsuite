@@ -26,7 +26,7 @@ function LatestCard({
     >
       <div className="flex items-start justify-between mb-3">
         <div>
-          <p className="text-white font-medium text-sm">{branch}</p>
+          <p className="text-fg font-medium text-sm">{branch}</p>
           <p className="text-muted text-xs flex items-center gap-1 mt-0.5">
             <Cpu size={11} />
             {arch}
@@ -98,13 +98,13 @@ export function DashboardPage() {
       ) : (
         <Link
           to="/live"
-          className="flex items-center gap-2 text-muted hover:text-white text-sm mb-6 w-fit transition-colors"
+          className="flex items-center gap-2 text-muted hover:text-fg text-sm mb-6 w-fit transition-colors"
         >
           <Radio size={13} /> Latest run log
         </Link>
       )}
 
-      <h1 className="text-white text-2xl font-semibold mb-6">Dashboard</h1>
+      <h1 className="text-fg text-2xl font-semibold mb-6">Dashboard</h1>
 
       {entries.length === 0 ? (
         <div className="text-muted text-sm">

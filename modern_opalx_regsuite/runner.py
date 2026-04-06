@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -500,6 +501,7 @@ def _run_regression_suite(
             ).strip()
 
         _append_pipeline_line(pipeline_log_path, f"[regression] START {test_name}")
+        _test_start = time.monotonic()
         rc, _output = _run_command(
             cmd,
             cwd=work_test_dir,
@@ -599,6 +601,7 @@ def _run_regression_suite(
             state=sim_state,
             log_file=f"logs/{test_name}-RT.o",
             metrics=sim_metrics,
+            duration_seconds=time.monotonic() - _test_start,
         )
         report.simulations.append(sim)
         _append_pipeline_line(

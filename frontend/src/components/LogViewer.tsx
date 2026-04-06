@@ -4,12 +4,13 @@ import { getAccessToken } from "../api/client";
 interface Props {
   onStatusChange?: (status: string) => void;
   onPhaseChange?: (phase: string) => void;
+  onLogLine?: (line: string) => void;
 }
 
 const MAX_LINES = 5_000;
 const FLUSH_MS = 100; // batch SSE lines and re-render at most 10×/sec
 
-export function LogViewer({ onStatusChange, onPhaseChange }: Props) {
+export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
   const [lines, setLines] = useState<string[]>([]);
   const [truncated, setTruncated] = useState(0); // lines dropped from the top
   const containerRef = useRef<HTMLDivElement>(null);
@@ -17,6 +18,9 @@ export function LogViewer({ onStatusChange, onPhaseChange }: Props) {
   // Buffer for incoming lines between flushes.
   const bufRef = useRef<string[]>([]);
   const flushTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Keep a stable ref so flush() can call the latest callback without stale closure.
+  const onLogLineRef = useRef(onLogLine);
+  useEffect(() => { onLogLineRef.current = onLogLine; }, [onLogLine]);
 
   useEffect(() => {
     const token = getAccessToken();
@@ -27,6 +31,7 @@ export function LogViewer({ onStatusChange, onPhaseChange }: Props) {
     function flush() {
       const incoming = bufRef.current.splice(0);
       if (incoming.length === 0) return;
+      incoming.forEach((line) => onLogLineRef.current?.(line));
       setLines((prev) => {
         const combined = [...prev, ...incoming];
         if (combined.length <= MAX_LINES) return combined;
@@ -97,7 +102,7 @@ export function LogViewer({ onStatusChange, onPhaseChange }: Props) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="log-viewer bg-bg rounded-md border border-border p-4 h-[60vh] overflow-y-auto text-slate-300 font-mono text-xs leading-5"
+        className="log-viewer bg-bg rounded-md border border-border p-4 h-[60vh] overflow-y-auto text-fg font-mono text-xs leading-5"
       >
         {lines.length === 0 ? (
           <span className="text-muted">Waiting for output…</span>

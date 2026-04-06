@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>OPALX Reg Suite</title>
+    <!-- Initialise dark/light class before first paint to avoid flash -->
+    <script>
+      (function () {
+        var saved = localStorage.getItem("opalx-theme");
+        if (saved !== "light") document.documentElement.classList.add("dark");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

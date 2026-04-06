@@ -31,6 +31,7 @@ class RegressionSimulation(BaseModel):
     state: Optional[str] = None
     log_file: Optional[str] = None
     metrics: List[RegressionMetric] = Field(default_factory=list)
+    duration_seconds: Optional[float] = None
 
 
 class UnitTestsReport(BaseModel):

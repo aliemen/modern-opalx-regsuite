@@ -2,14 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Light mode (default) ─────────────────────────────────────────────────── */
+:root {
+  --color-bg:      248 250 252;   /* slate-50  */
+  --color-surface: 255 255 255;   /* white     */
+  --color-border:  226 232 240;   /* slate-200 */
+  --color-muted:   100 116 139;   /* slate-500 */
+  --color-fg:      15 23 42;      /* slate-900 */
+  --color-accent:  79 70 229;     /* indigo-600 */
+}
+
+/* ── Dark mode ────────────────────────────────────────────────────────────── */
+.dark {
+  --color-bg:      10 15 30;      /* near-black navy  */
+  --color-surface: 17 24 39;      /* gray-900         */
+  --color-border:  31 41 55;      /* gray-800         */
+  --color-muted:   107 114 128;   /* gray-500         */
+  --color-fg:      241 245 249;   /* slate-100        */
+  --color-accent:  129 140 248;   /* indigo-400       */
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background-color: #020617;
-  color: #e2e8f0;
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-fg));
   font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }

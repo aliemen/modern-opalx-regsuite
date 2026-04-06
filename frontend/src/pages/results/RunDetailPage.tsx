@@ -15,6 +15,14 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleString();
 }
 
+function fmtDuration(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+}
+
 function duration(start: string, end: string | null) {
   if (!end) return "—";
   const s = Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000);
@@ -23,20 +31,41 @@ function duration(start: string, end: string | null) {
 }
 
 function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
-  const [open, setOpen] = useState(sim.state !== "passed");
+  const [open, setOpen] = useState(false); // default closed for better overview
+
+  const passedCount = sim.metrics.filter((m) => m.state === "passed").length;
+  const failedCount = sim.metrics.filter((m) => m.state === "failed").length;
+  const brokenCount = sim.metrics.filter((m) => m.state === "broken").length;
+  const totalCount = sim.metrics.length;
+
   return (
     <div className="border border-border rounded-lg overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-surface hover:bg-surface/80 text-left transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 bg-surface hover:bg-border/30 text-left transition-colors"
       >
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span className="text-white font-medium text-sm flex-1">{sim.name}</span>
-        {sim.description && (
-          <span className="text-muted text-xs hidden sm:inline mr-3 truncate max-w-xs">
-            {sim.description}
+        <span className="text-fg font-medium text-sm flex-1">{sim.name}</span>
+
+        {/* Pass/fail counts */}
+        <span className="text-xs tabular-nums flex items-center gap-1 mr-2">
+          <span className="text-passed">{passedCount}</span>
+          <span className="text-muted">/{totalCount}</span>
+          {failedCount > 0 && (
+            <span className="text-failed ml-1">{failedCount} failed</span>
+          )}
+          {brokenCount > 0 && (
+            <span className="text-broken ml-1">{brokenCount} broken</span>
+          )}
+        </span>
+
+        {/* Duration */}
+        {sim.duration_seconds != null && (
+          <span className="text-muted text-xs mr-2 tabular-nums">
+            {fmtDuration(sim.duration_seconds)}
           </span>
         )}
+
         {sim.state && <StatusBadge status={sim.state} />}
         {sim.log_file && (
           <a
@@ -44,7 +73,7 @@ function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string 
             target="_blank"
             rel="noopener"
             onClick={(e) => e.stopPropagation()}
-            className="text-muted hover:text-white ml-2"
+            className="text-muted hover:text-fg ml-2"
             title="View log"
           >
             <ExternalLink size={12} />
@@ -71,7 +100,7 @@ function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string 
               <tbody>
                 {sim.metrics.map((m) => (
                   <tr key={m.metric} className="border-t border-border/50">
-                    <td className="py-1.5 font-mono text-white">{m.metric}</td>
+                    <td className="py-1.5 font-mono text-fg">{m.metric}</td>
                     <td className="py-1.5 text-muted">{m.mode}</td>
                     <td className="py-1.5 text-muted font-mono">{fmtNum(m.eps)}</td>
                     <td className={`py-1.5 font-mono ${m.delta !== null && m.eps !== null && m.delta < m.eps ? "text-passed" : "text-failed"}`}>
@@ -169,7 +198,7 @@ export function RunDetailPage() {
       <div className="flex items-center justify-between">
         <Link
           to={`/results/${branch}/${arch}`}
-          className="flex items-center gap-1.5 text-muted hover:text-white text-sm transition-colors"
+          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
         >
           <ArrowLeft size={14} /> {branch} / {arch}
         </Link>
@@ -186,7 +215,7 @@ export function RunDetailPage() {
             </button>
             <button
               onClick={() => setConfirmDelete(false)}
-              className="px-3 py-1 rounded border border-border text-muted hover:text-white transition"
+              className="px-3 py-1 rounded border border-border text-muted hover:text-fg transition"
             >
               Cancel
             </button>
@@ -206,7 +235,7 @@ export function RunDetailPage() {
       <div className="bg-surface border border-border rounded-xl p-5 grid sm:grid-cols-2 gap-4 text-sm">
         <div className="space-y-1">
           <p className="text-muted text-xs">Run ID</p>
-          <p className="font-mono text-white">{meta.run_id}</p>
+          <p className="font-mono text-fg">{meta.run_id}</p>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Status</p>
@@ -214,15 +243,15 @@ export function RunDetailPage() {
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Branch / Arch</p>
-          <p className="text-white">{meta.branch} / {meta.arch}</p>
+          <p className="text-fg">{meta.branch} / {meta.arch}</p>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Duration</p>
-          <p className="text-white">{duration(meta.started_at, meta.finished_at)}</p>
+          <p className="text-fg">{duration(meta.started_at, meta.finished_at)}</p>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Started</p>
-          <p className="text-white">{fmtDate(meta.started_at)}</p>
+          <p className="text-fg">{fmtDate(meta.started_at)}</p>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Commits</p>
@@ -254,10 +283,10 @@ export function RunDetailPage() {
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <button
             onClick={() => setShowUnitDetails(!showUnitDetails)}
-            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-surface/80 transition-colors text-left"
+            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-border/30 transition-colors text-left"
           >
             {showUnitDetails ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span className="text-white font-medium">Unit Tests</span>
+            <span className="text-fg font-medium">Unit Tests</span>
             <span className="text-muted text-sm ml-auto">
               {meta.unit_tests_total - meta.unit_tests_failed}/{meta.unit_tests_total} passed
               {meta.unit_tests_failed > 0 && (
@@ -278,7 +307,7 @@ export function RunDetailPage() {
                 <tbody>
                   {unit.tests.map((t) => (
                     <tr key={t.name} className="border-t border-border/40">
-                      <td className="py-1.5 font-mono text-white">{t.name}</td>
+                      <td className="py-1.5 font-mono text-fg">{t.name}</td>
                       <td className="py-1.5">
                         <StatusBadge status={t.status} />
                       </td>
@@ -297,7 +326,7 @@ export function RunDetailPage() {
       {/* Regression tests */}
       {regression.simulations.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-white font-medium">
+          <h2 className="text-fg font-medium">
             Regression Tests
             <span className="text-muted font-normal text-sm ml-2">
               {meta.regression_passed}/{meta.regression_total} passed

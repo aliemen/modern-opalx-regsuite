@@ -43,6 +43,7 @@ export interface RegressionSimulation {
   state: string | null;
   log_file: string | null;
   metrics: RegressionMetric[];
+  duration_seconds: number | null;
 }
 
 export interface RegressionTestsReport {

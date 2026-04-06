@@ -67,7 +67,7 @@ export function TriggerPage() {
 
   return (
     <div className="p-6 max-w-xl mx-auto">
-      <h1 className="text-white text-2xl font-semibold mb-6">Start a Run</h1>
+      <h1 className="text-fg text-2xl font-semibold mb-6">Start a Run</h1>
 
       <div className="bg-surface border border-border rounded-xl p-6 flex flex-col gap-5">
         {/* OPALX branch */}
@@ -77,7 +77,7 @@ export function TriggerPage() {
             <select
               value={opalxBranch}
               onChange={(e) => setOpalxBranch(e.target.value)}
-              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
+              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
               disabled={loadingOpalx}
             >
               {(opalxBranches ?? ["master"]).map((b) => (
@@ -87,7 +87,7 @@ export function TriggerPage() {
             <button
               onClick={() => refetchOpalx()}
               disabled={fetchingOpalx}
-              className="p-2 text-muted hover:text-white border border-border rounded-md transition disabled:opacity-50"
+              className="p-2 text-muted hover:text-fg border border-border rounded-md transition disabled:opacity-50"
               title="Refresh branches"
             >
               <RefreshCw size={15} className={fetchingOpalx ? "animate-spin" : ""} />
@@ -102,7 +102,7 @@ export function TriggerPage() {
             <select
               value={regtestsBranch}
               onChange={(e) => setRegtestsBranch(e.target.value)}
-              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
+              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
               disabled={loadingRegtests}
             >
               {(regtestsBranches ?? ["master"]).map((b) => (
@@ -112,7 +112,7 @@ export function TriggerPage() {
             <button
               onClick={() => refetchRegtests()}
               disabled={fetchingRegtests}
-              className="p-2 text-muted hover:text-white border border-border rounded-md transition disabled:opacity-50"
+              className="p-2 text-muted hover:text-fg border border-border rounded-md transition disabled:opacity-50"
               title="Refresh branches"
             >
               <RefreshCw size={15} className={fetchingRegtests ? "animate-spin" : ""} />
@@ -127,7 +127,7 @@ export function TriggerPage() {
             type="text"
             value={arch}
             onChange={(e) => setArch(e.target.value)}
-            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-white text-sm focus:outline-none focus:border-accent"
+            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
           />
           <p className="text-muted text-xs mt-1">Must match an arch_configs entry or default.</p>
         </div>

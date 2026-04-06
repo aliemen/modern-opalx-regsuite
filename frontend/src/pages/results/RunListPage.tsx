@@ -29,11 +29,11 @@ export function RunListPage() {
     <div className="p-6 max-w-5xl mx-auto">
       <Link
         to="/"
-        className="flex items-center gap-1.5 text-muted hover:text-white text-sm mb-4 transition-colors"
+        className="flex items-center gap-1.5 text-muted hover:text-fg text-sm mb-4 transition-colors"
       >
         <ArrowLeft size={14} /> Dashboard
       </Link>
-      <h1 className="text-white text-xl font-semibold mb-1">
+      <h1 className="text-fg text-xl font-semibold mb-1">
         {branch} / {arch}
       </h1>
       <p className="text-muted text-sm mb-6">{runs?.length ?? 0} runs</p>

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -83,7 +83,7 @@ def _start_pipeline_log(pipeline_log_path: Path, branch: str, arch: str, run_id:
             f"branch={branch}\n"
             f"arch={arch}\n"
             f"run_id={run_id}\n"
-            f"started_at={datetime.utcnow().isoformat()}Z\n\n"
+            f"started_at={datetime.now(timezone.utc).isoformat()}Z\n\n"
         )
 
 
@@ -642,7 +642,7 @@ def run_pipeline(
         branch=branch,
         arch=arch,
         run_id=run_id,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
         status="running",
     )
     _write_json(paths.meta_path, meta.model_dump())
@@ -781,7 +781,7 @@ def run_pipeline(
         else:
             meta.status = "passed"
 
-    meta.finished_at = datetime.utcnow()
+    meta.finished_at = datetime.now(timezone.utc)
     _phase(paths.pipeline_log_path, f"done status={meta.status}")
     _write_json(paths.meta_path, meta.model_dump())
     _update_indexes(data_root, meta)
@@ -792,7 +792,7 @@ def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:
     """Finalise a cancelled run and persist it."""
     _append_pipeline_line(paths.pipeline_log_path, "== PHASE: done status=cancelled ==")
     meta.status = "cancelled"
-    meta.finished_at = datetime.utcnow()
+    meta.finished_at = datetime.now(timezone.utc)
     _write_json(paths.meta_path, meta.model_dump())
     _update_indexes(data_root, meta)
     return meta

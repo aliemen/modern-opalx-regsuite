@@ -45,7 +45,7 @@ def _heal_stale_runs(data_root: Path) -> None:
             if data.get("status") == "running":
                 data["status"] = "failed"
                 import datetime
-                data.setdefault("finished_at", datetime.datetime.utcnow().isoformat() + "Z")
+                data.setdefault("finished_at", datetime.datetime.now(datetime.timezone.utc).isoformat())
                 with meta_path.open("w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, default=str)
         except Exception:

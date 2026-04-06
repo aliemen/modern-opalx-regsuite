@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { XCircle } from "lucide-react";
+import { Download, XCircle } from "lucide-react";
 import { cancelRun, getCurrentRun } from "../api/runs";
 import { LogViewer } from "../components/LogViewer";
 import { StatusBadge } from "../components/StatusBadge";
@@ -91,6 +91,16 @@ export function LiveRunPage() {
           setCancelling(false);
         }}
       />
+
+      {/* Download full log */}
+      <a
+        href={`/data/runs/${run.branch}/${run.arch}/${run.run_id}/logs/pipeline.log`}
+        target="_blank"
+        rel="noopener"
+        className="flex items-center gap-1.5 text-muted hover:text-white text-xs mt-1 w-fit transition-colors"
+      >
+        <Download size={12} /> Download full log
+      </a>
 
       {finalStatus && finalStatus !== "running" && (
         <div className="mt-4 flex gap-3">

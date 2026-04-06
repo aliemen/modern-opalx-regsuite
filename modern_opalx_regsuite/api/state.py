@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -58,7 +58,7 @@ async def acquire_run_slot(
             run_id=run_id,
             branch=branch,
             arch=arch,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
             log_path=log_path,
         )
         return _active_run

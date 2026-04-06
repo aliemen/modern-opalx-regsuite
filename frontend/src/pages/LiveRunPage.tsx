@@ -66,7 +66,6 @@ function TestTrackerPanel({
   const runningCount = tests.filter((t) => t.status === "running").length;
 
   const totalCount = tests.length;
-  const doneCount = passedCount + failedCount + brokenCount;
 
   return (
     <div className="flex flex-col h-[60vh]">
@@ -103,17 +102,7 @@ function TestTrackerPanel({
         </div>
       )}
 
-      {/* Progress bar while running */}
-      {!finalStatus && totalCount > 0 && (
-        <div className="h-1 bg-border rounded-full mb-2 overflow-hidden">
-          <div
-            className="h-full bg-accent transition-all duration-500"
-            style={{ width: `${Math.round((doneCount / totalCount) * 100)}%` }}
-          />
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto bg-surface border border-border rounded-md px-3 py-3 space-y-1">
+<div className="flex-1 overflow-y-auto bg-surface border border-border rounded-md px-3 py-3 space-y-1">
         {tests.length === 0 ? (
           <p className="text-muted text-xs">
             {finalStatus

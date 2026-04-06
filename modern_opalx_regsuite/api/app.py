@@ -91,14 +91,13 @@ def create_app() -> FastAPI:
                 {"detail": "No refresh token cookie."},
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
-        cfg = load_config()
         username = verify_refresh_token(token)
         if username is None:
             return JSONResponse(
                 {"detail": "Invalid or expired refresh token."},
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
-        access_token = create_access_token(username, cfg)
+        access_token = create_access_token(username)
         return TokenResponse(access_token=access_token)
 
     # Serve the data directory so the frontend can access logs and plots.

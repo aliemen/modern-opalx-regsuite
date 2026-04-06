@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Play } from "lucide-react";
@@ -41,6 +41,11 @@ export function TriggerPage() {
 
   const isRunning = activeRun?.status === "running";
 
+  // If a run is already in progress, go straight to the live view.
+  useEffect(() => {
+    if (isRunning) navigate("/live", { replace: true });
+  }, [isRunning, navigate]);
+
   async function handleStart() {
     setError(null);
     try {
@@ -63,12 +68,6 @@ export function TriggerPage() {
   return (
     <div className="p-6 max-w-xl mx-auto">
       <h1 className="text-white text-2xl font-semibold mb-6">Start a Run</h1>
-
-      {isRunning && (
-        <div className="bg-broken/10 border border-broken/30 rounded-xl px-4 py-3 text-broken text-sm mb-6">
-          A run is already in progress. Only one run at a time is supported.
-        </div>
-      )}
 
       <div className="bg-surface border border-border rounded-xl p-6 flex flex-col gap-5">
         {/* OPALX branch */}
@@ -159,8 +158,7 @@ export function TriggerPage() {
 
         <button
           onClick={handleStart}
-          disabled={isRunning}
-          className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2.5 text-sm hover:brightness-110 transition disabled:opacity-40"
+          className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2.5 text-sm hover:brightness-110 transition"
         >
           <Play size={15} />
           Start Run

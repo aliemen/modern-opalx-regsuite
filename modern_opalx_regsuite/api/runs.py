@@ -76,23 +76,26 @@ async def _run_pipeline_async(
 
     # Broadcast log lines while the pipeline runs (log tailer task).
     tailer_task = asyncio.create_task(_log_tailer(active))
+    final_status = "failed"
 
     try:
         meta = await loop.run_in_executor(None, _sync)
         final_status = meta.status
     except Exception as exc:
-        final_status = "failed"
         if active.log_path:
-            with active.log_path.open("a", encoding="utf-8") as f:
-                f.write(f"\n[error] Unhandled exception: {exc}\n")
+            try:
+                active.log_path.parent.mkdir(parents=True, exist_ok=True)
+                with active.log_path.open("a", encoding="utf-8") as f:
+                    f.write(f"\n[error] Unhandled exception: {exc}\n")
+            except Exception:
+                pass
     finally:
         tailer_task.cancel()
         try:
             await tailer_task
         except asyncio.CancelledError:
             pass
-
-    await release_run_slot(final_status)
+        await release_run_slot(final_status)
 
 
 async def _log_tailer(active: ActiveRun) -> None:

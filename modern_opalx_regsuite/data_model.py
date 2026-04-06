@@ -4,19 +4,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Iterable, List, Optional
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, AfterValidator, Field
 
 
-def _ensure_utc(v: object) -> object:
+def _ensure_utc(v: datetime) -> datetime:
     """Coerce a naive datetime to UTC so aware/naive comparisons never raise."""
-    if isinstance(v, datetime) and v.tzinfo is None:
+    if v.tzinfo is None:
         return v.replace(tzinfo=timezone.utc)
     return v
 
 
 # Use this instead of bare `datetime` for any timestamp field that may be
 # serialised/deserialised from JSON files written before timezone support.
-UtcDatetime = Annotated[datetime, BeforeValidator(_ensure_utc)]
+# AfterValidator runs once Pydantic has already parsed the string → datetime.
+UtcDatetime = Annotated[datetime, AfterValidator(_ensure_utc)]
 
 
 class UnitTestCase(BaseModel):

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..config import load_config
+from ..data_model import runs_index_path
 from .auth import REFRESH_COOKIE_NAME, TokenResponse
 from .tokens import create_access_token, verify_refresh_token
 from .branches import router as branches_router
@@ -66,7 +67,7 @@ def _heal_index_entry(data_root: Path, meta: dict) -> None:
     run_id = meta.get("run_id", "")
     if not (branch and arch and run_id):
         return
-    idx_path = data_root / "runs" / branch / arch / "runs_index.json"
+    idx_path = runs_index_path(data_root, branch, arch)
     if not idx_path.is_file():
         return
     try:

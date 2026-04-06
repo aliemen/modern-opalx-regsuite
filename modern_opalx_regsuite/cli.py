@@ -10,7 +10,7 @@ import typer
 
 from . import config as config_mod
 from .config import SuiteConfig
-from .data_model import run_dir, runs_index_path
+from .data_model import RunIndexEntry, RunMeta, branches_index_path, run_dir, runs_index_path
 from .runner import run_pipeline
 from .sitegen import generate_site
 
@@ -323,6 +323,86 @@ def user_del(
     else:
         typer.echo(f"User '{username}' not found.", err=True)
         raise typer.Exit(1)
+
+
+@app.command("rebuild-indexes")
+def rebuild_indexes(
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml (defaults to ./config.toml or $OPALX_REGSUITE_CONFIG).",
+    ),
+) -> None:
+    """Rebuild runs-index/ and branches.json from all run-meta.json files on disk.
+
+    Run this once after pointing data_root at an existing data directory that
+    pre-dates the index files (e.g. legacy test data).
+    """
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+    runs_root = data_root / "runs"
+
+    if not runs_root.is_dir():
+        typer.echo(f"No runs directory found at {runs_root}")
+        raise typer.Exit(0)
+
+    # Collect all valid metas grouped by (branch, arch).
+    from collections import defaultdict
+    by_branch_arch: dict[tuple[str, str], list[RunMeta]] = defaultdict(list)
+    total = 0
+
+    for meta_path in sorted(runs_root.glob("*/*/*/run-meta.json")):
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            meta = RunMeta.model_validate(data)
+            by_branch_arch[(meta.branch, meta.arch)].append(meta)
+            total += 1
+        except Exception as exc:
+            typer.echo(f"  Skipping {meta_path}: {exc}", err=True)
+
+    if total == 0:
+        typer.echo("No valid run-meta.json files found.")
+        raise typer.Exit(0)
+
+    typer.echo(f"Found {total} run(s) across {len(by_branch_arch)} branch/arch pair(s).")
+
+    branches: dict[str, list[str]] = {}
+
+    for (branch, arch), metas in sorted(by_branch_arch.items()):
+        metas.sort(key=lambda m: m.started_at, reverse=True)
+        entries = [
+            RunIndexEntry(
+                branch=m.branch,
+                arch=m.arch,
+                run_id=m.run_id,
+                started_at=m.started_at,
+                finished_at=m.finished_at,
+                status=m.status,
+                unit_tests_total=m.unit_tests_total,
+                unit_tests_failed=m.unit_tests_failed,
+                regression_total=m.regression_total,
+                regression_passed=m.regression_passed,
+                regression_failed=m.regression_failed,
+                regression_broken=m.regression_broken,
+            )
+            for m in metas
+        ]
+        idx_path = runs_index_path(data_root, branch, arch)
+        idx_path.parent.mkdir(parents=True, exist_ok=True)
+        with idx_path.open("w", encoding="utf-8") as f:
+            json.dump([e.model_dump(mode="json") for e in entries], f, indent=2, default=str)
+        typer.echo(f"  {branch}/{arch}: {len(entries)} run(s) → {idx_path}")
+
+        archs = set(branches.get(branch, []))
+        archs.add(arch)
+        branches[branch] = sorted(archs)
+
+    branches_path = branches_index_path(data_root)
+    with branches_path.open("w", encoding="utf-8") as f:
+        json.dump(branches, f, indent=2)
+    typer.echo(f"Branches index written to {branches_path}")
 
 
 if __name__ == "__main__":

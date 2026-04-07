@@ -2,4 +2,5 @@
 modern_opalx_regsuite.egg-info/
 config.toml
 site/
-*/__pycache__/
+**/__pycache__/
+users.json

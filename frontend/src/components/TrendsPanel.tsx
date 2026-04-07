@@ -105,7 +105,7 @@ export function TrendsPanel({ archs }: { archs: string[] }) {
                 fontSize: 12,
               }}
               labelStyle={{ color: colors.fg }}
-              formatter={(value: string | number) => [`${Number(value).toFixed(1)}%`]}
+              formatter={(value) => value != null ? `${Number(value).toFixed(1)}%` : ""}
             />
             <Legend wrapperStyle={{ fontSize: 12, color: colors.muted }} />
             <Line

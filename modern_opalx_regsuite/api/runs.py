@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from ..config import SuiteConfig
 from ..data_model import run_dir
-from ..runner import run_pipeline
+from .coordinator import get_coordinator
 from .deps import get_config, require_auth
 from .state import (
     ActiveRun,
@@ -25,7 +25,6 @@ from .state import (
     get_active_run_by_id,
     get_all_active_runs,
     get_queue_snapshot,
-    release_run_slot,
     resolve_machine_id,
     subscribe_sse,
 )
@@ -82,119 +81,6 @@ class QueueStateResponse(BaseModel):
 
 def _run_id_from_time() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
-
-
-async def _run_pipeline_async(
-    cfg: SuiteConfig,
-    active: ActiveRun,
-    skip_unit: bool,
-    skip_regression: bool,
-) -> None:
-    """Execute the pipeline in a thread pool so the event loop stays responsive."""
-    loop = asyncio.get_running_loop()
-
-    def _sync():
-        return run_pipeline(
-            cfg,
-            branch=active.branch,
-            arch=active.arch,
-            run_id=active.run_id,
-            skip_unit=skip_unit,
-            skip_regression=skip_regression,
-            cancel_event=active.cancel_event,
-            execution_host=active.execution_host,
-            execution_user=active.execution_user,
-        )
-
-    # Broadcast log lines while the pipeline runs (log tailer task).
-    tailer_task = asyncio.create_task(_log_tailer(active))
-    final_status = "failed"
-
-    try:
-        meta = await loop.run_in_executor(None, _sync)
-        final_status = meta.status
-    except Exception as exc:
-        if active.log_path:
-            try:
-                active.log_path.parent.mkdir(parents=True, exist_ok=True)
-                with active.log_path.open("a", encoding="utf-8") as f:
-                    f.write(f"\n[error] Unhandled exception: {exc}\n")
-            except Exception:
-                pass
-    finally:
-        tailer_task.cancel()
-        try:
-            await tailer_task
-        except asyncio.CancelledError:
-            pass
-
-        # Release slot and auto-start next queued run.
-        next_queued = await release_run_slot(active.machine_id, final_status)
-        if next_queued is not None:
-            await _start_queued_run(next_queued)
-
-
-async def _start_queued_run(queued: QueuedRun) -> None:
-    """Promote a queued run to active and start it."""
-    next_active = await acquire_run_slot(
-        run_id=queued.run_id,
-        branch=queued.branch,
-        arch=queued.arch,
-        machine_id=queued.machine_id,
-        execution_host=queued.execution_host,
-        execution_user=queued.execution_user,
-        log_path=queued.log_path,
-    )
-    if next_active is not None:
-        # Carry over the cancel event from the queued run.
-        next_active.cancel_event = queued.cancel_event
-        asyncio.create_task(
-            _run_pipeline_async(
-                queued.cfg,  # type: ignore[arg-type]
-                next_active,
-                queued.skip_unit,
-                queued.skip_regression,
-            )
-        )
-
-
-async def _log_tailer(active: ActiveRun) -> None:
-    """Poll pipeline.log for new lines and push them to SSE subscriber queues."""
-    import re
-    _PHASE_RE = re.compile(r"^== PHASE: (\S+?) ==")
-
-    line_no = 0
-
-    def _push_new_lines() -> None:
-        nonlocal line_no
-        if not (active.log_path and active.log_path.exists()):
-            return
-        lines = active.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        while line_no < len(lines):
-            ln = lines[line_no]
-            m = _PHASE_RE.match(ln)
-            if m:
-                phase_val = m.group(1).split()[0]
-                active.phase = phase_val
-                event: dict = {"type": "phase", "phase": phase_val, "id": line_no}
-            else:
-                event = {"type": "log", "line": ln, "id": line_no}
-            for q in list(active.sse_queues):
-                try:
-                    q.put_nowait(event)
-                except asyncio.QueueFull:
-                    pass
-            line_no += 1
-
-    try:
-        while True:
-            _push_new_lines()
-            await asyncio.sleep(0.5)
-    except asyncio.CancelledError:
-        # Final sweep: capture any lines written after the last poll so that
-        # the last test's END event reaches SSE clients before release_run_slot
-        # sends the final status event.
-        _push_new_lines()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -292,9 +178,10 @@ async def trigger_run(
         log_path=log_path,
     )
     if active is not None:
-        # Machine is free — start immediately.
+        # Machine is free — start immediately via the coordinator.
+        coordinator = get_coordinator()
         asyncio.create_task(
-            _run_pipeline_async(cfg, active, body.skip_unit, body.skip_regression)
+            coordinator.run_pipeline_async(cfg, active, body.skip_unit, body.skip_regression)
         )
         return TriggerResponse(run_id=run_id)
     else:

@@ -941,6 +941,7 @@ def run_pipeline(
     cancel_event: Optional[threading.Event] = None,
     execution_host: Optional[str] = None,
     execution_user: Optional[str] = None,
+    repo_locks: Optional[dict[str, threading.Lock]] = None,
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
 
@@ -948,6 +949,10 @@ def run_pipeline(
     interrupt the pipeline between phases.  The event is checked after git
     updates, after cmake+build, after unit tests, and between each regression
     test.
+
+    Pass *repo_locks* (a dict mapping absolute repo path to
+    :class:`threading.Lock`) to serialise git operations on shared local
+    repositories when multiple pipelines run concurrently.
     """
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1022,31 +1027,57 @@ def run_pipeline(
         _phase(paths.pipeline_log_path, "git")
 
         # Local git update (always, for commit hash tracking).
-        _append_pipeline_line(
-            paths.pipeline_log_path, f"Updating OPALX repo at {opalx_repo}"
-        )
-        opalx_git_ok = _git_update_repo(
-            repo_path=opalx_repo,
-            branch=branch,
-            pipeline_log_path=paths.pipeline_log_path,
-        )
-        _append_pipeline_line(
-            paths.pipeline_log_path,
-            f"Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch})",
-        )
-        reg_git_ok = _git_update_repo(
-            repo_path=regtests_repo,
-            branch=cfg.regtests_branch,
-            pipeline_log_path=paths.pipeline_log_path,
-        )
-        meta.opalx_commit = _git_head_short(opalx_repo)
-        meta.tests_repo_commit = _git_head_short(regtests_repo)
+        # Acquire per-repo locks so concurrent pipelines don't corrupt the
+        # shared working trees with overlapping git operations.
+        _opalx_lock = (repo_locks or {}).get(str(opalx_repo))
+        _regtests_lock = (repo_locks or {}).get(str(regtests_repo))
+
+        if _opalx_lock:
+            _opalx_lock.acquire()
+        try:
+            _append_pipeline_line(
+                paths.pipeline_log_path, f"Updating OPALX repo at {opalx_repo}"
+            )
+            opalx_git_ok = _git_update_repo(
+                repo_path=opalx_repo,
+                branch=branch,
+                pipeline_log_path=paths.pipeline_log_path,
+            )
+            meta.opalx_commit = _git_head_short(opalx_repo)
+            # For remote runs, also resolve the HTTPS URL while we hold the lock.
+            opalx_url_resolved = None
+            if is_remote:
+                opalx_url_resolved = _get_repo_url(opalx_repo, cfg.opalx_repo_url)
+        finally:
+            if _opalx_lock:
+                _opalx_lock.release()
+
+        if _regtests_lock:
+            _regtests_lock.acquire()
+        try:
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch})",
+            )
+            reg_git_ok = _git_update_repo(
+                repo_path=regtests_repo,
+                branch=cfg.regtests_branch,
+                pipeline_log_path=paths.pipeline_log_path,
+            )
+            meta.tests_repo_commit = _git_head_short(regtests_repo)
+            regtests_url_resolved = None
+            if is_remote:
+                regtests_url_resolved = _get_repo_url(regtests_repo, cfg.regtests_repo_url)
+        finally:
+            if _regtests_lock:
+                _regtests_lock.release()
+
         _write_json(paths.meta_path, meta.model_dump())
 
-        # Remote: clone or update repos via HTTPS.
+        # Remote: clone or update repos via HTTPS (no local lock needed).
         if is_remote and remote is not None:
-            opalx_url = _get_repo_url(opalx_repo, cfg.opalx_repo_url)
-            regtests_url = _get_repo_url(regtests_repo, cfg.regtests_repo_url)
+            opalx_url = opalx_url_resolved  # type: ignore[assignment]
+            regtests_url = regtests_url_resolved  # type: ignore[assignment]
             _append_pipeline_line(
                 paths.pipeline_log_path,
                 f"[remote] Cloning/updating OPALX on {ac.remote_host}",

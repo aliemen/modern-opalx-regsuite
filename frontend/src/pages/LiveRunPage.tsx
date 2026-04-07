@@ -71,12 +71,12 @@ function TestTrackerPanel({
     <div className="flex flex-col h-[60vh]">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-medium text-muted uppercase tracking-wider">
-          {inRegression ? "Regression Tests" : `Phase: ${phase || "\u2026"}`}
+          {inRegression ? "Regression Tests" : `Phase: ${phase || "…"}`}
         </p>
         {tests.length > 0 && (
           <p className="text-xs text-muted tabular-nums">
-            <span className="text-passed">{passedCount}\u2713</span>
-            {failedCount > 0 && <span className="text-failed ml-1.5">{failedCount}\u2717</span>}
+            <span className="text-passed">{passedCount}&#x2713;</span>
+            {failedCount > 0 && <span className="text-failed ml-1.5">{failedCount}&#x2717;</span>}
             {brokenCount > 0 && <span className="text-broken ml-1.5">{brokenCount}?</span>}
             {runningCount > 0 && <span className="text-accent ml-1.5">{runningCount} running</span>}
           </p>
@@ -95,7 +95,7 @@ function TestTrackerPanel({
           </span>
           <span className="text-muted tabular-nums">
             {failedCount > 0 && `${failedCount} failed`}
-            {failedCount > 0 && brokenCount > 0 && " \u00b7 "}
+            {failedCount > 0 && brokenCount > 0 && " · "}
             {brokenCount > 0 && `${brokenCount} broken`}
             {failedCount === 0 && brokenCount === 0 && "all passed"}
           </span>
@@ -108,7 +108,7 @@ function TestTrackerPanel({
             {finalStatus
               ? "No regression tests ran."
               : inRegression
-              ? "Waiting for first test\u2026"
+              ? "Waiting for first test…"
               : "Tests will appear when the regression phase starts."}
           </p>
         ) : (
@@ -118,7 +118,7 @@ function TestTrackerPanel({
                 ? fmtMs(now - test.startTime)
                 : test.durationMs != null
                 ? fmtMs(test.durationMs)
-                : "\u2014";
+                : "—";
 
             const dotColor =
               test.status === "running"
@@ -277,7 +277,7 @@ export function LiveRunPage() {
   }
 
   if (isLoading && !routeRunId) {
-    return <div className="p-8 text-muted">Loading\u2026</div>;
+    return <div className="p-8 text-muted">Loading…</div>;
   }
   if (!effectiveRun) {
     return <div className="p-8 text-muted">No active run.</div>;
@@ -292,7 +292,7 @@ export function LiveRunPage() {
             {effectiveRun.branch || "..."} / {effectiveRun.arch || "..."}
           </h1>
           <p className="text-muted text-sm">
-            {effectiveRun.run_id} \u00b7 phase: <span className="text-accent">{phase}</span> \u00b7 {elapsed}
+            {effectiveRun.run_id} · phase: <span className="text-accent">{phase}</span> · {elapsed}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -304,7 +304,7 @@ export function LiveRunPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-failed border border-failed/40 rounded-md hover:bg-failed/10 transition disabled:opacity-50"
             >
               <XCircle size={15} />
-              {cancelling ? "Cancelling\u2026" : "Cancel"}
+              {cancelling ? "Cancelling…" : "Cancel"}
             </button>
           )}
         </div>

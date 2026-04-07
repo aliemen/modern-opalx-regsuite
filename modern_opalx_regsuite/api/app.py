@@ -17,6 +17,7 @@ from .tokens import create_access_token, verify_refresh_token
 from .branches import router as branches_router
 from .results import router as results_router
 from .runs import router as runs_router
+from .coordinator import shutdown_coordinator
 from .state import clear_all_state, get_active_run
 from .stream import router as stream_router
 
@@ -32,6 +33,8 @@ async def _lifespan(app: FastAPI):
         pass  # Config might not be initialised yet; non-fatal.
     clear_all_state()
     yield
+    # Shutdown the pipeline thread pool on exit.
+    shutdown_coordinator()
 
 
 def _heal_stale_runs(data_root: Path) -> None:

@@ -105,6 +105,14 @@ export function LogViewer({ runId, onStatusChange, onPhaseChange, onLogLine }: P
     return () => {
       if (flushTimer.current) clearInterval(flushTimer.current);
       es.close();
+      // Reset all internal state so the next run starts clean.
+      bufRef.current = [];
+      linesRef.current = [];
+      truncatedRef.current = 0;
+      hasLinesRef.current = false;
+      setHasLines(false);
+      setTruncated(0);
+      if (preRef.current) preRef.current.textContent = "";
     };
   }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
 

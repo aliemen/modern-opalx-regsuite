@@ -209,9 +209,29 @@ class RemoteExecutor:
     # ── File transfer ────────────────────────────────────────────────────
 
     def fetch_file(self, remote_path: str, local_path: Path) -> None:
-        """Download a single file from the remote via SFTP."""
+        """Download a single file from the remote via scp.
+
+        Fabric's conn.get() reuses a cached Paramiko SFTP channel that can
+        end up in a bad state after run_command() calls that use custom
+        out_stream/err_stream objects, causing spurious "Garbage packet
+        received" errors with Paramiko 4.x.  Using a subprocess scp call
+        creates a completely independent transfer that is unaffected by the
+        Fabric connection state.
+        """
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn.get(remote_path, str(local_path))
+        cmd = [
+            "scp",
+            "-i", str(self._key_path),
+            "-P", str(self._port),
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            f"{self._user}@{self._host}:{remote_path}",
+            str(local_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"scp failed (rc={result.returncode}): {stderr}")
 
     # ── Directory helpers ────────────────────────────────────────────────
 

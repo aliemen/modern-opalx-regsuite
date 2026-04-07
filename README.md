@@ -1,10 +1,13 @@
+Disclaimer: There is a lot of generated code in here (since this was initially planned to be a small internal testing tool that got kinda out of hand after how good LLMs got...), so don't trust anything that's happening in here. It seems to work fine and from time to time I find security vulnerabilities that I patch, but I haven't reviewed the whole code yet - so no guarantees for anythings! 
+
 ## modern-opalx-regsuite
 
 Modern, portable regression test orchestration and web dashboard for OPALX.
 
 ### Features
 
-- **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), and results browsing.
+- **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), results browsing, dashboard statistics, and live queue display.
+- **Per-machine run queuing**: Runs are queued per machine instead of rejected. Local and remote machines can run in parallel; only one run per machine at a time.
 - **Config-driven**: `config.toml` with per-architecture overrides (`[[arch_configs]]`) and optional Slurm support.
 - **File-based data model**: JSON + logs + SVG plots on disk, no database. Results live in a separate git repo (`opalx-regsuite-test-data`).
 - **Remote execution**: SSH into a remote machine (e.g. a GPU server) for cmake, build, and test runs. Results are fetched back and processed locally.
@@ -236,13 +239,42 @@ data_root/
 
 ---
 
+### Run queuing
+
+Runs are queued per machine rather than rejected when a machine is busy:
+
+- **Local machine**: All architectures with `execution_mode = "local"` (or `"slurm"`) share a
+  single "local" slot. Only one local run at a time.
+- **Remote machines**: Architectures with `execution_mode = "remote"` are grouped by their
+  `remote_host` value. Two archs pointing to the same host share a queue.
+- **Cross-machine parallelism**: A local run and a remote run (or two remote runs on different
+  hosts) can execute simultaneously.
+- **Auto-start**: When a run finishes, the next queued run on the same machine starts
+  automatically.
+- **Queue visibility**: The dashboard shows a live "Running Jobs & Queue" panel. Queued runs
+  can be cancelled before they start.
+- **Machine info**: Each run records which machine it ran on. The run detail page shows
+  "Executed On" (e.g. `aliemen@192.168.1.223` for remote, `Local` for local).
+
+Queued runs are held in memory. If the server restarts, queued (not-yet-started) runs are
+lost. Already-running runs that were interrupted are healed to "failed" on the next startup.
+
+---
+
+### Deployment notes
+
+The server **must** run with a single uvicorn worker (`--workers 1`, the default) because
+run queue state is held in process memory. This is enforced by the CLI's `serve` command.
+
+---
+
 ### Web pages
 
 | Route | Description |
 |---|---|
-| `/` | Dashboard — latest run per branch/arch |
-| `/trigger` | Start a new run |
-| `/live` | Live log streaming for the active run |
+| `/` | Dashboard — latest run per branch/arch, stats panel, live queue display |
+| `/trigger` | Start a new run (queues if machine is busy) |
+| `/live/:runId?` | Live log streaming for a specific run (or the most recent active run) |
 | `/results/:branch/:arch` | Run history table |
-| `/results/:branch/:arch/:run_id` | Detailed results with plots and metrics |
+| `/results/:branch/:arch/:run_id` | Detailed results with plots, metrics, and machine info |
 | `/settings` | SSH key management |

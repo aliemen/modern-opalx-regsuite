@@ -58,7 +58,7 @@ export default function App() {
           <Route element={<AuthGuard />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/trigger" element={<TriggerPage />} />
-            <Route path="/live" element={<LiveRunPage />} />
+            <Route path="/live/:runId?" element={<LiveRunPage />} />
             <Route path="/results/:branch/:arch" element={<RunListPage />} />
             <Route path="/results/:branch/:arch/:runId" element={<RunDetailPage />} />
             <Route path="/settings" element={<SettingsPage />} />

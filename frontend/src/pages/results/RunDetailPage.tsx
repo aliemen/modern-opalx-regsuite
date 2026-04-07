@@ -250,6 +250,14 @@ export function RunDetailPage() {
           <p className="text-fg">{duration(meta.started_at, meta.finished_at)}</p>
         </div>
         <div className="space-y-1">
+          <p className="text-muted text-xs">Executed On</p>
+          <p className="text-fg font-mono text-sm">
+            {meta.execution_host && meta.execution_host !== "local"
+              ? `${meta.execution_user ?? ""}${meta.execution_user ? "@" : ""}${meta.execution_host}`
+              : "Local"}
+          </p>
+        </div>
+        <div className="space-y-1">
           <p className="text-muted text-xs">Started</p>
           <p className="text-fg">{fmtDate(meta.started_at)}</p>
         </div>

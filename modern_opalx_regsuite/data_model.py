@@ -100,6 +100,9 @@ class RunMeta(BaseModel):
     opalx_commit: Optional[str] = None
     tests_repo_commit: Optional[str] = None
 
+    execution_host: Optional[str] = None  # "local" or remote IP/hostname
+    execution_user: Optional[str] = None  # SSH user for remote runs
+
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
 
@@ -122,6 +125,7 @@ class RunIndexEntry(BaseModel):
     started_at: UtcDatetime
     finished_at: Optional[UtcDatetime]
     status: str
+    execution_host: Optional[str] = None
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
     regression_total: int = 0

@@ -17,7 +17,7 @@ from .tokens import create_access_token, verify_refresh_token
 from .branches import router as branches_router
 from .results import router as results_router
 from .runs import router as runs_router
-from .state import clear_active_run, get_active_run
+from .state import clear_all_state, get_active_run
 from .stream import router as stream_router
 
 
@@ -30,7 +30,7 @@ async def _lifespan(app: FastAPI):
         _heal_stale_runs(data_root)
     except Exception:
         pass  # Config might not be initialised yet; non-fatal.
-    clear_active_run()
+    clear_all_state()
     yield
 
 
@@ -109,6 +109,9 @@ def create_app() -> FastAPI:
     app.include_router(stream_router)
     app.include_router(results_router)
     app.include_router(branches_router)
+
+    from .stats import router as stats_router
+    app.include_router(stats_router)
 
     # Auth router — login, logout endpoints.
     from .auth import router as auth_router

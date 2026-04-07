@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Play } from "lucide-react";
+import { RefreshCw, Play, Info } from "lucide-react";
 import {
-  getCurrentRun,
   getArchConfigs,
   getOpalxBranches,
   getRegtestsBranches,
@@ -19,6 +18,7 @@ export function TriggerPage() {
   const [skipUnit, setSkipUnit] = useState(false);
   const [skipRegression, setSkipRegression] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queuedInfo, setQueuedInfo] = useState<{ runId: string; position: number } | null>(null);
 
   const {
     data: opalxBranches,
@@ -39,30 +39,22 @@ export function TriggerPage() {
     queryFn: getArchConfigs,
   });
 
-  const { data: activeRun } = useQuery({
-    queryKey: ["current-run"],
-    queryFn: getCurrentRun,
-    refetchInterval: 5000,
-  });
-
-  const isRunning = activeRun?.status === "running";
-
-  // If a run is already in progress, go straight to the live view.
-  useEffect(() => {
-    if (isRunning) navigate("/live", { replace: true });
-  }, [isRunning, navigate]);
-
   async function handleStart() {
     setError(null);
+    setQueuedInfo(null);
     try {
-      await triggerRun({
+      const res = await triggerRun({
         branch: opalxBranch,
         arch,
         regtests_branch: regtestsBranch,
         skip_unit: skipUnit,
         skip_regression: skipRegression,
       });
-      navigate("/live");
+      if (res.queued) {
+        setQueuedInfo({ runId: res.run_id, position: res.position ?? 1 });
+      } else {
+        navigate(`/live/${res.run_id}`);
+      }
     } catch (e: unknown) {
       const msg =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
@@ -164,6 +156,24 @@ export function TriggerPage() {
         </div>
 
         {error && <p className="text-failed text-sm">{error}</p>}
+
+        {queuedInfo && (
+          <div className="flex items-start gap-2 text-sm bg-accent/10 border border-accent/30 rounded-md px-4 py-3 text-accent">
+            <Info size={15} className="mt-0.5 shrink-0" />
+            <div>
+              <p>
+                Run queued at position #{queuedInfo.position}. It will start
+                automatically when the machine becomes available.
+              </p>
+              <button
+                onClick={() => navigate("/")}
+                className="text-xs underline mt-1 hover:brightness-110"
+              >
+                View queue on dashboard
+              </button>
+            </div>
+          </div>
+        )}
 
         <button
           onClick={handleStart}

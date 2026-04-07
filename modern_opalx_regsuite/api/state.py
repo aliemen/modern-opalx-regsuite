@@ -1,12 +1,22 @@
-"""In-process singleton tracking the one active pipeline run.
+"""In-process per-machine run queues.
 
 The server MUST run with a single uvicorn worker (--workers 1) for this to work
 correctly, since the state lives in process memory.
+
+Concurrency model:
+- Each "machine" (identified by ``machine_id``) has at most one active run.
+- ``machine_id`` is ``"local"`` for local/slurm archs, or the ``remote_host``
+  value for remote archs.
+- Different machines can run in parallel.
+- When a machine is busy, new runs are queued (FIFO) and auto-started when the
+  slot is released.
 """
 from __future__ import annotations
 
 import asyncio
 import threading
+import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +28,10 @@ class ActiveRun:
     run_id: str
     branch: str
     arch: str
-    started_at: datetime
+    machine_id: str
+    execution_host: str
+    execution_user: Optional[str] = None
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "running"  # running | passed | failed | cancelled
     phase: str = "git"       # git | cmake | build | unit | regression | done
     log_path: Optional[Path] = None
@@ -26,8 +39,33 @@ class ActiveRun:
     sse_queues: list[asyncio.Queue] = field(default_factory=list)
 
 
-# Module-level state.
-_active_run: Optional[ActiveRun] = None
+@dataclass
+class QueuedRun:
+    queue_id: str
+    run_id: str
+    branch: str
+    arch: str
+    machine_id: str
+    execution_host: str
+    execution_user: Optional[str] = None
+    queued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    cfg: object = None  # SuiteConfig snapshot
+    skip_unit: bool = False
+    skip_regression: bool = False
+    log_path: Optional[Path] = None
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+
+@dataclass
+class MachineQueue:
+    machine_id: str
+    active_run: Optional[ActiveRun] = None
+    queue: deque[QueuedRun] = field(default_factory=deque)
+
+
+# ── Module-level state ──────────────────────────────────────────────────────
+
+_machines: dict[str, MachineQueue] = {}
 _run_lock: Optional[asyncio.Lock] = None
 
 
@@ -38,60 +76,233 @@ def _get_lock() -> asyncio.Lock:
     return _run_lock
 
 
-def get_active_run() -> Optional[ActiveRun]:
-    return _active_run
+def _get_machine(machine_id: str) -> MachineQueue:
+    if machine_id not in _machines:
+        _machines[machine_id] = MachineQueue(machine_id=machine_id)
+    return _machines[machine_id]
 
+
+# ── Machine ID resolution ───────────────────────────────────────────────────
+
+def resolve_machine_id(cfg: object, arch: str) -> tuple[str, Optional[str]]:
+    """Return ``(machine_id, remote_user)`` for *arch*.
+
+    For local/slurm archs: ``("local", None)``.
+    For remote archs: ``(remote_host, remote_user)``.
+    """
+    ac = cfg.get_arch_config(arch)  # type: ignore[union-attr]
+    if ac.execution_mode == "remote" and ac.remote_host:
+        return (ac.remote_host, ac.remote_user)
+    return ("local", None)
+
+
+# ── Slot acquisition & release ──────────────────────────────────────────────
 
 async def acquire_run_slot(
     run_id: str,
     branch: str,
     arch: str,
-    log_path: Path,
+    machine_id: str,
+    execution_host: str,
+    execution_user: Optional[str],
+    log_path: Optional[Path],
 ) -> Optional[ActiveRun]:
-    """Try to acquire the run slot. Returns None if another run is active."""
+    """Try to acquire the run slot for *machine_id*.
+
+    Returns the new ``ActiveRun`` if the slot was free, or ``None`` if the
+    machine is busy.
+    """
     lock = _get_lock()
     async with lock:
-        global _active_run
-        if _active_run is not None and _active_run.status == "running":
+        mq = _get_machine(machine_id)
+        if mq.active_run is not None and mq.active_run.status == "running":
             return None
-        _active_run = ActiveRun(
+        active = ActiveRun(
             run_id=run_id,
             branch=branch,
             arch=arch,
-            started_at=datetime.now(timezone.utc),
+            machine_id=machine_id,
+            execution_host=execution_host,
+            execution_user=execution_user,
             log_path=log_path,
         )
-        return _active_run
+        mq.active_run = active
+        return active
 
 
-async def release_run_slot(final_status: str) -> None:
-    """Mark the run done and release the slot (keeps the object for one last status read)."""
-    global _active_run
-    if _active_run is not None:
-        _active_run.status = final_status
-        _active_run.phase = "done"
-        # Notify all SSE subscribers of the final status.
-        for q in _active_run.sse_queues:
-            await q.put({"type": "status", "status": final_status})
-        _active_run.sse_queues.clear()
-        # We intentionally leave _active_run set so the /current endpoint can
-        # return the final state briefly; it is cleared on the next trigger.
+async def enqueue_run(queued: QueuedRun) -> int:
+    """Append *queued* to the machine's queue.  Returns the 1-based position."""
+    lock = _get_lock()
+    async with lock:
+        mq = _get_machine(queued.machine_id)
+        mq.queue.append(queued)
+        return len(mq.queue)
 
 
-def clear_active_run() -> None:
-    """Called at startup to reset any stale running state."""
-    global _active_run
-    _active_run = None
+async def release_run_slot(
+    machine_id: str,
+    final_status: str,
+) -> Optional[QueuedRun]:
+    """Mark the active run done and pop the next queued run (if any).
+
+    Atomically releases the slot and dequeues under the same lock so no race
+    can occur between a new ``trigger_run`` and the dequeue.
+    """
+    lock = _get_lock()
+    async with lock:
+        mq = _get_machine(machine_id)
+        if mq.active_run is not None:
+            mq.active_run.status = final_status
+            mq.active_run.phase = "done"
+            for q in mq.active_run.sse_queues:
+                try:
+                    q.put_nowait({"type": "status", "status": final_status})
+                except asyncio.QueueFull:
+                    pass
+            mq.active_run.sse_queues.clear()
+            # Keep the object briefly for the /current endpoint.
+
+        # Pop next queued run.
+        if mq.queue:
+            return mq.queue.popleft()
+        return None
 
 
-def subscribe_sse() -> asyncio.Queue:
-    """Register a new SSE client queue on the active run, or return a closed one."""
+# ── Querying state ──────────────────────────────────────────────────────────
+
+def get_active_run() -> Optional[ActiveRun]:
+    """Backward-compat: return the first active run found (for navbar)."""
+    for mq in _machines.values():
+        if mq.active_run is not None and mq.active_run.status == "running":
+            return mq.active_run
+    return None
+
+
+def get_all_active_runs() -> list[ActiveRun]:
+    """Return all currently running ``ActiveRun`` objects."""
+    return [
+        mq.active_run
+        for mq in _machines.values()
+        if mq.active_run is not None and mq.active_run.status == "running"
+    ]
+
+
+def get_active_run_by_id(run_id: str) -> Optional[ActiveRun]:
+    """Find an active run by *run_id* across all machines."""
+    for mq in _machines.values():
+        if mq.active_run is not None and mq.active_run.run_id == run_id:
+            return mq.active_run
+    return None
+
+
+def is_run_queued(run_id: str) -> bool:
+    """Check if *run_id* is in any machine's queue."""
+    for mq in _machines.values():
+        for qr in mq.queue:
+            if qr.run_id == run_id:
+                return True
+    return False
+
+
+def get_queue_snapshot() -> list[dict]:
+    """Return a serialisable snapshot of all machines with activity."""
+    result = []
+    for mq in _machines.values():
+        active = mq.active_run
+        if active is None and not mq.queue:
+            continue
+        active_dict = None
+        if active is not None and active.status == "running":
+            active_dict = {
+                "run_id": active.run_id,
+                "branch": active.branch,
+                "arch": active.arch,
+                "status": active.status,
+                "phase": active.phase,
+                "started_at": active.started_at.isoformat(),
+                "machine_id": active.machine_id,
+            }
+        queue_list = [
+            {
+                "queue_id": qr.queue_id,
+                "run_id": qr.run_id,
+                "branch": qr.branch,
+                "arch": qr.arch,
+                "queued_at": qr.queued_at.isoformat(),
+            }
+            for qr in mq.queue
+        ]
+        result.append({
+            "machine_id": mq.machine_id,
+            "active_run": active_dict,
+            "queue": queue_list,
+        })
+    return result
+
+
+# ── SSE subscription ────────────────────────────────────────────────────────
+
+def subscribe_sse(run_id: Optional[str] = None) -> asyncio.Queue:
+    """Register a new SSE client queue on the active run matching *run_id*.
+
+    If *run_id* is ``None``, falls back to the first active run (backward compat).
+    """
     q: asyncio.Queue = asyncio.Queue(maxsize=10_000)
-    if _active_run is not None and _active_run.status == "running":
-        _active_run.sse_queues.append(q)
+    if run_id is not None:
+        run = get_active_run_by_id(run_id)
+        if run is not None and run.status == "running":
+            run.sse_queues.append(q)
+        return q
+    # Backward compat: attach to first active run.
+    run = get_active_run()
+    if run is not None:
+        run.sse_queues.append(q)
     return q
 
 
-def unsubscribe_sse(q: asyncio.Queue) -> None:
-    if _active_run is not None and q in _active_run.sse_queues:
-        _active_run.sse_queues.remove(q)
+def unsubscribe_sse(q: asyncio.Queue, run_id: Optional[str] = None) -> None:
+    """Detach *q* from the run's SSE queue list."""
+    if run_id is not None:
+        run = get_active_run_by_id(run_id)
+        if run is not None and q in run.sse_queues:
+            run.sse_queues.remove(q)
+        return
+    # Backward compat: search all machines.
+    for mq in _machines.values():
+        if mq.active_run is not None and q in mq.active_run.sse_queues:
+            mq.active_run.sse_queues.remove(q)
+            return
+
+
+# ── Cancellation ────────────────────────────────────────────────────────────
+
+async def cancel_active_run(run_id: str) -> bool:
+    """Set the cancel event on the active run matching *run_id*."""
+    for mq in _machines.values():
+        if (
+            mq.active_run is not None
+            and mq.active_run.run_id == run_id
+            and mq.active_run.status == "running"
+        ):
+            mq.active_run.cancel_event.set()
+            return True
+    return False
+
+
+async def cancel_queued_run(queue_id: str) -> bool:
+    """Remove a queued run by *queue_id*.  Returns True if found and removed."""
+    lock = _get_lock()
+    async with lock:
+        for mq in _machines.values():
+            for i, qr in enumerate(mq.queue):
+                if qr.queue_id == queue_id:
+                    del mq.queue[i]
+                    return True
+        return False
+
+
+# ── Cleanup ─────────────────────────────────────────────────────────────────
+
+def clear_all_state() -> None:
+    """Called at startup to reset any stale in-memory state."""
+    _machines.clear()

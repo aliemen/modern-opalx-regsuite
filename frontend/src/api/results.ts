@@ -59,6 +59,8 @@ export interface RunMeta {
   status: string;
   opalx_commit: string | null;
   tests_repo_commit: string | null;
+  execution_host: string | null;
+  execution_user: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
   regression_total: number;

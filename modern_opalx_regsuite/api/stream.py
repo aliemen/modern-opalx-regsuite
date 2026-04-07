@@ -1,4 +1,4 @@
-"""SSE log streaming endpoint for the active run."""
+"""SSE log streaming endpoints for active runs."""
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +11,13 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .tokens import verify_access_token
-from .state import get_active_run, subscribe_sse, unsubscribe_sse
+from .state import (
+    get_active_run,
+    get_active_run_by_id,
+    is_run_queued,
+    subscribe_sse,
+    unsubscribe_sse,
+)
 
 router = APIRouter(prefix="/api/runs", tags=["stream"])
 
@@ -28,49 +34,27 @@ def _parse_phase(line: str) -> str | None:
     return None
 
 
-async def _tail_log(log_path: Path, start_line: int, run_queues: list[asyncio.Queue]) -> None:
-    """Read new lines from *log_path* and push them to all queues."""
-    line_no = 0
-    try:
-        while True:
-            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            while line_no < len(lines):
-                ln = lines[line_no]
-                event: dict = {"type": "log", "line": ln, "id": line_no}
-                phase = _parse_phase(ln)
-                if phase:
-                    event = {"type": "phase", "phase": phase, "id": line_no}
-                for q in list(run_queues):
-                    try:
-                        q.put_nowait(event)
-                    except asyncio.QueueFull:
-                        pass
-                line_no += 1
-            await asyncio.sleep(0.5)
-    except asyncio.CancelledError:
-        pass
-
-
-@router.get("/current/stream")
-async def stream_current_run(
-    request: Request,
-    token: str | None = Query(None, description="Bearer token (for EventSource clients)"),
-):
-    """SSE endpoint. Streams log lines and phase/status events for the active run.
-
-    Supports ``Last-Event-ID`` for replay from a given line offset.
-    """
-    # Validate token (query param or Authorization header).
+def _validate_token(request: Request, token: str | None) -> bool:
+    """Validate bearer token from query param or Authorization header."""
     bearer = request.headers.get("Authorization", "")
-    auth_token = token or (bearer.removeprefix("Bearer ").strip() if bearer.startswith("Bearer ") else None)
-    if not auth_token or verify_access_token(auth_token) is None:
-        from fastapi.responses import Response
-        return Response("Unauthorized", status_code=401)
+    auth_token = token or (
+        bearer.removeprefix("Bearer ").strip()
+        if bearer.startswith("Bearer ")
+        else None
+    )
+    return bool(auth_token and verify_access_token(auth_token) is not None)
 
-    run = get_active_run()
+
+def _stream_run(run, run_id: str | None, request: Request):
+    """Build an SSE StreamingResponse for a specific active run."""
     if run is None or run.log_path is None:
+        # Check if queued.
+        if run_id and is_run_queued(run_id):
+            async def _queued():
+                yield 'data: {"type": "status", "status": "queued"}\n\n'
+            return StreamingResponse(_queued(), media_type="text/event-stream")
         async def _empty():
-            yield "data: {\"type\": \"status\", \"status\": \"none\"}\n\n"
+            yield 'data: {"type": "status", "status": "none"}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
     last_id_header = request.headers.get("Last-Event-ID", "")
@@ -79,7 +63,8 @@ async def stream_current_run(
     except (ValueError, TypeError):
         start_line = 0
 
-    q = subscribe_sse()
+    effective_run_id = run_id or run.run_id
+    q = subscribe_sse(effective_run_id)
 
     async def _event_gen() -> AsyncIterator[str]:
         # First, replay any lines that exist before the SSE connection.
@@ -100,7 +85,7 @@ async def stream_current_run(
         # If the run already finished, send the final status and close.
         if run.status != "running":
             yield f"data: {json.dumps({'type': 'status', 'status': run.status})}\n\n"
-            unsubscribe_sse(q)
+            unsubscribe_sse(q, run_id=effective_run_id)
             return
 
         # Then stream live events from the queue.
@@ -125,7 +110,7 @@ async def stream_current_run(
                 if event.get("type") == "status":
                     break
         finally:
-            unsubscribe_sse(q)
+            unsubscribe_sse(q, run_id=effective_run_id)
 
     return StreamingResponse(
         _event_gen(),
@@ -135,3 +120,32 @@ async def stream_current_run(
             "X-Accel-Buffering": "no",  # nginx hint to disable buffering
         },
     )
+
+
+@router.get("/current/stream")
+async def stream_current_run(
+    request: Request,
+    token: str | None = Query(None, description="Bearer token (for EventSource clients)"),
+):
+    """SSE endpoint. Streams log lines for the first active run (backward compat)."""
+    if not _validate_token(request, token):
+        from fastapi.responses import Response
+        return Response("Unauthorized", status_code=401)
+
+    run = get_active_run()
+    return _stream_run(run, None, request)
+
+
+@router.get("/{run_id}/stream")
+async def stream_run_by_id(
+    run_id: str,
+    request: Request,
+    token: str | None = Query(None, description="Bearer token (for EventSource clients)"),
+):
+    """SSE endpoint. Streams log lines for a specific active run."""
+    if not _validate_token(request, token):
+        from fastapi.responses import Response
+        return Response("Unauthorized", status_code=401)
+
+    run = get_active_run_by_id(run_id)
+    return _stream_run(run, run_id, request)

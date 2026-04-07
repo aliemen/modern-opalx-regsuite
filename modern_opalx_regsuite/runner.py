@@ -939,6 +939,8 @@ def run_pipeline(
     skip_unit: bool = False,
     skip_regression: bool = False,
     cancel_event: Optional[threading.Event] = None,
+    execution_host: Optional[str] = None,
+    execution_user: Optional[str] = None,
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
 
@@ -960,6 +962,8 @@ def run_pipeline(
         run_id=run_id,
         started_at=datetime.now(timezone.utc),
         status="running",
+        execution_host=execution_host,
+        execution_user=execution_user,
     )
     _write_json(paths.meta_path, meta.model_dump())
 
@@ -1264,6 +1268,7 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
         started_at=meta.started_at,
         finished_at=meta.finished_at,
         status=meta.status,
+        execution_host=meta.execution_host,
         unit_tests_total=meta.unit_tests_total,
         unit_tests_failed=meta.unit_tests_failed,
         regression_total=meta.regression_total,

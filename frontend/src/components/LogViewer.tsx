@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getAccessToken } from "../api/client";
 
 interface Props {
+  runId?: string;
   onStatusChange?: (status: string) => void;
   onPhaseChange?: (phase: string) => void;
   onLogLine?: (line: string) => void;
@@ -10,7 +11,7 @@ interface Props {
 const MAX_LINES = 5_000;
 const FLUSH_MS = 250; // flush at most 4×/sec; cheap because DOM is updated directly
 
-export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
+export function LogViewer({ runId, onStatusChange, onPhaseChange, onLogLine }: Props) {
   // Minimal React state — only what affects rendered structure, not log content.
   const [hasLines, setHasLines] = useState(false);
   const [truncated, setTruncated] = useState(0);
@@ -32,7 +33,8 @@ export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
 
   useEffect(() => {
     const token = getAccessToken();
-    const url = `/api/runs/current/stream${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    const base = runId ? `/api/runs/${runId}/stream` : `/api/runs/current/stream`;
+    const url = `${base}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
     const es = new EventSource(url);
 
     function applyLines(incoming: string[]) {
@@ -104,7 +106,7 @@ export function LogViewer({ onStatusChange, onPhaseChange, onLogLine }: Props) {
       if (flushTimer.current) clearInterval(flushTimer.current);
       es.close();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleScroll() {
     const el = containerRef.current;

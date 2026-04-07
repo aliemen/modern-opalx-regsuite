@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, XCircle } from "lucide-react";
-import { cancelRun, getCurrentRun } from "../api/runs";
+import { cancelRunById, getCurrentRun, getQueueState } from "../api/runs";
 import { LogViewer } from "../components/LogViewer";
 import { StatusBadge } from "../components/StatusBadge";
 
@@ -71,12 +71,12 @@ function TestTrackerPanel({
     <div className="flex flex-col h-[60vh]">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-medium text-muted uppercase tracking-wider">
-          {inRegression ? "Regression Tests" : `Phase: ${phase || "…"}`}
+          {inRegression ? "Regression Tests" : `Phase: ${phase || "\u2026"}`}
         </p>
         {tests.length > 0 && (
           <p className="text-xs text-muted tabular-nums">
-            <span className="text-passed">{passedCount}✓</span>
-            {failedCount > 0 && <span className="text-failed ml-1.5">{failedCount}✗</span>}
+            <span className="text-passed">{passedCount}\u2713</span>
+            {failedCount > 0 && <span className="text-failed ml-1.5">{failedCount}\u2717</span>}
             {brokenCount > 0 && <span className="text-broken ml-1.5">{brokenCount}?</span>}
             {runningCount > 0 && <span className="text-accent ml-1.5">{runningCount} running</span>}
           </p>
@@ -95,20 +95,20 @@ function TestTrackerPanel({
           </span>
           <span className="text-muted tabular-nums">
             {failedCount > 0 && `${failedCount} failed`}
-            {failedCount > 0 && brokenCount > 0 && " · "}
+            {failedCount > 0 && brokenCount > 0 && " \u00b7 "}
             {brokenCount > 0 && `${brokenCount} broken`}
             {failedCount === 0 && brokenCount === 0 && "all passed"}
           </span>
         </div>
       )}
 
-<div className="flex-1 overflow-y-auto bg-surface border border-border rounded-md px-3 py-3 space-y-1">
+      <div className="flex-1 overflow-y-auto bg-surface border border-border rounded-md px-3 py-3 space-y-1">
         {tests.length === 0 ? (
           <p className="text-muted text-xs">
             {finalStatus
               ? "No regression tests ran."
               : inRegression
-              ? "Waiting for first test…"
+              ? "Waiting for first test\u2026"
               : "Tests will appear when the regression phase starts."}
           </p>
         ) : (
@@ -118,7 +118,7 @@ function TestTrackerPanel({
                 ? fmtMs(now - test.startTime)
                 : test.durationMs != null
                 ? fmtMs(test.durationMs)
-                : "—";
+                : "\u2014";
 
             const dotColor =
               test.status === "running"
@@ -177,6 +177,7 @@ function loadLiveState(): StoredLiveState | null {
 
 export function LiveRunPage() {
   const navigate = useNavigate();
+  const { runId: routeRunId } = useParams<{ runId?: string }>();
 
   // Synchronously restore persisted state so the tracker appears instantly.
   const [initSnap] = useState(loadLiveState);
@@ -186,39 +187,58 @@ export function LiveRunPage() {
   const [cancelling, setCancelling] = useState(false);
   const [tests, setTests] = useState<TestInfo[]>(initSnap?.tests ?? []);
 
-  const { data: run, isLoading } = useQuery({
+  // If no runId in route, pick the first active run.
+  const { data: queueState } = useQuery({
+    queryKey: ["queue-state"],
+    queryFn: getQueueState,
+    refetchInterval: 5000,
+    enabled: !routeRunId,
+  });
+
+  // Fallback: also try getCurrentRun for backward compat.
+  const { data: currentRun, isLoading } = useQuery({
     queryKey: ["current-run"],
     queryFn: getCurrentRun,
     refetchInterval: finalStatus ? 2000 : false,
+    enabled: !routeRunId,
   });
 
-  const elapsed = useElapsed(run?.started_at);
-  const displayStatus = finalStatus ?? run?.status ?? "running";
+  // Determine the effective run to display.
+  const activeFromQueue = queueState?.machines
+    ?.flatMap((m) => (m.active_run ? [m.active_run] : []))
+    ?.[0];
+  const effectiveRun = routeRunId
+    ? { run_id: routeRunId, branch: "", arch: "", status: "running", phase: "git", started_at: "", machine_id: null, ...currentRun, ...(currentRun?.run_id === routeRunId ? currentRun : {}) }
+    : currentRun ?? activeFromQueue ?? null;
+
+  const runId = effectiveRun?.run_id;
+  const elapsed = useElapsed(effectiveRun?.started_at || undefined);
+  const displayStatus = finalStatus ?? effectiveRun?.status ?? "running";
 
   useEffect(() => {
-    if (!isLoading && !run) {
+    if (!routeRunId && !isLoading && !effectiveRun) {
       navigate("/trigger");
     }
-  }, [run, isLoading, navigate]);
+  }, [effectiveRun, isLoading, navigate, routeRunId]);
 
   // If restored state is from a different run, clear it.
   useEffect(() => {
-    if (!run?.run_id || !initSnap) return;
-    if (initSnap.runId !== run.run_id) {
+    if (!runId || !initSnap) return;
+    if (initSnap.runId !== runId) {
       setTests([]);
       setPhase("git");
       setFinalStatus(null);
     }
-  }, [run?.run_id, initSnap]);
+  }, [runId, initSnap]);
 
   // Persist live-view state to sessionStorage on every change.
   useEffect(() => {
-    if (!run?.run_id) return;
+    if (!runId) return;
     sessionStorage.setItem(
       LIVE_STATE_KEY,
-      JSON.stringify({ runId: run.run_id, tests, phase, finalStatus } satisfies StoredLiveState),
+      JSON.stringify({ runId, tests, phase, finalStatus } satisfies StoredLiveState),
     );
-  }, [tests, phase, finalStatus, run?.run_id]);
+  }, [tests, phase, finalStatus, runId]);
 
   // Parse regression test START/END lines from the log stream.
   const handleLogLine = useCallback((line: string) => {
@@ -238,8 +258,6 @@ export function LiveRunPage() {
       const state = endMatch[2] as TestStatus;
       setTests((prev) =>
         prev.map((t) =>
-          // Only update tests still marked "running" — avoids SSE replay
-          // overwriting correct durations on tests restored from storage.
           t.name === name && t.status === "running"
             ? { ...t, status: state, durationMs: Date.now() - t.startTime }
             : t
@@ -249,16 +267,20 @@ export function LiveRunPage() {
   }, []);
 
   async function handleCancel() {
+    if (!runId) return;
     setCancelling(true);
     try {
-      await cancelRun();
+      await cancelRunById(runId);
     } catch {
       setCancelling(false);
     }
   }
 
-  if (isLoading || !run) {
-    return <div className="p-8 text-muted">Loading…</div>;
+  if (isLoading && !routeRunId) {
+    return <div className="p-8 text-muted">Loading\u2026</div>;
+  }
+  if (!effectiveRun) {
+    return <div className="p-8 text-muted">No active run.</div>;
   }
 
   return (
@@ -267,10 +289,10 @@ export function LiveRunPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-fg text-xl font-semibold">
-            {run.branch} / {run.arch}
+            {effectiveRun.branch || "..."} / {effectiveRun.arch || "..."}
           </h1>
           <p className="text-muted text-sm">
-            {run.run_id} · phase: <span className="text-accent">{phase}</span> · {elapsed}
+            {effectiveRun.run_id} \u00b7 phase: <span className="text-accent">{phase}</span> \u00b7 {elapsed}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -282,7 +304,7 @@ export function LiveRunPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-failed border border-failed/40 rounded-md hover:bg-failed/10 transition disabled:opacity-50"
             >
               <XCircle size={15} />
-              {cancelling ? "Cancelling…" : "Cancel"}
+              {cancelling ? "Cancelling\u2026" : "Cancel"}
             </button>
           )}
         </div>
@@ -293,6 +315,7 @@ export function LiveRunPage() {
         {/* Log viewer — 3/5 width */}
         <div className="lg:col-span-3">
           <LogViewer
+            runId={runId}
             onPhaseChange={setPhase}
             onStatusChange={(s) => {
               setFinalStatus(s);
@@ -300,14 +323,16 @@ export function LiveRunPage() {
             }}
             onLogLine={handleLogLine}
           />
-          <a
-            href={`/data/runs/${run.branch}/${run.arch}/${run.run_id}/logs/pipeline.log`}
-            target="_blank"
-            rel="noopener"
-            className="flex items-center gap-1.5 text-muted hover:text-fg text-xs mt-1 w-fit transition-colors"
-          >
-            <Download size={12} /> Download full log
-          </a>
+          {effectiveRun.branch && (
+            <a
+              href={`/data/runs/${effectiveRun.branch}/${effectiveRun.arch}/${effectiveRun.run_id}/logs/pipeline.log`}
+              target="_blank"
+              rel="noopener"
+              className="flex items-center gap-1.5 text-muted hover:text-fg text-xs mt-1 w-fit transition-colors"
+            >
+              <Download size={12} /> Download full log
+            </a>
+          )}
         </div>
 
         {/* Test tracker — 2/5 width */}
@@ -317,11 +342,11 @@ export function LiveRunPage() {
       </div>
 
       {/* Post-run actions */}
-      {finalStatus && finalStatus !== "running" && (
+      {finalStatus && finalStatus !== "running" && effectiveRun.branch && (
         <div className="mt-4 flex gap-3">
           <button
             onClick={() =>
-              navigate(`/results/${run.branch}/${run.arch}/${run.run_id}`)
+              navigate(`/results/${effectiveRun.branch}/${effectiveRun.arch}/${effectiveRun.run_id}`)
             }
             className="px-4 py-2 text-sm bg-accent text-bg font-medium rounded-md hover:brightness-110 transition"
           >

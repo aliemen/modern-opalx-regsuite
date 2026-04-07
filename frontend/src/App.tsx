@@ -9,6 +9,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { TriggerPage } from "./pages/TriggerPage";
 import { LiveRunPage } from "./pages/LiveRunPage";
+import { ActivityPage } from "./pages/ActivityPage";
 import { RunListPage } from "./pages/results/RunListPage";
 import { RunDetailPage } from "./pages/results/RunDetailPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<AuthGuard />}>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
             <Route path="/trigger" element={<TriggerPage />} />
             <Route path="/live/:runId?" element={<LiveRunPage />} />
             <Route path="/results/:branch/:arch" element={<RunListPage />} />

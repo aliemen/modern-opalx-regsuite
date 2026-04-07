@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
 from ..config import SuiteConfig
@@ -31,6 +31,11 @@ class RunDetail(BaseModel):
     regression: RegressionTestsReport
 
 
+class PaginatedRuns(BaseModel):
+    runs: list[RunIndexEntry]
+    total: int
+
+
 @router.get("/branches")
 def list_branches(
     _user: Annotated[str, Depends(require_auth)],
@@ -47,6 +52,7 @@ def list_branches(
 def list_runs(
     branch: str,
     arch: str,
+    response: Response,
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
     limit: int = Query(50, ge=1, le=500),
@@ -54,11 +60,49 @@ def list_runs(
 ) -> list[RunIndexEntry]:
     path = runs_index_path(cfg.resolved_data_root, branch, arch)
     if not path.is_file():
+        response.headers["X-Total-Count"] = "0"
         return []
     with path.open("r", encoding="utf-8") as f:
         raw = json.load(f)
     entries = [RunIndexEntry.model_validate(e) for e in raw]
+    response.headers["X-Total-Count"] = str(len(entries))
     return entries[offset : offset + limit]
+
+
+@router.get("/all-runs", response_model=PaginatedRuns)
+def list_all_runs(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> PaginatedRuns:
+    """Return all runs across every branch/arch, sorted by started_at descending."""
+    data_root = cfg.resolved_data_root
+    branches_path = branches_index_path(data_root)
+    if not branches_path.is_file():
+        return PaginatedRuns(runs=[], total=0)
+
+    with branches_path.open("r", encoding="utf-8") as f:
+        branches: dict[str, list[str]] = json.load(f)
+
+    all_entries: list[RunIndexEntry] = []
+    for branch, archs in branches.items():
+        for arch in archs:
+            idx_path = runs_index_path(data_root, branch, arch)
+            if not idx_path.is_file():
+                continue
+            try:
+                with idx_path.open("r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                all_entries.extend(RunIndexEntry.model_validate(e) for e in raw)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    all_entries.sort(key=lambda e: e.started_at, reverse=True)
+    return PaginatedRuns(
+        runs=all_entries[offset : offset + limit],
+        total=len(all_entries),
+    )
 
 
 @router.get("/branches/{branch}/archs/{arch}/runs/{run_id}", response_model=RunDetail)

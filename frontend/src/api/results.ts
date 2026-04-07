@@ -80,16 +80,32 @@ export async function getBranches(): Promise<Record<string, string[]>> {
   return res.data;
 }
 
+export interface PaginatedRuns {
+  runs: RunIndexEntry[];
+  total: number;
+}
+
 export async function getRuns(
   branch: string,
   arch: string,
   limit = 50,
   offset = 0
-): Promise<RunIndexEntry[]> {
+): Promise<{ runs: RunIndexEntry[]; total: number }> {
   const res = await api.get<RunIndexEntry[]>(
     `/api/results/branches/${branch}/archs/${arch}/runs`,
     { params: { limit, offset } }
   );
+  const total = parseInt(res.headers["x-total-count"] ?? "0", 10);
+  return { runs: res.data, total };
+}
+
+export async function getAllRuns(
+  limit = 25,
+  offset = 0
+): Promise<PaginatedRuns> {
+  const res = await api.get<PaginatedRuns>("/api/results/all-runs", {
+    params: { limit, offset },
+  });
   return res.data;
 }
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, LogOut, Moon, Play, Settings, Sun, LayoutDashboard } from "lucide-react";
+import { Activity, History, LogOut, Moon, Play, Settings, Sun, LayoutDashboard } from "lucide-react";
 import { getCurrentRun } from "../api/runs";
 import { logout } from "../api/auth";
 import { setAccessToken } from "../api/client";
@@ -55,6 +55,13 @@ export function NavBar() {
         >
           <LayoutDashboard size={15} />
           Dashboard
+        </Link>
+        <Link
+          to="/activity"
+          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
+        >
+          <History size={15} />
+          Activity
         </Link>
         <Link
           to="/trigger"

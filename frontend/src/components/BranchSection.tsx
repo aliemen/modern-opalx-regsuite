@@ -71,7 +71,7 @@ function useLatestRun(branch: string, arch: string) {
     queryKey: ["runs", branch, arch],
     queryFn: () => getRuns(branch, arch, 1, 0),
     refetchInterval: 30_000,
-    select: (data) => data[0] as RunIndexEntry | undefined,
+    select: (data) => data.runs[0] as RunIndexEntry | undefined,
   });
 }
 
@@ -93,7 +93,8 @@ function useSummary(branch: string, archs: string[]) {
       queryKey: ["runs", branch, arch],
       queryFn: () => getRuns(branch, arch, 1, 0),
       refetchInterval: 30_000,
-      select: (data: RunIndexEntry[]) => data[0] as RunIndexEntry | undefined,
+      select: (data: { runs: RunIndexEntry[]; total: number }) =>
+        data.runs[0] as RunIndexEntry | undefined,
     })),
   });
   const counts: Record<string, number> = {};

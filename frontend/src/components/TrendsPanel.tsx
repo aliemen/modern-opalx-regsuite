@@ -47,14 +47,14 @@ export function TrendsPanel({ archs }: { archs: string[] }) {
   const [selectedArch, setSelectedArch] = useState(archs[0] ?? "");
   const colors = useThemeColors();
 
-  const { data: runs } = useQuery({
+  const { data } = useQuery({
     queryKey: ["trend-runs", "master", selectedArch],
     queryFn: () => getRuns("master", selectedArch, 20, 0),
     refetchInterval: 60_000,
     enabled: !!selectedArch,
   });
 
-  const trendData = useMemo(() => toTrendData(runs ?? []), [runs]);
+  const trendData = useMemo(() => toTrendData(data?.runs ?? []), [data]);
 
   return (
     <div className="bg-surface border border-border rounded-xl p-5">

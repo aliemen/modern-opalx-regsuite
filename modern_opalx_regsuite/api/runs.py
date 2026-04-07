@@ -104,28 +104,37 @@ async def _log_tailer(active: ActiveRun) -> None:
     _PHASE_RE = re.compile(r"^== PHASE: (\S+?) ==")
 
     line_no = 0
+
+    def _push_new_lines() -> None:
+        nonlocal line_no
+        if not (active.log_path and active.log_path.exists()):
+            return
+        lines = active.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        while line_no < len(lines):
+            ln = lines[line_no]
+            m = _PHASE_RE.match(ln)
+            if m:
+                phase_val = m.group(1).split()[0]
+                active.phase = phase_val
+                event: dict = {"type": "phase", "phase": phase_val, "id": line_no}
+            else:
+                event = {"type": "log", "line": ln, "id": line_no}
+            for q in list(active.sse_queues):
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+            line_no += 1
+
     try:
         while True:
-            if active.log_path and active.log_path.exists():
-                lines = active.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-                while line_no < len(lines):
-                    ln = lines[line_no]
-                    m = _PHASE_RE.match(ln)
-                    if m:
-                        phase_val = m.group(1).split()[0]
-                        active.phase = phase_val
-                        event = {"type": "phase", "phase": phase_val, "id": line_no}
-                    else:
-                        event = {"type": "log", "line": ln, "id": line_no}
-                    for q in list(active.sse_queues):
-                        try:
-                            q.put_nowait(event)
-                        except asyncio.QueueFull:
-                            pass
-                    line_no += 1
+            _push_new_lines()
             await asyncio.sleep(0.5)
     except asyncio.CancelledError:
-        pass
+        # Final sweep: capture any lines written after the last poll so that
+        # the last test's END event reaches SSE clients before release_run_slot
+        # sends the final status event.
+        _push_new_lines()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 - **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), and results browsing.
 - **Config-driven**: `config.toml` with per-architecture overrides (`[[arch_configs]]`) and optional Slurm support.
 - **File-based data model**: JSON + logs + SVG plots on disk, no database. Results live in a separate git repo (`opalx-regsuite-test-data`).
+- **Remote execution**: SSH into a remote machine (e.g. a GPU server) for cmake, build, and test runs. Results are fetched back and processed locally.
 - **Single-command server**: `opalx-regsuite serve` starts the full stack.
 - **CLI still works**: All CLI commands (`run`, `gen-data-site`, `del-test`, …) remain available.
 
@@ -14,7 +15,13 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 
 ### Setup (production — Proxmox LXC)
 
+**Requirements**: Python 3.10+, Node.js 20+ (Vite requires Node 20.19+ or 22.12+).
+
 ```bash
+# 0. (If Node.js < 20) Upgrade Node.js — example using NodeSource on Debian/Ubuntu:
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
 # 1. Clone the repo and install
 git clone <this-repo> /home/opalx/modern-opalx-regsuite
 cd /home/opalx/modern-opalx-regsuite
@@ -99,7 +106,7 @@ Per-architecture overrides (optional, can have multiple):
 ```toml
 [[arch_configs]]
 arch           = "cpu-serial"
-execution_mode = "local"      # "local" or "slurm"
+execution_mode = "local"      # "local", "slurm", or "remote"
 build_jobs     = 4
 mpi_ranks      = 1
 cmake_args     = ["-DBUILD_TYPE=Release", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON"]
@@ -121,6 +128,75 @@ port = 8000
 users_file = "users.json"
 # secret_key is read from OPALX_SECRET_KEY env var (never put it in this file)
 ```
+
+---
+
+### Remote execution
+
+`execution_mode = "remote"` SSHes into a remote host to run cmake, build, and regression
+tests there. Only `.stat` result files are transferred back; all plotting and JSON
+generation happen locally using the existing pipeline.
+
+#### 1. Upload your SSH key
+
+Navigate to **Settings** in the web UI (`/settings`) and upload the private key that
+grants access to the remote machine. Give it a short name (e.g. `gpu-key`). The key is
+stored as `{data_root}/ssh-keys/{name}.pem` with `0o600` permissions.
+
+Alternatively, place the key file there manually before starting the server.
+
+#### 2. Add the remote arch config
+
+```toml
+# Optional: HTTPS URLs for the repos to clone on the remote.
+# If omitted, derived automatically from 'git remote get-url origin' of your local repos.
+opalx_repo_url    = "https://github.com/org/opalx.git"
+regtests_repo_url = "https://github.com/org/regression-tests-x.git"
+
+# Paths passed to 'module use' before 'module load' (applies to all archs, including remote).
+module_use_paths  = ["/opt/modules/custom"]
+
+[[arch_configs]]
+arch              = "gpu-server"
+execution_mode    = "remote"
+cmake_args        = ["-DBUILD_TYPE=Release", "-DPLATFORMS=CUDA"]
+build_jobs        = 8
+mpi_ranks         = 1
+module_loads      = ["gcc/15.2.0", "cuda/12.0"]
+
+# Remote SSH settings
+remote_host       = "gpu-server.example.com"
+remote_user       = "opalx"
+remote_key_name   = "gpu-key"          # matches the name uploaded in Settings
+
+# Optional tuning (defaults shown)
+remote_port       = 22
+remote_work_dir   = "/tmp/opalx-regsuite"   # persistent workspace on the remote
+remote_cleanup    = false                    # keep workspace between runs (fast incremental builds)
+remote_lmod_init  = "/usr/share/lmod/lmod/init/bash"
+```
+
+#### Remote workspace layout
+
+The workspace on the remote persists between runs by default (`remote_cleanup = false`),
+so git repos are only cloned once and builds are incremental:
+
+```
+{remote_work_dir}/
+  opalx-src/                        # git clone of OPALX (HTTPS, updated each run)
+  regtests/                         # git clone of regression-tests-x
+  builds/{branch}/{arch}/build/     # persistent build dir (incremental cmake/make)
+  work/{run_id}/{test_name}/        # per-run work dirs (cleaned after each run)
+```
+
+Set `remote_cleanup = true` to delete the entire workspace after each run (useful for
+one-off builds or disk-constrained machines).
+
+#### Requirements on the remote machine
+
+- `git` installed with outbound HTTPS access to the repos
+- Any compilers/libraries needed by the build (loaded via `module_loads`)
+- The SSH user must have write access to `remote_work_dir`
 
 ---
 
@@ -169,3 +245,4 @@ data_root/
 | `/live` | Live log streaming for the active run |
 | `/results/:branch/:arch` | Run history table |
 | `/results/:branch/:arch/:run_id` | Detailed results with plots and metrics |
+| `/settings` | SSH key management |

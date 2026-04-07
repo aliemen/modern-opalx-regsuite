@@ -706,6 +706,10 @@ def _run_regression_suite_remote(
     reg_lines.append(f"Running {len(tests)} regression tests remotely on {ac.remote_host}")
     reg_lines.append(f"Remote OPALX executable: {remote_opalx_exe}")
 
+    # Ensure the per-run work directory exists on the remote before any cp -r calls.
+    remote_run_work_dir = f"{remote_base}/work/{run_id}"
+    remote.ensure_dir(remote_run_work_dir)
+
     for test_name in tests:
         if cancel_event is not None and cancel_event.is_set():
             _append_pipeline_line(

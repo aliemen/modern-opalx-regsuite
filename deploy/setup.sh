@@ -122,10 +122,22 @@ mkdir -p "$BUILDS_DIR"
 chown "$SERVICE_USER:$SERVICE_USER" "$BUILDS_DIR"
 
 # ---------------------------------------------------------------------------
-# Step 5 — Secret key
+# Step 5 — Secret key and SSH key directory
 # ---------------------------------------------------------------------------
 info "Setting up /etc/opalx/secrets..."
 mkdir -p /etc/opalx
+
+# SSH keys are kept outside data_root so they are never co-located with
+# test-data that may be archived or shared as a data repository.
+SSH_KEYS_DIR="/etc/opalx/ssh-keys"
+if [[ ! -d "$SSH_KEYS_DIR" ]]; then
+    mkdir -p "$SSH_KEYS_DIR"
+    chmod 700 "$SSH_KEYS_DIR"
+    chown "$SERVICE_USER" "$SSH_KEYS_DIR"
+    success "Created SSH keys directory at $SSH_KEYS_DIR"
+else
+    warn "SSH keys directory already exists at $SSH_KEYS_DIR — skipping."
+fi
 if [[ ! -f "$SECRETS_PATH" ]]; then
     SECRET=$(python3 -c "import secrets; print('OPALX_SECRET_KEY=' + secrets.token_hex(32))")
     echo "$SECRET" > "$SECRETS_PATH"
@@ -169,6 +181,7 @@ sudo -u "$SERVICE_USER" \
     --regtests-branch   "master" \
     --default-branch    "master" \
     --default-arch      "cpu-serial" \
+    --ssh-keys-dir      "$SSH_KEYS_DIR" \
     --config            "$CONFIG_PATH"
 
 chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_PATH"
@@ -251,6 +264,7 @@ echo "    Builds           : $BUILDS_DIR"
 echo "    Test data        : $DATA_ROOT"
 echo "    Config           : $CONFIG_PATH"
 echo "    Secrets          : $SECRETS_PATH"
+echo "    SSH keys         : $SSH_KEYS_DIR"
 echo ""
 echo "  Next steps:"
 echo "    1. Review $CONFIG_PATH and adjust cmake_args, arch_configs, etc."

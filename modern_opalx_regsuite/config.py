@@ -238,7 +238,9 @@ class SuiteConfig(BaseModel):
     def resolved_ssh_keys_dir(self) -> Path:
         if self.ssh_keys_dir is not None:
             return self.ssh_keys_dir.expanduser().resolve()
-        return self.resolved_data_root / "ssh-keys"
+        # Default to ~/.config/opalx-regsuite/ssh-keys so that keys are never
+        # co-located with the test-data directory (which may be shared or archived).
+        return Path.home() / ".config" / "opalx-regsuite" / "ssh-keys"
 
     @property
     def resolved_secret_key(self) -> str:

@@ -63,6 +63,14 @@ def init(
         prompt=True,
         help="Default architecture to test.",
     ),
+    ssh_keys_dir: Optional[str] = typer.Option(
+        None,
+        "--ssh-keys-dir",
+        help=(
+            "Directory for SSH private key files. "
+            "Defaults to ~/.config/opalx-regsuite/ssh-keys if not set."
+        ),
+    ),
     config: Optional[Path] = typer.Option(
         None,
         "--config",
@@ -79,6 +87,7 @@ def init(
         regtests_branch=regtests_branch,
         default_branch=default_branch,
         default_architectures=[default_arch],
+        ssh_keys_dir=_resolve_path(ssh_keys_dir) if ssh_keys_dir else None,
     )
     cfg_path = config_mod.save_config(cfg, path=config)
     typer.echo(f"Configuration written to {cfg_path}")

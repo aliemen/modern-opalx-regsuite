@@ -1,7 +1,8 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, Trash2, Key } from "lucide-react";
-import { listSshKeys, uploadSshKey, deleteSshKey, SshKeyInfo } from "../api/keys";
+import { listSshKeys, uploadSshKey, deleteSshKey } from "../api/keys";
+import type { SshKeyInfo } from "../api/keys";
 
 export function SettingsPage() {
   const queryClient = useQueryClient();

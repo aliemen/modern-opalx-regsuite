@@ -4,10 +4,10 @@ from __future__ import annotations
 import io
 import os
 import shlex
-import subprocess
 from pathlib import Path
 from typing import Optional
 
+import paramiko
 from fabric import Connection
 
 
@@ -209,29 +209,25 @@ class RemoteExecutor:
     # ── File transfer ────────────────────────────────────────────────────
 
     def fetch_file(self, remote_path: str, local_path: Path) -> None:
-        """Download a single file from the remote via scp.
+        """Download a single file from the remote via a fresh SFTP channel.
 
-        Fabric's conn.get() reuses a cached Paramiko SFTP channel that can
-        end up in a bad state after run_command() calls that use custom
-        out_stream/err_stream objects, causing spurious "Garbage packet
-        received" errors with Paramiko 4.x.  Using a subprocess scp call
-        creates a completely independent transfer that is unaffected by the
-        Fabric connection state.
+        Uses paramiko.SFTPClient.from_transport() directly instead of
+        conn.get(), for two reasons:
+        - Fabric 3.x caches the SFTP client and it can become stale after
+          run_command() calls that use custom out_stream/err_stream objects,
+          causing "Garbage packet received" with Paramiko 4.x.
+        - subprocess scp invokes the remote shell, which on this host prints
+          "Loaded opalx module" even for non-interactive sessions, corrupting
+          the scp protocol handshake.
+        The SFTP subsystem is launched by OpenSSH directly (not via the user's
+        shell), so shell startup output does not affect it.
         """
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            "scp",
-            "-i", str(self._key_path),
-            "-P", str(self._port),
-            "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=accept-new",
-            f"{self._user}@{self._host}:{remote_path}",
-            str(local_path),
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
-        if result.returncode != 0:
-            stderr = result.stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(f"scp failed (rc={result.returncode}): {stderr}")
+        sftp = paramiko.SFTPClient.from_transport(self.conn.transport)
+        try:
+            sftp.get(remote_path, str(local_path))
+        finally:
+            sftp.close()
 
     # ── Directory helpers ────────────────────────────────────────────────
 

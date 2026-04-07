@@ -31,6 +31,11 @@ export async function cancelRun(): Promise<void> {
   await api.post("/api/runs/current/cancel");
 }
 
+export async function getArchConfigs(): Promise<string[]> {
+  const res = await api.get<string[]>("/api/runs/archs");
+  return res.data;
+}
+
 export async function getOpalxBranches(): Promise<string[]> {
   const res = await api.get<{ branches: string[] }>("/api/branches/opalx");
   return res.data.branches;

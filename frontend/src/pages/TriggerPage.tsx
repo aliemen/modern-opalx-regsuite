@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Play } from "lucide-react";
 import {
   getCurrentRun,
+  getArchConfigs,
   getOpalxBranches,
   getRegtestsBranches,
   triggerRun,
@@ -32,6 +33,11 @@ export function TriggerPage() {
     refetch: refetchRegtests,
     isFetching: fetchingRegtests,
   } = useQuery({ queryKey: ["regtests-branches"], queryFn: getRegtestsBranches });
+
+  const { data: archConfigs, isLoading: loadingArchs } = useQuery({
+    queryKey: ["arch-configs"],
+    queryFn: getArchConfigs,
+  });
 
   const { data: activeRun } = useQuery({
     queryKey: ["current-run"],
@@ -122,14 +128,17 @@ export function TriggerPage() {
 
         {/* Architecture */}
         <div>
-          <label className="block text-sm text-muted mb-1">Architecture</label>
-          <input
-            type="text"
+          <label className="block text-sm text-muted mb-1">Run config</label>
+          <select
             value={arch}
             onChange={(e) => setArch(e.target.value)}
             className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-          />
-          <p className="text-muted text-xs mt-1">Must match an arch_configs entry or default.</p>
+            disabled={loadingArchs}
+          >
+            {(archConfigs ?? ["cpu-serial"]).map((a) => (
+              <option key={a}>{a}</option>
+            ))}
+          </select>
         </div>
 
         {/* Options */}

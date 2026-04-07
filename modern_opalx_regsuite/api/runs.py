@@ -130,6 +130,19 @@ async def _log_tailer(active: ActiveRun) -> None:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@router.get("/archs", response_model=list[str])
+def list_archs(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+):
+    """Return all configured architecture identifiers."""
+    names = list(cfg.default_architectures)
+    for ac in cfg.arch_configs:
+        if ac.arch not in names:
+            names.append(ac.arch)
+    return names
+
+
 @router.get("/current", response_model=Optional[CurrentRunStatus])
 def get_current_run(_user: Annotated[str, Depends(require_auth)]):
     run = get_active_run()

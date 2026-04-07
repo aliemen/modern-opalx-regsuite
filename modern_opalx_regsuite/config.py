@@ -22,9 +22,9 @@ class ArchConfig(BaseModel):
     """Per-architecture build and execution overrides."""
 
     arch: str = Field(..., description="Architecture identifier, e.g. 'cpu-serial'.")
-    execution_mode: Literal["local", "slurm"] = Field(
+    execution_mode: Literal["local", "slurm", "remote"] = Field(
         "local",
-        description="'local' runs directly; 'slurm' submits via sbatch.",
+        description="'local' runs directly; 'slurm' submits via sbatch; 'remote' SSHes to remote_host.",
     )
     cmake_args: Optional[List[str]] = Field(
         None,
@@ -39,6 +39,38 @@ class ArchConfig(BaseModel):
     module_loads: List[str] = Field(
         default_factory=list,
         description="Modules to load, e.g. ['gcc/15.2.0', 'openmpi/4.1.6_slurm'].",
+    )
+
+    # Remote execution fields (only used when execution_mode == "remote").
+    remote_host: Optional[str] = Field(
+        None, description="SSH hostname or IP of the remote machine."
+    )
+    remote_user: Optional[str] = Field(
+        None, description="SSH username on the remote machine."
+    )
+    remote_port: int = Field(22, description="SSH port on the remote machine.")
+    remote_key_name: Optional[str] = Field(
+        None,
+        description="Name of SSH key stored in {ssh_keys_dir}/{name}.pem.",
+    )
+    remote_work_dir: str = Field(
+        "/tmp/opalx-regsuite",
+        description=(
+            "Persistent base directory on the remote. "
+            "Repos, builds, and per-run work dirs live here."
+        ),
+    )
+    remote_cleanup: bool = Field(
+        False,
+        description=(
+            "If true, delete the entire remote_work_dir after a run "
+            "(repos, builds, everything). Default false keeps the workspace "
+            "for fast incremental updates on subsequent runs."
+        ),
+    )
+    remote_lmod_init: str = Field(
+        "/usr/share/lmod/lmod/init/bash",
+        description="Path to lmod init script on the remote host.",
     )
 
 
@@ -118,6 +150,23 @@ class SuiteConfig(BaseModel):
         description="If true, retain per-test temporary work directories after a run.",
     )
 
+    # HTTPS git URLs for remote cloning (public repos).
+    opalx_repo_url: Optional[str] = Field(
+        None,
+        description=(
+            "HTTPS git URL for OPALX, used to clone on remote hosts. "
+            "Example: 'https://github.com/org/opalx.git'. "
+            "If not set, derived from 'git remote get-url origin' of opalx_repo_root."
+        ),
+    )
+    regtests_repo_url: Optional[str] = Field(
+        None,
+        description=(
+            "HTTPS git URL for regression-tests-x, used to clone on remote hosts. "
+            "If not set, derived from 'git remote get-url origin' of regtests_repo_root."
+        ),
+    )
+
     # Paths added via 'module use' before any module_loads are applied.
     module_use_paths: List[str] = Field(
         default_factory=list,
@@ -128,6 +177,15 @@ class SuiteConfig(BaseModel):
     arch_configs: List[ArchConfig] = Field(
         default_factory=list,
         description="Per-architecture build and execution overrides.",
+    )
+
+    # SSH key storage for remote execution.
+    ssh_keys_dir: Optional[Path] = Field(
+        None,
+        description=(
+            "Directory for SSH private key files ({name}.pem). "
+            "Defaults to {data_root}/ssh-keys if not set."
+        ),
     )
 
     # Web server settings.
@@ -175,6 +233,12 @@ class SuiteConfig(BaseModel):
     @property
     def resolved_regtests_repo_root(self) -> Path:
         return self.regtests_repo_root.expanduser().resolve()
+
+    @property
+    def resolved_ssh_keys_dir(self) -> Path:
+        if self.ssh_keys_dir is not None:
+            return self.ssh_keys_dir.expanduser().resolve()
+        return self.resolved_data_root / "ssh-keys"
 
     @property
     def resolved_secret_key(self) -> str:
@@ -250,8 +314,14 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     add_kv("opalx_executable_relpath", data.get("opalx_executable_relpath", "src/opalx"))
     add_kv("opalx_args", data.get("opalx_args", []))
     add_kv("keep_work_dirs", data.get("keep_work_dirs", False))
+    if data.get("opalx_repo_url"):
+        add_kv("opalx_repo_url", data["opalx_repo_url"])
+    if data.get("regtests_repo_url"):
+        add_kv("regtests_repo_url", data["regtests_repo_url"])
     if data.get("module_use_paths"):
         add_kv("module_use_paths", data["module_use_paths"])
+    if data.get("ssh_keys_dir"):
+        add_kv("ssh_keys_dir", str(data["ssh_keys_dir"]))
     add_kv("host", data.get("host", "0.0.0.0"))
     add_kv("port", data.get("port", 8000))
     # Never write the secret key to disk; it lives in the env var.
@@ -271,6 +341,20 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
             add_kv("slurm_args", ac["slurm_args"])
         if ac.get("module_loads"):
             add_kv("module_loads", ac["module_loads"])
+        if ac.get("remote_host"):
+            add_kv("remote_host", ac["remote_host"])
+        if ac.get("remote_user"):
+            add_kv("remote_user", ac["remote_user"])
+        if ac.get("remote_port", 22) != 22:
+            add_kv("remote_port", ac["remote_port"])
+        if ac.get("remote_key_name"):
+            add_kv("remote_key_name", ac["remote_key_name"])
+        if ac.get("remote_work_dir", "/tmp/opalx-regsuite") != "/tmp/opalx-regsuite":
+            add_kv("remote_work_dir", ac["remote_work_dir"])
+        if ac.get("remote_cleanup"):
+            add_kv("remote_cleanup", ac["remote_cleanup"])
+        if ac.get("remote_lmod_init", "") and ac["remote_lmod_init"] != "/usr/share/lmod/lmod/init/bash":
+            add_kv("remote_lmod_init", ac["remote_lmod_init"])
 
     text = "\n".join(lines) + "\n"
     with config_path.open("w", encoding="utf-8") as f:

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .config import SuiteConfig
+from .config import ArchConfig, SuiteConfig
 from .data_model import (
     RegressionMetric,
     RegressionSimulation,
@@ -678,6 +678,255 @@ def _run_regression_suite(
     return report
 
 
+def _run_regression_suite_remote(
+    cfg: SuiteConfig,
+    paths: RunPaths,
+    ac: "ArchConfig",
+    remote: "RemoteExecutor",  # type: ignore[name-defined]
+    remote_base: str,
+    remote_build: str,
+    run_id: str,
+    pipeline_log_path: Path,
+    cancel_event: Optional[threading.Event] = None,
+) -> RegressionTestsReport:
+    """Run regression tests on a remote host via SSH.
+
+    Test discovery and result processing (stat parsing, plots) happen locally.
+    Only the simulation execution happens on the remote.
+    """
+    tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
+    tests = _discover_regression_tests(tests_root)
+    report = RegressionTestsReport(simulations=[])
+
+    remote_opalx_exe = f"{remote_build}/{cfg.opalx_executable_relpath}"
+    remote_opalx_dir = str(Path(remote_opalx_exe).parent)
+    remote_tests_root = f"{remote_base}/regtests/{cfg.regtests_subdir}"
+
+    reg_lines: list[str] = []
+    reg_lines.append(f"Running {len(tests)} regression tests remotely on {ac.remote_host}")
+    reg_lines.append(f"Remote OPALX executable: {remote_opalx_exe}")
+
+    for test_name in tests:
+        if cancel_event is not None and cancel_event.is_set():
+            _append_pipeline_line(
+                pipeline_log_path,
+                "[regression] CANCELLED by user — stopping regression tests.",
+            )
+            break
+
+        src_test_dir = tests_root / test_name
+        work_test_dir = paths.work_dir / test_name
+        if work_test_dir.exists():
+            shutil.rmtree(work_test_dir)
+        work_test_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy test directory on the remote.
+        remote_test_work = f"{remote_base}/work/{run_id}/{test_name}"
+        remote_test_src = f"{remote_tests_root}/{test_name}"
+        remote.run_command(
+            f"rm -rf {shlex.quote(remote_test_work)} && cp -r {shlex.quote(remote_test_src)} {shlex.quote(remote_test_work)}",
+            remote_cwd="/tmp",
+            log_path=pipeline_log_path,
+            append_log=True,
+        )
+
+        local_script = src_test_dir / f"{test_name}.local"
+        rt_file = src_test_dir / f"{test_name}.rt"
+        reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
+        local_stat = work_test_dir / f"{test_name}.stat"
+        test_log_local = work_test_dir / f"{test_name}-RT.o"
+        test_log_run = paths.logs_dir / f"{test_name}-RT.o"
+
+        env = {"OPALX_EXE_PATH": remote_opalx_dir}
+
+        if local_script.is_file():
+            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
+            cmd = f"bash {shlex.quote(test_name + '.local')}"
+            if extra_args:
+                cmd += f" {extra_args}"
+        else:
+            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
+            mpi_prefix = f"mpirun -np {ac.mpi_ranks} " if ac.mpi_ranks > 1 else ""
+            cmd = (
+                f"{mpi_prefix}{shlex.quote(remote_opalx_exe)} "
+                f"{extra_args} {shlex.quote(test_name + '.in')}"
+            ).strip()
+
+        _append_pipeline_line(pipeline_log_path, f"[regression] START {test_name}")
+        _test_start = time.monotonic()
+
+        rc = remote.run_command(
+            cmd,
+            remote_cwd=remote_test_work,
+            log_path=test_log_local,
+            module_loads=ac.module_loads or None,
+            module_use_paths=cfg.module_use_paths or None,
+            lmod_init=ac.remote_lmod_init,
+            env=env,
+        )
+
+        # Copy log to run logs directory.
+        if test_log_local.exists():
+            shutil.copy2(test_log_local, test_log_run)
+
+        # Fetch the .stat file from the remote.
+        remote_stat = f"{remote_test_work}/{test_name}.stat"
+        try:
+            remote.fetch_file(remote_stat, local_stat)
+        except Exception as exc:
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] WARNING: could not fetch {test_name}.stat: {exc}",
+            )
+
+        # --- Local processing (identical to _run_regression_suite) ---
+        description, checks = _parse_rt_file(rt_file)
+        sim_metrics: list[RegressionMetric] = []
+
+        if checks:
+            for var_name, mode, eps in checks:
+                rev, s_vals, values, unit = (
+                    _read_stat_data(local_stat, var_name)
+                    if local_stat.exists()
+                    else (None, [], [], None)
+                )
+                _ref_rev, ref_s_vals, ref_values, _ = (
+                    _read_stat_data(reference_stat, var_name)
+                    if reference_stat.exists()
+                    else (None, [], [], None)
+                )
+                delta = _compute_delta(mode, values, ref_values)
+
+                state = "broken"
+                if delta is not None:
+                    state = "passed" if delta < eps else "failed"
+                elif rc != 0:
+                    state = "failed"
+
+                plot_rel: Optional[str] = None
+                can_plot = (
+                    s_vals
+                    and values
+                    and ref_s_vals
+                    and ref_values
+                    and len(s_vals) == len(values)
+                    and len(ref_s_vals) == len(ref_values)
+                    and min(len(values), len(ref_values)) > 1
+                )
+                if can_plot:
+                    plot_name = f"{test_name}_{var_name}.svg"
+                    plot_path = paths.plots_dir / plot_name
+                    try:
+                        _write_stat_plot(
+                            s_vals=s_vals,
+                            values=values,
+                            ref_s_vals=ref_s_vals,
+                            ref_values=ref_values,
+                            out_path=plot_path,
+                            test_name=test_name,
+                            var_name=var_name,
+                            var_unit=unit or "",
+                        )
+                        plot_rel = f"plots/{plot_name}"
+                    except Exception as exc:
+                        _append_pipeline_line(
+                            pipeline_log_path,
+                            f"[regression] plot failed for {test_name}:{var_name}: {exc}",
+                        )
+
+                current_value = values[-1] if values else None
+                reference_value = ref_values[-1] if ref_values else None
+                sim_metrics.append(
+                    RegressionMetric(
+                        metric=var_name,
+                        mode=mode,
+                        eps=eps,
+                        delta=delta,
+                        state=state,
+                        reference_value=reference_value,
+                        current_value=current_value,
+                        plot=plot_rel,
+                    )
+                )
+        else:
+            has_stat = local_stat.exists()
+            state = "passed" if rc == 0 and has_stat else ("failed" if rc != 0 else "broken")
+            sim_metrics.append(
+                RegressionMetric(
+                    metric="run",
+                    mode="presence",
+                    eps=None,
+                    delta=None,
+                    state=state,
+                    reference_value=None,
+                    current_value=None,
+                    plot=None,
+                )
+            )
+
+        sim_state = "passed"
+        if any(m.state == "failed" for m in sim_metrics):
+            sim_state = "failed"
+        elif any(m.state == "broken" for m in sim_metrics):
+            sim_state = "broken"
+
+        sim = RegressionSimulation(
+            name=test_name,
+            description=description,
+            state=sim_state,
+            log_file=f"logs/{test_name}-RT.o",
+            metrics=sim_metrics,
+            duration_seconds=time.monotonic() - _test_start,
+        )
+        report.simulations.append(sim)
+        _append_pipeline_line(
+            pipeline_log_path,
+            f"[regression] END {test_name} state={sim_state} metrics={len(sim_metrics)}",
+        )
+        reg_lines.append(f"{test_name}: {sim_state} ({len(sim_metrics)} checks)")
+
+    if not cfg.keep_work_dirs and paths.work_dir.exists():
+        shutil.rmtree(paths.work_dir)
+        _append_pipeline_line(pipeline_log_path, "[regression] Removed temporary work directory.")
+
+    paths.reg_log_path.write_text("\n".join(reg_lines) + "\n", encoding="utf-8")
+    return report
+
+
+def _validate_remote_config(ac: ArchConfig) -> None:
+    """Raise ValueError if required remote fields are missing."""
+    missing = []
+    if not ac.remote_host:
+        missing.append("remote_host")
+    if not ac.remote_user:
+        missing.append("remote_user")
+    if not ac.remote_key_name:
+        missing.append("remote_key_name")
+    if missing:
+        raise ValueError(
+            f"execution_mode='remote' for arch '{ac.arch}' requires: "
+            + ", ".join(missing)
+        )
+
+
+def _get_repo_url(repo_path: Path, config_url: Optional[str]) -> str:
+    """Resolve a git clone URL: use config value or derive from local origin."""
+    if config_url:
+        return config_url
+    proc = subprocess.run(
+        ["git", "-C", str(repo_path), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    raise ValueError(
+        f"Cannot determine git URL for {repo_path}. "
+        "Set opalx_repo_url / regtests_repo_url in config."
+    )
+
+
 def run_pipeline(
     cfg: SuiteConfig,
     branch: str,
@@ -715,9 +964,34 @@ def run_pipeline(
     effective_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
     build_cmd = f"make -j{ac.build_jobs}"
 
+    is_remote = ac.execution_mode == "remote"
+
+    # ── Remote executor setup ────────────────────────────────────────────────
+    remote: Optional["RemoteExecutor"] = None  # type: ignore[name-defined]
+    remote_base: Optional[str] = None
+    remote_build: Optional[str] = None
+
+    if is_remote:
+        from .remote import RemoteExecutor
+
+        _validate_remote_config(ac)
+        key_path = cfg.resolved_ssh_keys_dir / f"{ac.remote_key_name}.pem"
+        if not key_path.exists():
+            raise FileNotFoundError(f"SSH key not found: {key_path}")
+        remote = RemoteExecutor(
+            host=ac.remote_host,  # type: ignore[arg-type]
+            user=ac.remote_user,  # type: ignore[arg-type]
+            key_path=key_path,
+            port=ac.remote_port,
+            pipeline_log_path=paths.pipeline_log_path,
+        )
+        remote_base = ac.remote_work_dir
+        remote_build = f"{remote_base}/builds/{branch}/{arch}/build"
+
     # Build the module environment once for this run (used by cmake, build, tests).
     module_env: Optional[dict[str, str]] = None
-    if ac.module_loads:
+    if ac.module_loads and not is_remote:
+        # For remote runs, module loading is handled inline by RemoteExecutor.
         module_env = _build_module_env(
             ac.module_loads,
             cfg.module_use_paths,
@@ -728,140 +1002,236 @@ def run_pipeline(
     opalx_repo = cfg.resolved_opalx_repo_root
     regtests_repo = cfg.resolved_regtests_repo_root
 
-    # Determine build directory.
+    # Determine build directory (local).
     build_dir = cfg.resolved_builds_root / branch / arch / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Phase: git ────────────────────────────────────────────────────────────
-    _phase(paths.pipeline_log_path, "git")
-    _append_pipeline_line(
-        paths.pipeline_log_path, f"Updating OPALX repo at {opalx_repo}"
-    )
-    opalx_git_ok = _git_update_repo(
-        repo_path=opalx_repo,
-        branch=branch,
-        pipeline_log_path=paths.pipeline_log_path,
-    )
-    _append_pipeline_line(
-        paths.pipeline_log_path,
-        f"Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch})",
-    )
-    reg_git_ok = _git_update_repo(
-        repo_path=regtests_repo,
-        branch=cfg.regtests_branch,
-        pipeline_log_path=paths.pipeline_log_path,
-    )
-    meta.opalx_commit = _git_head_short(opalx_repo)
-    meta.tests_repo_commit = _git_head_short(regtests_repo)
-    _write_json(paths.meta_path, meta.model_dump())
+    try:
+        if is_remote and remote is not None:
+            remote.ensure_dir(remote_build)  # type: ignore[arg-type]
 
-    if cancel_event is not None and cancel_event.is_set():
-        return _cancel_run(meta, paths, data_root)
+        # ── Phase: git ────────────────────────────────────────────────────────
+        _phase(paths.pipeline_log_path, "git")
 
-    # ── Phase: cmake ──────────────────────────────────────────────────────────
-    _phase(paths.pipeline_log_path, "cmake")
-    cmake_cmd = " ".join(["cmake", *effective_cmake_args, str(opalx_repo)])
-    _append_pipeline_line(
-        paths.pipeline_log_path, f"Configuring build: {cmake_cmd}"
-    )
-    cmake_rc, _ = _run_command(
-        cmake_cmd,
-        cwd=build_dir,
-        log_path=paths.logs_dir / "cmake.log",
-        pipeline_log_path=paths.pipeline_log_path,
-        env=module_env,
-    )
-
-    # ── Phase: build ──────────────────────────────────────────────────────────
-    _phase(paths.pipeline_log_path, "build")
-    _append_pipeline_line(paths.pipeline_log_path, f"Building: {build_cmd}")
-    build_rc, _ = _run_command(
-        build_cmd,
-        cwd=build_dir,
-        log_path=paths.logs_dir / "build.log",
-        pipeline_log_path=paths.pipeline_log_path,
-        env=module_env,
-    )
-    build_ok = cmake_rc == 0 and build_rc == 0
-    if not build_ok:
-        meta.status = "failed"
-    if not (opalx_git_ok and reg_git_ok):
-        meta.status = "failed"
-
-    if cancel_event is not None and cancel_event.is_set():
-        return _cancel_run(meta, paths, data_root)
-
-    unit_report = UnitTestsReport()
-    reg_report = RegressionTestsReport()
-
-    # ── Phase: unit ───────────────────────────────────────────────────────────
-    _phase(paths.pipeline_log_path, "unit")
-    if build_ok and not skip_unit and cfg.unit_test_command:
-        rc, output = _run_command(
-            cfg.unit_test_command,
-            cwd=build_dir,
-            log_path=paths.unit_log_path,
-            pipeline_log_path=paths.pipeline_log_path,
-            env=module_env,
+        # Local git update (always, for commit hash tracking).
+        _append_pipeline_line(
+            paths.pipeline_log_path, f"Updating OPALX repo at {opalx_repo}"
         )
-        unit_report = _parse_unit_output(output)
-        meta.unit_tests_total = unit_report.total
-        meta.unit_tests_failed = unit_report.failed
-        if rc != 0 and meta.status == "running":
-            meta.status = "failed"
-    elif skip_unit:
-        _append_pipeline_line(paths.pipeline_log_path, "[unit] Skipped by user.")
-    else:
-        _append_pipeline_line(paths.pipeline_log_path, "[unit] Skipped because build failed.")
-
-    _write_json(paths.unit_json_path, unit_report.model_dump())
-
-    if cancel_event is not None and cancel_event.is_set():
-        return _cancel_run(meta, paths, data_root)
-
-    # ── Phase: regression ─────────────────────────────────────────────────────
-    _phase(paths.pipeline_log_path, "regression")
-    if build_ok and not skip_regression:
-        reg_report = _run_regression_suite(
-            cfg=cfg,
-            paths=paths,
-            build_dir=build_dir,
+        opalx_git_ok = _git_update_repo(
+            repo_path=opalx_repo,
+            branch=branch,
             pipeline_log_path=paths.pipeline_log_path,
-            mpi_ranks=ac.mpi_ranks,
-            cancel_event=cancel_event,
-            base_env=module_env,
         )
-        meta.regression_total = reg_report.total
-        meta.regression_passed = reg_report.passed
-        meta.regression_failed = reg_report.failed
-        meta.regression_broken = reg_report.broken
-        if (
-            meta.regression_failed > 0 or meta.regression_broken > 0
-        ) and meta.status == "running":
-            meta.status = "failed"
-    elif skip_regression:
-        _append_pipeline_line(paths.pipeline_log_path, "[regression] Skipped by user.")
-    else:
-        _append_pipeline_line(paths.pipeline_log_path, "[regression] Skipped because build failed.")
+        _append_pipeline_line(
+            paths.pipeline_log_path,
+            f"Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch})",
+        )
+        reg_git_ok = _git_update_repo(
+            repo_path=regtests_repo,
+            branch=cfg.regtests_branch,
+            pipeline_log_path=paths.pipeline_log_path,
+        )
+        meta.opalx_commit = _git_head_short(opalx_repo)
+        meta.tests_repo_commit = _git_head_short(regtests_repo)
+        _write_json(paths.meta_path, meta.model_dump())
 
-    _write_json(paths.reg_json_path, reg_report.model_dump())
+        # Remote: clone or update repos via HTTPS.
+        if is_remote and remote is not None:
+            opalx_url = _get_repo_url(opalx_repo, cfg.opalx_repo_url)
+            regtests_url = _get_repo_url(regtests_repo, cfg.regtests_repo_url)
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[remote] Cloning/updating OPALX on {ac.remote_host}",
+            )
+            remote_opalx_ok = remote.git_clone_or_update(
+                opalx_url,
+                f"{remote_base}/opalx-src",
+                branch,
+                log_path=paths.pipeline_log_path,
+            )
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[remote] Cloning/updating regression-tests on {ac.remote_host}",
+            )
+            remote_regtests_ok = remote.git_clone_or_update(
+                regtests_url,
+                f"{remote_base}/regtests",
+                cfg.regtests_branch,
+                log_path=paths.pipeline_log_path,
+            )
+            if not (remote_opalx_ok and remote_regtests_ok):
+                opalx_git_ok = False
 
-    # Check one more time after regression (cancel may have fired mid-loop).
-    if cancel_event is not None and cancel_event.is_set():
-        return _cancel_run(meta, paths, data_root)
+        if cancel_event is not None and cancel_event.is_set():
+            return _cancel_run(meta, paths, data_root)
 
-    # ── Phase: done ───────────────────────────────────────────────────────────
-    if meta.status == "running":
-        if meta.unit_tests_failed or meta.regression_failed or meta.regression_broken:
-            meta.status = "failed"
+        # ── Phase: cmake ──────────────────────────────────────────────────────
+        _phase(paths.pipeline_log_path, "cmake")
+        if is_remote and remote is not None:
+            cmake_cmd = " ".join(
+                ["cmake", *effective_cmake_args, shlex.quote(f"{remote_base}/opalx-src")]
+            )
+            _append_pipeline_line(
+                paths.pipeline_log_path, f"[remote] Configuring build: {cmake_cmd}"
+            )
+            cmake_rc = remote.run_command(
+                cmake_cmd,
+                remote_cwd=remote_build,  # type: ignore[arg-type]
+                log_path=paths.logs_dir / "cmake.log",
+                module_loads=ac.module_loads or None,
+                module_use_paths=cfg.module_use_paths or None,
+                lmod_init=ac.remote_lmod_init,
+            )
         else:
-            meta.status = "passed"
+            cmake_cmd = " ".join(["cmake", *effective_cmake_args, str(opalx_repo)])
+            _append_pipeline_line(
+                paths.pipeline_log_path, f"Configuring build: {cmake_cmd}"
+            )
+            cmake_rc, _ = _run_command(
+                cmake_cmd,
+                cwd=build_dir,
+                log_path=paths.logs_dir / "cmake.log",
+                pipeline_log_path=paths.pipeline_log_path,
+                env=module_env,
+            )
 
-    meta.finished_at = datetime.now(timezone.utc)
-    _phase(paths.pipeline_log_path, f"done status={meta.status}")
-    _write_json(paths.meta_path, meta.model_dump())
-    _update_indexes(data_root, meta)
-    return meta
+        # ── Phase: build ──────────────────────────────────────────────────────
+        _phase(paths.pipeline_log_path, "build")
+        _append_pipeline_line(paths.pipeline_log_path, f"Building: {build_cmd}")
+        if is_remote and remote is not None:
+            build_rc = remote.run_command(
+                build_cmd,
+                remote_cwd=remote_build,  # type: ignore[arg-type]
+                log_path=paths.logs_dir / "build.log",
+                module_loads=ac.module_loads or None,
+                module_use_paths=cfg.module_use_paths or None,
+                lmod_init=ac.remote_lmod_init,
+            )
+        else:
+            build_rc, _ = _run_command(
+                build_cmd,
+                cwd=build_dir,
+                log_path=paths.logs_dir / "build.log",
+                pipeline_log_path=paths.pipeline_log_path,
+                env=module_env,
+            )
+
+        build_ok = cmake_rc == 0 and build_rc == 0
+        if not build_ok:
+            meta.status = "failed"
+        if not (opalx_git_ok and reg_git_ok):
+            meta.status = "failed"
+
+        if cancel_event is not None and cancel_event.is_set():
+            return _cancel_run(meta, paths, data_root)
+
+        unit_report = UnitTestsReport()
+        reg_report = RegressionTestsReport()
+
+        # ── Phase: unit ───────────────────────────────────────────────────────
+        _phase(paths.pipeline_log_path, "unit")
+        if build_ok and not skip_unit and cfg.unit_test_command:
+            if is_remote and remote is not None:
+                rc = remote.run_command(
+                    cfg.unit_test_command,
+                    remote_cwd=remote_build,  # type: ignore[arg-type]
+                    log_path=paths.unit_log_path,
+                    module_loads=ac.module_loads or None,
+                    module_use_paths=cfg.module_use_paths or None,
+                    lmod_init=ac.remote_lmod_init,
+                )
+                output = paths.unit_log_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            else:
+                rc, output = _run_command(
+                    cfg.unit_test_command,
+                    cwd=build_dir,
+                    log_path=paths.unit_log_path,
+                    pipeline_log_path=paths.pipeline_log_path,
+                    env=module_env,
+                )
+            unit_report = _parse_unit_output(output)
+            meta.unit_tests_total = unit_report.total
+            meta.unit_tests_failed = unit_report.failed
+            if rc != 0 and meta.status == "running":
+                meta.status = "failed"
+        elif skip_unit:
+            _append_pipeline_line(paths.pipeline_log_path, "[unit] Skipped by user.")
+        else:
+            _append_pipeline_line(paths.pipeline_log_path, "[unit] Skipped because build failed.")
+
+        _write_json(paths.unit_json_path, unit_report.model_dump())
+
+        if cancel_event is not None and cancel_event.is_set():
+            return _cancel_run(meta, paths, data_root)
+
+        # ── Phase: regression ─────────────────────────────────────────────────
+        _phase(paths.pipeline_log_path, "regression")
+        if build_ok and not skip_regression:
+            if is_remote and remote is not None:
+                reg_report = _run_regression_suite_remote(
+                    cfg=cfg,
+                    paths=paths,
+                    ac=ac,
+                    remote=remote,
+                    remote_base=remote_base,  # type: ignore[arg-type]
+                    remote_build=remote_build,  # type: ignore[arg-type]
+                    run_id=run_id,
+                    pipeline_log_path=paths.pipeline_log_path,
+                    cancel_event=cancel_event,
+                )
+            else:
+                reg_report = _run_regression_suite(
+                    cfg=cfg,
+                    paths=paths,
+                    build_dir=build_dir,
+                    pipeline_log_path=paths.pipeline_log_path,
+                    mpi_ranks=ac.mpi_ranks,
+                    cancel_event=cancel_event,
+                    base_env=module_env,
+                )
+            meta.regression_total = reg_report.total
+            meta.regression_passed = reg_report.passed
+            meta.regression_failed = reg_report.failed
+            meta.regression_broken = reg_report.broken
+            if (
+                meta.regression_failed > 0 or meta.regression_broken > 0
+            ) and meta.status == "running":
+                meta.status = "failed"
+        elif skip_regression:
+            _append_pipeline_line(paths.pipeline_log_path, "[regression] Skipped by user.")
+        else:
+            _append_pipeline_line(paths.pipeline_log_path, "[regression] Skipped because build failed.")
+
+        _write_json(paths.reg_json_path, reg_report.model_dump())
+
+        # Check one more time after regression (cancel may have fired mid-loop).
+        if cancel_event is not None and cancel_event.is_set():
+            return _cancel_run(meta, paths, data_root)
+
+        # ── Phase: done ───────────────────────────────────────────────────────
+        if meta.status == "running":
+            if meta.unit_tests_failed or meta.regression_failed or meta.regression_broken:
+                meta.status = "failed"
+            else:
+                meta.status = "passed"
+
+        meta.finished_at = datetime.now(timezone.utc)
+        _phase(paths.pipeline_log_path, f"done status={meta.status}")
+        _write_json(paths.meta_path, meta.model_dump())
+        _update_indexes(data_root, meta)
+        return meta
+
+    finally:
+        if remote is not None:
+            # Clean up per-run work dir on remote (always).
+            if remote_base is not None and run_id:
+                remote.cleanup(f"{remote_base}/work/{run_id}")
+            # Full cleanup only if configured.
+            if ac.remote_cleanup and remote_base is not None:
+                remote.cleanup(remote_base)
+            remote.close()
 
 
 def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:

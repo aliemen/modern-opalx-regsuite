@@ -28,6 +28,65 @@ from .data_model import (
 )
 
 
+_LMOD_INIT_CANDIDATES = [
+    "/usr/share/lmod/lmod/init/bash",
+    "/etc/profile.d/lmod.sh",
+]
+
+
+def _find_lmod_init() -> Optional[str]:
+    for p in _LMOD_INIT_CANDIDATES:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _build_module_env(
+    module_loads: list[str],
+    module_use_paths: list[str],
+    pipeline_log_path: Path,
+) -> dict[str, str]:
+    """Return an environment dict with the requested lmod modules loaded."""
+    if not module_loads:
+        return os.environ.copy()
+
+    lmod_init = _find_lmod_init()
+    if not lmod_init:
+        _append_pipeline_line(
+            pipeline_log_path,
+            "[modules] WARNING: lmod init script not found; skipping module loads.",
+        )
+        return os.environ.copy()
+
+    parts = [f"source {shlex.quote(lmod_init)}"]
+    for p in module_use_paths:
+        parts.append(f"module use {shlex.quote(p)}")
+    for m in module_loads:
+        parts.append(f"module load {shlex.quote(m)}")
+    parts.append("env -0")
+
+    script = " && ".join(parts)
+    _append_pipeline_line(
+        pipeline_log_path, f"[modules] Loading: {', '.join(module_loads)}"
+    )
+    proc = subprocess.run(["bash", "-c", script], capture_output=True)
+    if proc.returncode != 0:
+        _append_pipeline_line(
+            pipeline_log_path,
+            f"[modules] WARNING: module load failed (rc={proc.returncode}); using base env.\n"
+            + proc.stderr.decode(errors="replace"),
+        )
+        return os.environ.copy()
+
+    env: dict[str, str] = {}
+    for item in proc.stdout.split(b"\0"):
+        s = item.decode(errors="replace")
+        if "=" in s:
+            k, v = s.split("=", 1)
+            env[k] = v
+    return env
+
+
 @dataclass
 class RunPaths:
     root: Path
@@ -437,6 +496,7 @@ def _run_regression_suite(
     pipeline_log_path: Path,
     mpi_ranks: int = 1,
     cancel_event: Optional[threading.Event] = None,
+    base_env: Optional[dict[str, str]] = None,
 ) -> RegressionTestsReport:
     tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
     tests = _discover_regression_tests(tests_root)
@@ -476,7 +536,7 @@ def _run_regression_suite(
 
         test_log_local = work_test_dir / f"{test_name}-RT.o"
         test_log_run = paths.logs_dir / f"{test_name}-RT.o"
-        env = os.environ.copy()
+        env = (base_env or os.environ).copy()
         env["OPALX_EXE_PATH"] = str(opalx_exe.parent)
 
         if local_script.is_file():
@@ -655,6 +715,15 @@ def run_pipeline(
     effective_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
     build_cmd = f"make -j{ac.build_jobs}"
 
+    # Build the module environment once for this run (used by cmake, build, tests).
+    module_env: Optional[dict[str, str]] = None
+    if ac.module_loads:
+        module_env = _build_module_env(
+            ac.module_loads,
+            cfg.module_use_paths,
+            paths.pipeline_log_path,
+        )
+
     # Resolve repositories.
     opalx_repo = cfg.resolved_opalx_repo_root
     regtests_repo = cfg.resolved_regtests_repo_root
@@ -700,6 +769,7 @@ def run_pipeline(
         cwd=build_dir,
         log_path=paths.logs_dir / "cmake.log",
         pipeline_log_path=paths.pipeline_log_path,
+        env=module_env,
     )
 
     # ── Phase: build ──────────────────────────────────────────────────────────
@@ -710,6 +780,7 @@ def run_pipeline(
         cwd=build_dir,
         log_path=paths.logs_dir / "build.log",
         pipeline_log_path=paths.pipeline_log_path,
+        env=module_env,
     )
     build_ok = cmake_rc == 0 and build_rc == 0
     if not build_ok:
@@ -731,6 +802,7 @@ def run_pipeline(
             cwd=build_dir,
             log_path=paths.unit_log_path,
             pipeline_log_path=paths.pipeline_log_path,
+            env=module_env,
         )
         unit_report = _parse_unit_output(output)
         meta.unit_tests_total = unit_report.total
@@ -757,6 +829,7 @@ def run_pipeline(
             pipeline_log_path=paths.pipeline_log_path,
             mpi_ranks=ac.mpi_ranks,
             cancel_event=cancel_event,
+            base_env=module_env,
         )
         meta.regression_total = reg_report.total
         meta.regression_passed = reg_report.passed

@@ -118,6 +118,12 @@ class SuiteConfig(BaseModel):
         description="If true, retain per-test temporary work directories after a run.",
     )
 
+    # Paths added via 'module use' before any module_loads are applied.
+    module_use_paths: List[str] = Field(
+        default_factory=list,
+        description="Paths to add with 'module use' before loading modules.",
+    )
+
     # Per-architecture overrides (optional).
     arch_configs: List[ArchConfig] = Field(
         default_factory=list,
@@ -244,6 +250,8 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     add_kv("opalx_executable_relpath", data.get("opalx_executable_relpath", "src/opalx"))
     add_kv("opalx_args", data.get("opalx_args", []))
     add_kv("keep_work_dirs", data.get("keep_work_dirs", False))
+    if data.get("module_use_paths"):
+        add_kv("module_use_paths", data["module_use_paths"])
     add_kv("host", data.get("host", "0.0.0.0"))
     add_kv("port", data.get("port", 8000))
     # Never write the secret key to disk; it lives in the env var.

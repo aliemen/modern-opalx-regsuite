@@ -371,6 +371,31 @@ def _extract_local_run_command(local_script: Path) -> Optional[str]:
     return None
 
 
+def _wrap_command_with_mpirun_srun_shim(cmd: str) -> str:
+    """Wrap *cmd* so legacy ``mpirun`` calls transparently map to ``srun``.
+
+    Some cluster environments (for example CSCS uenv setups) provide ``srun``
+    in Slurm allocations but no ``mpirun``. Legacy regression ``*.local``
+    scripts still call ``mpirun`` directly, so we synthesize a tiny local
+    ``mpirun`` shim in the test work dir and prepend ``$PWD`` to ``PATH``.
+    """
+    shim_script = (
+        "cat > mpirun <<'OPALX_MPIRUN_SHIM'\n"
+        "#!/usr/bin/env bash\n"
+        "if [[ \"${1:-}\" == \"-np\" || \"${1:-}\" == \"-n\" || \"${1:-}\" == \"--np\" ]]; then\n"
+        "  ranks=\"${2:-1}\"\n"
+        "  shift 2\n"
+        "  exec srun -n \"$ranks\" \"$@\"\n"
+        "fi\n"
+        "exec srun \"$@\"\n"
+        "OPALX_MPIRUN_SHIM\n"
+        "chmod +x mpirun\n"
+        "PATH=\"$PWD:$PATH\"\n"
+        f"{cmd}\n"
+    )
+    return f"bash -lc {shlex.quote(shim_script)}"
+
+
 def _parse_sdds_kv(block: str, key: str) -> Optional[str]:
     m = re.search(rf"{key}=([^,]+)", block)
     if not m:
@@ -736,6 +761,36 @@ def _run_regression_suite_remote(
     remote_run_work_dir = f"{remote_base}/work/{run_id}"
     remote.ensure_dir(remote_run_work_dir)
 
+    has_mpirun = (
+        remote.run_command(
+            "command -v mpirun >/dev/null 2>&1",
+            remote_cwd=remote_run_work_dir,
+            log_path=pipeline_log_path,
+            append_log=True,
+        )
+        == 0
+    )
+    has_srun = (
+        remote.run_command(
+            "command -v srun >/dev/null 2>&1",
+            remote_cwd=remote_run_work_dir,
+            log_path=pipeline_log_path,
+            append_log=True,
+        )
+        == 0
+    )
+    use_mpirun_shim = (not has_mpirun) and has_srun
+    if use_mpirun_shim:
+        _append_pipeline_line(
+            pipeline_log_path,
+            "[regression] mpirun not found on remote; using an srun-backed mpirun shim for legacy .local scripts.",
+        )
+    elif not has_mpirun:
+        _append_pipeline_line(
+            pipeline_log_path,
+            "[regression] WARNING: neither mpirun nor srun detected on remote; regression runs may fail.",
+        )
+
     for test_name in tests:
         if cancel_event is not None and cancel_event.is_set():
             _append_pipeline_line(
@@ -774,9 +829,14 @@ def _run_regression_suite_remote(
             cmd = f"bash {shlex.quote(test_name + '.local')}"
             if extra_args:
                 cmd += f" {extra_args}"
+            if use_mpirun_shim:
+                cmd = _wrap_command_with_mpirun_srun_shim(cmd)
         else:
             extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
-            mpi_prefix = f"mpirun -np {mpi_ranks} " if mpi_ranks > 1 else ""
+            if mpi_ranks > 1:
+                mpi_prefix = f"srun -n {mpi_ranks} " if use_mpirun_shim else f"mpirun -np {mpi_ranks} "
+            else:
+                mpi_prefix = ""
             cmd = (
                 f"{mpi_prefix}{shlex.quote(remote_opalx_exe)} "
                 f"{extra_args} {shlex.quote(test_name + '.in')}"

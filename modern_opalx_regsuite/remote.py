@@ -10,6 +10,7 @@ ever touch a log file.
 from __future__ import annotations
 
 import io
+import re
 import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -142,6 +143,7 @@ class RemoteExecutor:
         self._pipeline_log_path = pipeline_log_path
         self._conn: Optional[Connection] = None
         self._gateway_conn: Optional[Connection] = None
+        self._allocation_id: Optional[str] = None
 
     # ── Connection management ────────────────────────────────────────────
 
@@ -173,7 +175,8 @@ class RemoteExecutor:
         return self._conn
 
     def close(self) -> None:
-        """Close the target connection, then the gateway. Fabric does not cascade."""
+        """Cancel any active Slurm allocation, then close SSH connections."""
+        self.release_slurm_job()
         if self._conn is not None:
             try:
                 self._conn.close()
@@ -186,6 +189,55 @@ class RemoteExecutor:
             except Exception:
                 pass
             self._gateway_conn = None
+
+    # ── Slurm allocation ─────────────────────────────────────────────────
+
+    def allocate_slurm_job(self, slurm_args: list[str]) -> str:
+        """Allocate a Slurm job via ``salloc --parsable --no-shell``.
+
+        Returns the job ID string and records it in ``self._allocation_id``.
+        From this point on, every :meth:`run_command` call is automatically
+        wrapped in ``srun --jobid=<ID> --overlap -- bash -c '...'`` so that
+        MPI-linked executables can find the allocated host list.
+
+        ``--parsable`` makes salloc emit only ``JOBID`` or ``JOBID;CLUSTER``
+        (no human-readable banner text).  ``--no-shell`` allocates resources
+        without launching an interactive shell and returns immediately after
+        the allocation is granted.  Supported in Slurm ≥ 20.11.
+        """
+        args_str = " ".join(shlex.quote(a) for a in slurm_args)
+        result = self.conn.run(
+            f"salloc --no-shell {args_str}",
+            hide=True,
+            warn=True,
+        )
+        if result.return_code != 0:
+            raise RuntimeError(
+                f"salloc failed (rc={result.return_code}): {result.stderr.strip()}"
+            )
+        # salloc writes "salloc: Granted job allocation 12345" to stderr.
+        combined = result.stdout + result.stderr
+        m = re.search(r"Granted job allocation (\d+)", combined)
+        if m is None:
+            raise RuntimeError(
+                f"Could not parse job ID from salloc output: {combined!r}"
+            )
+        job_id = m.group(1)
+        self._allocation_id = job_id
+        self._log(f"[{self._connection_name}] Slurm job {job_id} allocated")
+        return job_id
+
+    def release_slurm_job(self) -> None:
+        """Cancel the active Slurm allocation. No-op if none is active."""
+        if self._allocation_id is None:
+            return
+        job_id = self._allocation_id
+        self._allocation_id = None  # clear first so close() won't double-cancel
+        try:
+            self.conn.run(f"scancel {shlex.quote(job_id)}", hide=True, warn=True)
+        except Exception:
+            pass
+        self._log(f"[{self._connection_name}] Slurm job {job_id} cancelled")
 
     # ── Logging helper ───────────────────────────────────────────────────
 
@@ -233,9 +285,43 @@ class RemoteExecutor:
 
         ``self._env.prologue`` holds the arguments between ``uenv run`` and
         ``--``, e.g. ``--view=develop /path/to/image.squashfs``.
+
+        When a Slurm allocation is active, use :meth:`_uenv_srun_flags`
+        instead — uenv activation is passed as ``srun --uenv/--view`` flags,
+        which avoids nesting ``uenv run`` inside ``bash -c`` inside ``srun``.
         """
         assert self._env is not None and self._env.prologue
         return f"uenv run {self._env.prologue} -- {cmd}"
+
+    def _uenv_srun_flags(self) -> str:
+        """Convert the uenv prologue to ``srun --uenv`` / ``--view`` flags.
+
+        CSCS Alps ``srun`` accepts ``--uenv=<image>`` and ``--view=<view>``
+        directly — the equivalent of ``#SBATCH --uenv`` / ``#SBATCH --view``.
+        Supported prologue forms (same syntax as ``uenv run``):
+
+        - ``/path/to/image.squashfs``
+        - ``/path/to/image.squashfs:view-name``
+        - ``--view=view-name /path/to/image.squashfs``
+        """
+        prologue = (self._env.prologue or "") if self._env else ""
+        parts = shlex.split(prologue)
+        image: Optional[str] = None
+        view: Optional[str] = None
+        for part in parts:
+            if part.startswith("--view="):
+                view = part[len("--view="):]
+            elif not part.startswith("-"):
+                if ":" in part:
+                    image, _, view_suffix = part.partition(":")
+                    if view_suffix:
+                        view = view_suffix
+                else:
+                    image = part
+        flags = f"--uenv={shlex.quote(image)}" if image else ""
+        if view:
+            flags += f" --view={shlex.quote(view)}"
+        return flags.strip()
 
     # ── Command execution ────────────────────────────────────────────────
 
@@ -271,12 +357,32 @@ class RemoteExecutor:
         # uenv style: wrap the whole thing (including env vars) with uenv run.
         # uenv run uses execve, not a shell — VAR=value cmd shell syntax does not
         # work.  Use env(1) to carry the variable assignments instead.
-        if self._is_uenv() and self._env and self._env.prologue:
+        # Exception: when a Slurm allocation is active, uenv activation is passed
+        # as srun --uenv/--view flags (see below) — running "uenv run" inside an
+        # srun step can interfere with namespace setup on CSCS Alps.
+        if self._is_uenv() and self._env and self._env.prologue and self._allocation_id is None:
             inner = (f"env {env_prefix}{cmd}") if env_prefix else cmd
             full_cmd = self._wrap_with_uenv(inner)
 
         # Wrap in cd. The wrapped command exists in memory only.
         wrapped = f"cd {shlex.quote(remote_cwd)} && {full_cmd}"
+
+        # When a Slurm allocation is active, run every command as a job step
+        # so that MPI-linked test executables can see the allocated host list.
+        # srun calls execve, not a shell, so we use bash -c to preserve the
+        # &&-chain (cd, module loads, env preamble) around the real command.
+        # When uenv style is configured, pass the image/view as srun --uenv/--view
+        # flags instead of calling "uenv run" inside bash — this is the correct
+        # way to activate a uenv on CSCS Alps compute nodes, equivalent to
+        # #SBATCH --uenv / #SBATCH --view.
+        if self._allocation_id is not None:
+            uenv_flags = ""
+            if self._is_uenv() and self._env and self._env.prologue:
+                uenv_flags = " " + self._uenv_srun_flags()
+            wrapped = (
+                f"srun --jobid={shlex.quote(self._allocation_id)} --overlap{uenv_flags}"
+                f" -- bash -c {shlex.quote(wrapped)}"
+            )
 
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_mode = "a" if append_log else "w"

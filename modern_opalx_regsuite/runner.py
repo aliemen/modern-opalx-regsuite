@@ -1048,6 +1048,24 @@ def run_pipeline(
     build_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        # ── Phase: slurm-alloc (optional) ────────────────────────────────────
+        if is_remote and remote is not None and ac.slurm_args:
+            _phase(paths.pipeline_log_path, "slurm-alloc")
+            try:
+                job_id = remote.allocate_slurm_job(ac.slurm_args)
+                _append_pipeline_line(
+                    paths.pipeline_log_path,
+                    f"[{connection_name}] Slurm job {job_id} allocated"
+                    f" ({' '.join(ac.slurm_args)})",
+                )
+            except Exception as exc:
+                _phase(paths.pipeline_log_path, "done status=failed")
+                meta.status = "failed"
+                meta.finished_at = datetime.now(timezone.utc)
+                _write_json(paths.meta_path, meta.model_dump())
+                _update_indexes(data_root, meta)
+                raise RuntimeError(f"Slurm allocation failed: {exc}") from exc
+
         if is_remote and remote is not None:
             remote.ensure_dir(remote_build)  # type: ignore[arg-type]
 

@@ -146,7 +146,13 @@ class ArchConfig(BaseModel):
     mpi_ranks: int = Field(1, description="MPI ranks for regression test execution.")
     slurm_args: List[str] = Field(
         default_factory=list,
-        description="Extra sbatch arguments, e.g. ['--partition=gpu', '--gres=gpu:1']. Reserved for future slurm support.",
+        description=(
+            "salloc arguments for Slurm-managed remote runs, e.g. "
+            "['--partition=debug', '--ntasks=4', '--gpus=4', '--time=01:00:00']. "
+            "When non-empty the runner allocates a job via 'salloc --parsable --no-shell' "
+            "before starting the pipeline and runs every command as an srun step within "
+            "that job. Leave empty to run all commands directly over SSH (no Slurm)."
+        ),
     )
     env: EnvActivation = Field(
         default_factory=EnvActivation,

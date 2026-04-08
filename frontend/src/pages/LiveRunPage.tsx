@@ -174,6 +174,12 @@ interface StoredLiveState {
   tests: TestInfo[];
   phase: string;
   finalStatus: string | null;
+  // Cached from the first `effectiveRun` seen so the "View results" /
+  // "Dashboard" buttons remain visible after the backend removes the run
+  // from its active-runs list (which would otherwise clear `effectiveRun`
+  // and hide the buttons a split second after they appear).
+  branch?: string;
+  arch?: string;
 }
 
 function liveStateKey(runId: string): string {
@@ -281,6 +287,12 @@ export function LiveRunPage() {
   );
   const [cancelling, setCancelling] = useState(false);
   const [tests, setTests] = useState<TestInfo[]>(initSnap?.tests ?? []);
+  // Cached branch/arch from the first effectiveRun so post-run action buttons
+  // stay visible after the backend drops the run from active-runs.
+  const [cachedBranch, setCachedBranch] = useState<string | undefined>(
+    initSnap?.branch
+  );
+  const [cachedArch, setCachedArch] = useState<string | undefined>(initSnap?.arch);
 
   const elapsed = useElapsed(effectiveRun?.started_at || undefined);
   const displayStatus = finalStatus ?? effectiveRun?.status ?? "running";
@@ -294,7 +306,16 @@ export function LiveRunPage() {
     setPhase(snap?.phase ?? "git");
     setFinalStatus(snap?.finalStatus ?? null);
     setCancelling(false);
+    setCachedBranch(snap?.branch);
+    setCachedArch(snap?.arch);
   }, [runId]);
+
+  // Cache branch/arch the moment we see the live run, so the post-run action
+  // buttons can keep rendering after `effectiveRun` becomes null.
+  useEffect(() => {
+    if (effectiveRun?.branch) setCachedBranch(effectiveRun.branch);
+    if (effectiveRun?.arch) setCachedArch(effectiveRun.arch);
+  }, [effectiveRun?.branch, effectiveRun?.arch]);
 
   // Redirect to trigger page if nothing to show.
   useEffect(() => {
@@ -313,8 +334,15 @@ export function LiveRunPage() {
   // Persist live-view state to per-run session storage on every change.
   useEffect(() => {
     if (!runId) return;
-    saveLiveState({ runId, tests, phase, finalStatus });
-  }, [tests, phase, finalStatus, runId]);
+    saveLiveState({
+      runId,
+      tests,
+      phase,
+      finalStatus,
+      branch: cachedBranch,
+      arch: cachedArch,
+    });
+  }, [tests, phase, finalStatus, runId, cachedBranch, cachedArch]);
 
   // Parse regression test START/END lines from the log stream.
   const handleLogLine = useCallback(
@@ -429,12 +457,12 @@ export function LiveRunPage() {
       </div>
 
       {/* Post-run actions */}
-      {finalStatus && finalStatus !== "running" && effectiveRun?.branch && (
+      {finalStatus && finalStatus !== "running" && runId && (effectiveRun?.branch ?? cachedBranch) && (effectiveRun?.arch ?? cachedArch) && (
         <div className="mt-4 flex gap-3">
           <button
             onClick={() =>
               navigate(
-                `/results/${effectiveRun.branch}/${effectiveRun.arch}/${effectiveRun.run_id}`
+                `/results/${effectiveRun?.branch ?? cachedBranch}/${effectiveRun?.arch ?? cachedArch}/${runId}`
               )
             }
             className="px-4 py-2 text-sm bg-accent text-bg font-medium rounded-md hover:brightness-110 transition"

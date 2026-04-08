@@ -365,7 +365,15 @@ class RemoteExecutor:
             full_cmd = self._wrap_with_uenv(inner)
 
         # Wrap in cd. The wrapped command exists in memory only.
-        wrapped = f"cd {shlex.quote(remote_cwd)} && {full_cmd}"
+        # Also unset the exported "module" bash function inherited from the SSH
+        # login profile (lmod exports it via BASH_FUNC_module%%). srun rejects
+        # multiline function exports with "Improperly formed environment variable",
+        # which corrupts the log output of any command that calls srun internally
+        # (e.g. regression test .local scripts that launch OPAL-X via srun).
+        wrapped = (
+            f"unset -f module 2>/dev/null; "
+            f"cd {shlex.quote(remote_cwd)} && {full_cmd}"
+        )
 
         # When a Slurm allocation is active, run every command as a job step
         # so that MPI-linked test executables can see the allocated host list.

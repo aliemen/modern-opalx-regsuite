@@ -1,6 +1,7 @@
 import { api } from "./client";
 
-export type EnvActivationStyle = "none" | "modules" | "prologue";
+export type EnvActivationStyle = "none" | "modules" | "prologue" | "uenv";
+export const ENV_STYLES: EnvActivationStyle[] = ["none", "modules", "prologue", "uenv"];
 
 export interface EnvActivation {
   style: EnvActivationStyle;

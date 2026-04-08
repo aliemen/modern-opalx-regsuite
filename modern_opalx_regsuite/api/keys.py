@@ -87,7 +87,15 @@ async def upload_ssh_key(
     key_file: Annotated[UploadFile, File(...)],
     user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
+    cert_file: Annotated[UploadFile | None, File()] = None,
 ) -> SshKeyInfo:
+    """Upload a private key, and optionally a certificate file alongside it.
+
+    The certificate (e.g. ``cscs-key-cert.pub`` from CSCS) is stored as
+    ``<name>-cert.pub`` next to ``<name>.pem``. If present, Paramiko will
+    automatically use it for certificate-based authentication (required by
+    some HPC sites like CSCS Alps/Daint).
+    """
     _validate_name(name)
     username, _ = user_paths
     keys = user_keys_dir(cfg, username)
@@ -102,9 +110,46 @@ async def upload_ssh_key(
 
     _write_key_atomic(key_path, content)
 
+    if cert_file is not None:
+        cert_content = await cert_file.read()
+        if cert_content:
+            cert_path = keys / f"{name}-cert.pub"
+            _write_key_atomic(cert_path, cert_content)
+
     fp = _fingerprint(key_path)
     mtime = datetime.fromtimestamp(key_path.stat().st_mtime, tz=timezone.utc)
     return SshKeyInfo(name=name, created_at=mtime.isoformat(), fingerprint=fp)
+
+
+@router.post("/{name}/cert", status_code=204)
+async def upload_ssh_key_cert(
+    name: str,
+    cert_file: Annotated[UploadFile, File(...)],
+    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
+) -> None:
+    """Upload or replace the certificate for an existing SSH key.
+
+    The certificate is stored as ``<name>-cert.pub`` next to ``<name>.pem``.
+    Use this endpoint to add a certificate to a key that was uploaded without one.
+    """
+    _validate_name(name)
+    username, _ = user_paths
+    keys = user_keys_dir(cfg, username)
+    key_path = keys / f"{name}.pem"
+    if not key_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Key '{name}' not found.",
+        )
+    cert_content = await cert_file.read()
+    if not cert_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Certificate file is empty.",
+        )
+    cert_path = keys / f"{name}-cert.pub"
+    _write_key_atomic(cert_path, cert_content)
 
 
 @router.get("", response_model=list[SshKeyInfo])
@@ -149,10 +194,14 @@ def delete_ssh_key(
             },
         )
 
-    key_path = user_keys_dir(cfg, username) / f"{name}.pem"
+    keys = user_keys_dir(cfg, username)
+    key_path = keys / f"{name}.pem"
     if not key_path.is_file():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Key '{name}' not found.",
         )
     key_path.unlink()
+    cert_path = keys / f"{name}-cert.pub"
+    if cert_path.is_file():
+        cert_path.unlink()

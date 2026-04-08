@@ -13,11 +13,13 @@ export async function listSshKeys(): Promise<SshKeyInfo[]> {
 
 export async function uploadSshKey(
   name: string,
-  file: File
+  file: File,
+  cert?: File
 ): Promise<SshKeyInfo> {
   const form = new FormData();
   form.append("name", name);
   form.append("key_file", file);
+  if (cert) form.append("cert_file", cert);
   const res = await api.post<SshKeyInfo>("/api/settings/ssh-keys", form);
   return res.data;
 }

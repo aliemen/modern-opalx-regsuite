@@ -15,6 +15,7 @@ import { ConnectionForm } from "../components/ConnectionForm";
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const certRef = useRef<HTMLInputElement>(null);
 
   const [keyName, setKeyName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -36,13 +37,14 @@ export function SettingsPage() {
   });
 
   const uploadMut = useMutation({
-    mutationFn: ({ name, file }: { name: string; file: File }) =>
-      uploadSshKey(name, file),
+    mutationFn: ({ name, file, cert }: { name: string; file: File; cert?: File }) =>
+      uploadSshKey(name, file, cert),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       setKeyName("");
       if (fileRef.current) fileRef.current.value = "";
+      if (certRef.current) certRef.current.value = "";
       setError(null);
       setSuccess(`Key "${data.name}" uploaded.`);
     },
@@ -113,6 +115,7 @@ export function SettingsPage() {
     setError(null);
     setSuccess(null);
     const file = fileRef.current?.files?.[0];
+    const cert = certRef.current?.files?.[0];
     if (!keyName.trim()) {
       setError("Please enter a key name.");
       return;
@@ -121,7 +124,7 @@ export function SettingsPage() {
       setError("Please select a private key file.");
       return;
     }
-    uploadMut.mutate({ name: keyName.trim(), file });
+    uploadMut.mutate({ name: keyName.trim(), file, cert });
   }
 
   return (
@@ -157,6 +160,19 @@ export function SettingsPage() {
               className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm file:mr-3 file:border-0 file:bg-transparent file:text-accent file:text-sm file:font-medium"
             />
           </div>
+          <div className="flex gap-2 items-center">
+            <label className="text-xs text-muted whitespace-nowrap">Certificate (optional):</label>
+            <input
+              ref={certRef}
+              type="file"
+              accept=".pub,*"
+              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm file:mr-3 file:border-0 file:bg-transparent file:text-muted file:text-sm file:font-medium"
+            />
+          </div>
+          <p className="text-muted text-xs">
+            Upload a certificate file (e.g. <code className="text-fg">cscs-key-cert.pub</code>) if
+            your HPC site uses certificate-based SSH authentication (CSCS Alps / Daint).
+          </p>
           <button
             onClick={handleUpload}
             disabled={uploadMut.isPending}

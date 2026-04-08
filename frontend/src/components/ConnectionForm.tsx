@@ -8,6 +8,7 @@ import {
   updateConnection,
   type Connection,
   type EnvActivationStyle,
+  ENV_STYLES,
 } from "../api/connections";
 
 interface Props {
@@ -310,7 +311,7 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
       <div className="border-t border-border pt-3">
         <h4 className="text-fg text-sm font-medium mb-2">Environment activation</h4>
         <div className="flex gap-4 mb-3">
-          {(["none", "modules", "prologue"] as EnvActivationStyle[]).map((s) => (
+          {ENV_STYLES.map((s) => (
             <label
               key={s}
               className="flex items-center gap-1.5 text-sm text-muted cursor-pointer"
@@ -398,7 +399,7 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
             <label className="block text-xs text-muted mb-1">Prologue command</label>
             <textarea
               rows={3}
-              placeholder="uenv start prgenv-gnu/24.7:v3 --view=default"
+              placeholder="source /opt/setup.sh"
               value={form.env.prologue ?? ""}
               onChange={(e) =>
                 setForm({
@@ -409,10 +410,35 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
               className={`${inputCls} font-mono`}
             />
             <p className="text-muted text-xs mt-1">
-              Free-form shell command prepended before every remote command.
+              Shell command joined with <code className="text-fg">&&</code> before every remote command.
               Must keep <code className="text-fg">git</code>,{" "}
               <code className="text-fg">cmake</code>, and{" "}
               <code className="text-fg">make</code> available on PATH.
+            </p>
+          </div>
+        )}
+
+        {form.env.style === "uenv" && (
+          <div>
+            <label className="block text-xs text-muted mb-1">uenv run arguments</label>
+            <textarea
+              rows={3}
+              placeholder="--view=develop /capstor/store/.../image.squashfs"
+              value={form.env.prologue ?? ""}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  env: { ...form.env, prologue: e.target.value },
+                })
+              }
+              className={`${inputCls} font-mono`}
+            />
+            <p className="text-muted text-xs mt-1">
+              Arguments placed between <code className="text-fg">uenv run</code> and{" "}
+              <code className="text-fg">--</code>. Each command runs as{" "}
+              <code className="text-fg">uenv run {"<args>"} -- {"<cmd>"}</code>.
+              Use this instead of <code className="text-fg">uenv start</code>, which requires
+              an interactive shell and fails in scripted SSH sessions.
             </p>
           </div>
         )}

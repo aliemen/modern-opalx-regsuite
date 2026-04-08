@@ -21,6 +21,67 @@ if TYPE_CHECKING:
     from .config import EnvActivation, GatewayEndpoint
 
 
+def _load_pkey(key_path: Path) -> paramiko.PKey:
+    """Load a private key from *key_path*, trying all supported key types.
+
+    Using ``pkey=`` instead of ``key_filename=`` avoids a known Paramiko quirk
+    where the internal type-guessing loop silently skips newer OpenSSH-format
+    Ed25519 keys and falls through to ``AuthenticationException`` with no
+    diagnostic information.  Loading explicitly surfaces key-format errors at
+    load time with a clear message.
+
+    If a certificate file ``<key_stem>-cert.pub`` exists next to the private
+    key (e.g. CSCS-style certificate-based auth), it is attached to the key
+    object automatically so Paramiko offers the cert identity during auth —
+    exactly what OpenSSH does when it finds ``<name>-cert.pub`` alongside
+    ``<name>`` in ``~/.ssh/``.
+    """
+    key: paramiko.PKey | None = None
+    for key_cls in (
+        paramiko.Ed25519Key,
+        paramiko.RSAKey,
+        paramiko.ECDSAKey,
+    ):
+        try:
+            key = key_cls.from_private_key_file(str(key_path))
+            break
+        except (paramiko.SSHException, ValueError):
+            continue
+    if key is None:
+        raise ValueError(
+            f"Could not load SSH private key from {key_path}: "
+            "unrecognised format or unsupported key type."
+        )
+    # Auto-load companion certificate if present (e.g. cscs-key-cert.pub).
+    cert_path = key_path.parent / (key_path.stem + "-cert.pub")
+    if cert_path.is_file():
+        key.load_certificate(str(cert_path))
+    return key
+
+
+def _connect_kwargs(key_path: Path) -> dict:
+    """Build Fabric/Paramiko connect_kwargs for a single SSH leg.
+
+    - ``pkey``: pre-loaded key object — avoids the ``key_filename`` type-guessing
+      loop that silently fails for newer OpenSSH-format Ed25519 keys.
+    - ``allow_agent=False``: do not query the ssh-agent (IdentitiesOnly equivalent).
+    - ``look_for_keys=False``: do not scan ~/.ssh/id_* fallback files.
+    - ``banner_timeout=60``: CSCS and similar HPC front-ends can take several
+      seconds to emit the SSH banner; Paramiko's default of 15 s is too short.
+    - ``auth_timeout=60``: same reasoning — give the server time to complete
+      the public-key challenge exchange.
+    - ``timeout=30``: TCP connect timeout.
+    """
+    return {
+        "pkey": _load_pkey(key_path),
+        "allow_agent": False,
+        "look_for_keys": False,
+        "banner_timeout": 60,
+        "auth_timeout": 60,
+        "timeout": 30,
+    }
+
+
 class _TeeWriter(io.RawIOBase):
     """File-like that writes each chunk to two underlying file objects."""
 
@@ -98,7 +159,7 @@ class RemoteExecutor:
                     host=self._gateway.host,
                     user=self._gateway.user,
                     port=self._gateway.port,
-                    connect_kwargs={"key_filename": str(self._gateway_key_path)},
+                    connect_kwargs=_connect_kwargs(self._gateway_key_path),
                 )
                 gw_conn = self._gateway_conn
 
@@ -107,7 +168,7 @@ class RemoteExecutor:
                 user=self._user,
                 port=self._port,
                 gateway=gw_conn,
-                connect_kwargs={"key_filename": str(self._key_path)},
+                connect_kwargs=_connect_kwargs(self._key_path),
             )
         return self._conn
 
@@ -136,15 +197,19 @@ class RemoteExecutor:
 
     # ── Environment activation preamble ──────────────────────────────────
 
-    def _build_env_preamble(self) -> list[str]:
-        """Return shell statements that activate the connection's env.
+    def _is_uenv(self) -> bool:
+        return self._env is not None and self._env.style == "uenv"
 
-        Returns an empty list when env is None or style="none". The result is
-        joined into the in-memory wrapped command — never written to a log
+    def _build_env_preamble(self) -> list[str]:
+        """Return shell statements that activate the connection's env (prefix styles only).
+
+        Returns an empty list for ``none``, ``uenv`` (handled separately as a
+        wrapper in ``run_command``), and when no env is configured.  The result
+        is joined into the in-memory wrapped command — never written to a log
         file under ``data_root``.
         """
         env = self._env
-        if env is None or env.style == "none":
+        if env is None or env.style in ("none", "uenv"):
             return []
         if env.style == "prologue":
             return [env.prologue] if env.prologue else []
@@ -157,6 +222,20 @@ class RemoteExecutor:
                 parts.append(f"module load {shlex.quote(m)}")
             return parts
         return []
+
+    def _wrap_with_uenv(self, cmd: str) -> str:
+        """Wrap *cmd* with ``uenv run <prologue> -- <cmd>``.
+
+        ``uenv start`` is an interactive-shell command that fails in
+        non-interactive SSH sessions.  ``uenv run`` is the correct alternative
+        for scripted use — it executes a single command inside the uenv and
+        exits, exactly like ``docker run``.
+
+        ``self._env.prologue`` holds the arguments between ``uenv run`` and
+        ``--``, e.g. ``--view=develop /path/to/image.squashfs``.
+        """
+        assert self._env is not None and self._env.prologue
+        return f"uenv run {self._env.prologue} -- {cmd}"
 
     # ── Command execution ────────────────────────────────────────────────
 
@@ -188,6 +267,10 @@ class RemoteExecutor:
             full_cmd = " && ".join(prefix_parts) + " && " + env_prefix + cmd
         elif env_prefix:
             full_cmd = env_prefix + cmd
+
+        # uenv style: wrap the whole thing (including env vars) with uenv run.
+        if self._is_uenv() and self._env and self._env.prologue:
+            full_cmd = self._wrap_with_uenv(env_prefix + cmd if env_prefix else cmd)
 
         # Wrap in cd. The wrapped command exists in memory only.
         wrapped = f"cd {shlex.quote(remote_cwd)} && {full_cmd}"

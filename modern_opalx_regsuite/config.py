@@ -22,17 +22,23 @@ class EnvActivation(BaseModel):
     """How to activate the build/test environment.
 
     Used by both ``ArchConfig.env`` (local runs) and ``Connection.env`` (remote runs).
-    Three styles:
+    Four styles:
 
     - ``"none"``: do nothing; commands run in whatever shell environment is the default.
     - ``"modules"``: source an lmod init script, then ``module use`` + ``module load`` lines.
-    - ``"prologue"``: prepend a free-form shell command (e.g. ``uenv start prgenv-gnu/24.7:v3 --view=default``).
+    - ``"prologue"``: prepend a free-form shell command that is joined with ``&&`` before
+      each run command.  Use this for simple setups like ``export VAR=val`` or sourcing
+      a setup script.
+    - ``"uenv"``: wrap each command with ``uenv run <prologue> -- <cmd>``.  Use this for
+      CSCS uenv images.  Set ``prologue`` to everything that comes between ``uenv run``
+      and ``--``, e.g.
+      ``--view=develop /capstor/.../opal-x-gh200-mpich-gcc-2025-09-28.squashfs``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    style: Literal["none", "modules", "prologue"] = Field(
-        "none", description="Activation style: 'none', 'modules', or 'prologue'."
+    style: Literal["none", "modules", "prologue", "uenv"] = Field(
+        "none", description="Activation style: 'none', 'modules', 'prologue', or 'uenv'."
     )
     # modules style:
     lmod_init: str = Field(
@@ -47,10 +53,14 @@ class EnvActivation(BaseModel):
         default_factory=list,
         description="Modules to load with 'module load' (modules style only).",
     )
-    # prologue style:
+    # prologue / uenv style:
     prologue: Optional[str] = Field(
         None,
-        description="Free-form shell command to prepend before each run command (prologue style only).",
+        description=(
+            "prologue style: free-form shell command prepended with '&&' before each command. "
+            "uenv style: arguments passed between 'uenv run' and '--', e.g. "
+            "'--view=develop /path/to/image.squashfs'."
+        ),
     )
 
 

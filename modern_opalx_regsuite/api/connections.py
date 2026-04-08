@@ -192,7 +192,19 @@ async def test_user_connection(
 
     # Run the blocking SSH call in a worker thread so we don't stall the loop.
     def _do_test() -> ConnectionTestResult:
+        import io
+        import logging
         from ..remote import RemoteExecutor
+
+        # Capture paramiko DEBUG output for this test so we can surface
+        # the full auth negotiation trace in the error message.
+        log_buf = io.StringIO()
+        handler = logging.StreamHandler(log_buf)
+        handler.setLevel(logging.DEBUG)
+        paramiko_logger = logging.getLogger("paramiko")
+        old_level = paramiko_logger.level
+        paramiko_logger.setLevel(logging.DEBUG)
+        paramiko_logger.addHandler(handler)
 
         executor = RemoteExecutor(
             host=conn.host,
@@ -208,8 +220,24 @@ async def test_user_connection(
             who = executor.whoami()
             return ConnectionTestResult(ok=True, whoami=who)
         except Exception as exc:  # noqa: BLE001 — surface to the user
-            return ConnectionTestResult(ok=False, error=str(exc))
+            debug_log = log_buf.getvalue()
+            # Extract the most useful lines (auth-related) to keep the
+            # error message short enough to display in the UI.
+            useful = [
+                l for l in debug_log.splitlines()
+                if any(k in l.lower() for k in (
+                    "auth", "userauth", "banner", "key", "host", "connect",
+                    "transport", "error", "exception", "failed", "reject",
+                ))
+            ]
+            detail = "\n".join(useful[-30:]) if useful else debug_log[-2000:]
+            return ConnectionTestResult(
+                ok=False,
+                error=f"{type(exc).__name__}: {exc}\n\nParamiko trace:\n{detail}",
+            )
         finally:
             executor.close()
+            paramiko_logger.removeHandler(handler)
+            paramiko_logger.setLevel(old_level)
 
     return await asyncio.to_thread(_do_test)

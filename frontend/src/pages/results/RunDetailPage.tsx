@@ -252,8 +252,8 @@ export function RunDetailPage() {
         <div className="space-y-1">
           <p className="text-muted text-xs">Executed On</p>
           <p className="text-fg font-mono text-sm">
-            {meta.execution_host && meta.execution_host !== "local"
-              ? `${meta.execution_user ?? ""}${meta.execution_user ? "@" : ""}${meta.execution_host}`
+            {meta.connection_name && meta.connection_name !== "local"
+              ? meta.connection_name
               : "Local"}
           </p>
         </div>

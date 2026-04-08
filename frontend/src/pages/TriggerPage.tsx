@@ -8,6 +8,7 @@ import {
   getRegtestsBranches,
   triggerRun,
 } from "../api/runs";
+import { listConnections, LOCAL_CONNECTION } from "../api/connections";
 
 export function TriggerPage() {
   const navigate = useNavigate();
@@ -15,6 +16,7 @@ export function TriggerPage() {
   const [opalxBranch, setOpalxBranch] = useState("master");
   const [regtestsBranch, setRegtestsBranch] = useState("master");
   const [arch, setArch] = useState("cpu-serial");
+  const [connectionName, setConnectionName] = useState<string>(LOCAL_CONNECTION);
   const [skipUnit, setSkipUnit] = useState(false);
   const [skipRegression, setSkipRegression] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +41,11 @@ export function TriggerPage() {
     queryFn: getArchConfigs,
   });
 
+  const { data: connections, isLoading: loadingConnections } = useQuery({
+    queryKey: ["connections"],
+    queryFn: listConnections,
+  });
+
   async function handleStart() {
     setError(null);
     setQueuedInfo(null);
@@ -49,6 +56,7 @@ export function TriggerPage() {
         regtests_branch: regtestsBranch,
         skip_unit: skipUnit,
         skip_regression: skipRegression,
+        connection_name: connectionName,
       });
       if (res.queued) {
         setQueuedInfo({ runId: res.run_id, position: res.position ?? 1 });
@@ -131,6 +139,28 @@ export function TriggerPage() {
               <option key={a}>{a}</option>
             ))}
           </select>
+        </div>
+
+        {/* Connection (or local) */}
+        <div>
+          <label className="block text-sm text-muted mb-1">Connection</label>
+          <select
+            value={connectionName}
+            onChange={(e) => setConnectionName(e.target.value)}
+            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+            disabled={loadingConnections}
+          >
+            <option value={LOCAL_CONNECTION}>Local</option>
+            {(connections ?? []).map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+                {c.description ? ` — ${c.description}` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="text-muted text-xs mt-1">
+            Manage connections in <span className="text-fg">Settings</span>.
+          </p>
         </div>
 
         {/* Options */}

@@ -5,12 +5,15 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 import bcrypt
 from pydantic import BaseModel
 
 from ..config import SuiteConfig
-from .deps import get_config
+from ..user_store import ensure_user_dir
+from .deps import get_config, require_auth
 from .tokens import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_access_token,
@@ -104,3 +107,22 @@ def login(body: LoginRequest, response: Response, cfg: SuiteConfig = Depends(get
 def logout(response: Response):
     response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/auth")
     return {"ok": True}
+
+
+class MeResponse(BaseModel):
+    username: str
+
+
+@router.get("/me", response_model=MeResponse)
+def me(
+    username: Annotated[str, Depends(require_auth)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
+):
+    """Return the authenticated user's identity.
+
+    Side-effect: idempotently materializes the per-user directory tree under
+    ``<users_root>/<username>/`` so pre-existing users (created before per-user
+    state existed) self-heal on first call.
+    """
+    ensure_user_dir(cfg, username)
+    return MeResponse(username=username)

@@ -121,9 +121,13 @@ def create_app() -> FastAPI:
     from .auth import router as auth_router
     app.include_router(auth_router)
 
-    # SSH key management router.
+    # SSH key management router (per-user).
     from .keys import router as keys_router
     app.include_router(keys_router)
+
+    # Per-user named SSH connections router.
+    from .connections import router as connections_router
+    app.include_router(connections_router)
 
     # Inline /api/auth/refresh-cookie endpoint (needs raw Request to read cookies).
     @app.post("/api/auth/refresh-cookie", response_model=TokenResponse)

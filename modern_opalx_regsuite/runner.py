@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .config import ArchConfig, SuiteConfig
+from .config import ArchConfig, Connection, EnvActivation, SuiteConfig
 from .data_model import (
     RegressionMetric,
     RegressionSimulation,
@@ -41,39 +41,59 @@ def _find_lmod_init() -> Optional[str]:
     return None
 
 
-def _build_module_env(
-    module_loads: list[str],
-    module_use_paths: list[str],
+def _build_local_env(
+    env_activation: EnvActivation,
     pipeline_log_path: Path,
 ) -> dict[str, str]:
-    """Return an environment dict with the requested lmod modules loaded."""
-    if not module_loads:
+    """Return an environment dict for local runs based on an EnvActivation.
+
+    Supports all three styles ("none", "modules", "prologue") so local
+    execution has parity with remote. The prologue style runs the user's
+    free-form shell command (e.g. ``uenv start ...``) in a fresh bash
+    subshell, then captures the resulting environment via ``env -0``.
+    """
+    if env_activation.style == "none":
         return os.environ.copy()
 
-    lmod_init = _find_lmod_init()
-    if not lmod_init:
+    parts: list[str] = []
+
+    if env_activation.style == "modules":
+        if not env_activation.module_loads:
+            return os.environ.copy()
+        lmod_init = env_activation.lmod_init or _find_lmod_init()
+        if not lmod_init or not os.path.isfile(lmod_init):
+            # Fall back to autodetection if the configured path is missing.
+            fallback = _find_lmod_init()
+            if not fallback:
+                _append_pipeline_line(
+                    pipeline_log_path,
+                    "[env] WARNING: lmod init script not found; skipping module loads.",
+                )
+                return os.environ.copy()
+            lmod_init = fallback
+        parts.append(f"source {shlex.quote(lmod_init)}")
+        for p in env_activation.module_use_paths:
+            parts.append(f"module use {shlex.quote(p)}")
+        for m in env_activation.module_loads:
+            parts.append(f"module load {shlex.quote(m)}")
         _append_pipeline_line(
             pipeline_log_path,
-            "[modules] WARNING: lmod init script not found; skipping module loads.",
+            f"[env] modules: {', '.join(env_activation.module_loads)}",
         )
-        return os.environ.copy()
 
-    parts = [f"source {shlex.quote(lmod_init)}"]
-    for p in module_use_paths:
-        parts.append(f"module use {shlex.quote(p)}")
-    for m in module_loads:
-        parts.append(f"module load {shlex.quote(m)}")
+    elif env_activation.style == "prologue":
+        if not env_activation.prologue:
+            return os.environ.copy()
+        parts.append(env_activation.prologue)
+        _append_pipeline_line(pipeline_log_path, "[env] prologue activated")
+
     parts.append("env -0")
-
     script = " && ".join(parts)
-    _append_pipeline_line(
-        pipeline_log_path, f"[modules] Loading: {', '.join(module_loads)}"
-    )
     proc = subprocess.run(["bash", "-c", script], capture_output=True)
     if proc.returncode != 0:
         _append_pipeline_line(
             pipeline_log_path,
-            f"[modules] WARNING: module load failed (rc={proc.returncode}); using base env.\n"
+            f"[env] WARNING: activation failed (rc={proc.returncode}); using base env.\n"
             + proc.stderr.decode(errors="replace"),
         )
         return os.environ.copy()
@@ -681,7 +701,8 @@ def _run_regression_suite(
 def _run_regression_suite_remote(
     cfg: SuiteConfig,
     paths: RunPaths,
-    ac: "ArchConfig",
+    connection: Connection,
+    mpi_ranks: int,
     remote: "RemoteExecutor",  # type: ignore[name-defined]
     remote_base: str,
     remote_build: str,
@@ -693,6 +714,10 @@ def _run_regression_suite_remote(
 
     Test discovery and result processing (stat parsing, plots) happen locally.
     Only the simulation execution happens on the remote.
+
+    Sensitive-data rule: every line written to ``reg_lines`` (which becomes
+    ``regression-tests.log`` under data_root) uses the connection name only;
+    never the underlying SSH host or remote work_dir.
     """
     tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
     tests = _discover_regression_tests(tests_root)
@@ -703,8 +728,9 @@ def _run_regression_suite_remote(
     remote_tests_root = f"{remote_base}/regtests/{cfg.regtests_subdir}"
 
     reg_lines: list[str] = []
-    reg_lines.append(f"Running {len(tests)} regression tests remotely on {ac.remote_host}")
-    reg_lines.append(f"Remote OPALX executable: {remote_opalx_exe}")
+    reg_lines.append(
+        f"Running {len(tests)} regression tests remotely via [{connection.name}]"
+    )
 
     # Ensure the per-run work directory exists on the remote before any cp -r calls.
     remote_run_work_dir = f"{remote_base}/work/{run_id}"
@@ -750,7 +776,7 @@ def _run_regression_suite_remote(
                 cmd += f" {extra_args}"
         else:
             extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
-            mpi_prefix = f"mpirun -np {ac.mpi_ranks} " if ac.mpi_ranks > 1 else ""
+            mpi_prefix = f"mpirun -np {mpi_ranks} " if mpi_ranks > 1 else ""
             cmd = (
                 f"{mpi_prefix}{shlex.quote(remote_opalx_exe)} "
                 f"{extra_args} {shlex.quote(test_name + '.in')}"
@@ -763,10 +789,7 @@ def _run_regression_suite_remote(
             cmd,
             remote_cwd=remote_test_work,
             log_path=test_log_local,
-            module_loads=ac.module_loads or None,
-            module_use_paths=cfg.module_use_paths or None,
-            lmod_init=ac.remote_lmod_init,
-            env=env,
+            env_vars=env,
         )
 
         # Copy log to run logs directory.
@@ -897,22 +920,6 @@ def _run_regression_suite_remote(
     return report
 
 
-def _validate_remote_config(ac: ArchConfig) -> None:
-    """Raise ValueError if required remote fields are missing."""
-    missing = []
-    if not ac.remote_host:
-        missing.append("remote_host")
-    if not ac.remote_user:
-        missing.append("remote_user")
-    if not ac.remote_key_name:
-        missing.append("remote_key_name")
-    if missing:
-        raise ValueError(
-            f"execution_mode='remote' for arch '{ac.arch}' requires: "
-            + ", ".join(missing)
-        )
-
-
 def _get_repo_url(repo_path: Path, config_url: Optional[str]) -> str:
     """Resolve a git clone URL: use config value or derive from local origin."""
     if config_url:
@@ -939,8 +946,9 @@ def run_pipeline(
     skip_unit: bool = False,
     skip_regression: bool = False,
     cancel_event: Optional[threading.Event] = None,
-    execution_host: Optional[str] = None,
-    execution_user: Optional[str] = None,
+    connection: Optional[Connection] = None,
+    target_key_path: Optional[Path] = None,
+    gateway_key_path: Optional[Path] = None,
     repo_locks: Optional[dict[str, threading.Lock]] = None,
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
@@ -949,6 +957,12 @@ def run_pipeline(
     interrupt the pipeline between phases.  The event is checked after git
     updates, after cmake+build, after unit tests, and between each regression
     test.
+
+    Pass *connection* to run remotely. The runner is user-agnostic — the
+    caller (the API layer) is responsible for resolving *target_key_path* and
+    (optionally) *gateway_key_path* from the user's per-user ssh-keys dir
+    before invoking this function. When *connection* is None, the run is
+    local and uses ``ArchConfig.env`` for environment activation.
 
     Pass *repo_locks* (a dict mapping absolute repo path to
     :class:`threading.Lock`) to serialise git operations on shared local
@@ -961,14 +975,18 @@ def run_pipeline(
     paths = _ensure_run_paths(data_root, branch, arch, run_id)
     _start_pipeline_log(paths.pipeline_log_path, branch, arch, run_id)
 
+    is_remote = connection is not None
+    connection_name = connection.name if connection is not None else "local"
+
+    # SENSITIVE-DATA RULE: only ``connection_name`` (user-chosen) lands in
+    # run-meta.json. Never write the underlying SSH host/user/work_dir here.
     meta = RunMeta(
         branch=branch,
         arch=arch,
         run_id=run_id,
         started_at=datetime.now(timezone.utc),
         status="running",
-        execution_host=execution_host,
-        execution_user=execution_user,
+        connection_name=connection_name,
     )
     _write_json(paths.meta_path, meta.model_dump())
 
@@ -977,39 +995,49 @@ def run_pipeline(
     effective_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
     build_cmd = f"make -j{ac.build_jobs}"
 
-    is_remote = ac.execution_mode == "remote"
-
     # ── Remote executor setup ────────────────────────────────────────────────
     remote: Optional["RemoteExecutor"] = None  # type: ignore[name-defined]
     remote_base: Optional[str] = None
     remote_build: Optional[str] = None
 
-    if is_remote:
+    if is_remote and connection is not None:
         from .remote import RemoteExecutor
 
-        _validate_remote_config(ac)
-        key_path = cfg.resolved_ssh_keys_dir / f"{ac.remote_key_name}.pem"
-        if not key_path.exists():
-            raise FileNotFoundError(f"SSH key not found: {key_path}")
+        if target_key_path is None:
+            raise ValueError(
+                "run_pipeline: connection is set but target_key_path is None — "
+                "the API layer must pre-resolve key paths."
+            )
+        if not target_key_path.exists():
+            raise FileNotFoundError(f"SSH key not found: {target_key_path}")
+        if connection.gateway is not None:
+            if gateway_key_path is None:
+                raise ValueError(
+                    "run_pipeline: connection has a gateway but gateway_key_path is None"
+                )
+            if not gateway_key_path.exists():
+                raise FileNotFoundError(
+                    f"Gateway SSH key not found: {gateway_key_path}"
+                )
         remote = RemoteExecutor(
-            host=ac.remote_host,  # type: ignore[arg-type]
-            user=ac.remote_user,  # type: ignore[arg-type]
-            key_path=key_path,
-            port=ac.remote_port,
+            host=connection.host,
+            user=connection.user,
+            key_path=target_key_path,
+            port=connection.port,
+            connection_name=connection.name,
+            gateway=connection.gateway,
+            gateway_key_path=gateway_key_path,
+            env=connection.env,
             pipeline_log_path=paths.pipeline_log_path,
         )
-        remote_base = ac.remote_work_dir
+        remote_base = connection.work_dir
         remote_build = f"{remote_base}/builds/{branch}/{arch}/build"
 
-    # Build the module environment once for this run (used by cmake, build, tests).
+    # Build the local environment once for this run (used by cmake, build, tests).
+    # Remote runs: env activation happens inline inside RemoteExecutor.
     module_env: Optional[dict[str, str]] = None
-    if ac.module_loads and not is_remote:
-        # For remote runs, module loading is handled inline by RemoteExecutor.
-        module_env = _build_module_env(
-            ac.module_loads,
-            cfg.module_use_paths,
-            paths.pipeline_log_path,
-        )
+    if not is_remote:
+        module_env = _build_local_env(ac.env, paths.pipeline_log_path)
 
     # Resolve repositories.
     opalx_repo = cfg.resolved_opalx_repo_root
@@ -1038,9 +1066,12 @@ def run_pipeline(
             opalx_url = _get_repo_url(opalx_repo, cfg.opalx_repo_url)
             regtests_url = _get_repo_url(regtests_repo, cfg.regtests_repo_url)
 
+            # Sanitized: connection_name only, no host. The actual git URLs are
+            # public (or at least already in the user's connection config) so
+            # they're acceptable; the SSH host is not.
             _append_pipeline_line(
                 paths.pipeline_log_path,
-                f"[remote] Cloning/updating OPALX on {ac.remote_host}",
+                f"[{connection_name}] Cloning/updating OPALX (branch={branch})",
             )
             remote_opalx_ok = remote.git_clone_or_update(
                 opalx_url,
@@ -1050,7 +1081,7 @@ def run_pipeline(
             )
             _append_pipeline_line(
                 paths.pipeline_log_path,
-                f"[remote] Cloning/updating regression-tests on {ac.remote_host}",
+                f"[{connection_name}] Cloning/updating regression-tests (branch={cfg.regtests_branch})",
             )
             remote_regtests_ok = remote.git_clone_or_update(
                 regtests_url,
@@ -1108,19 +1139,20 @@ def run_pipeline(
         # ── Phase: cmake ──────────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "cmake")
         if is_remote and remote is not None:
+            # NB: cmake_cmd contains the remote work_dir; pass it to the
+            # executor (which never logs the wrapped command), and only log a
+            # sanitized line under data_root.
             cmake_cmd = " ".join(
                 ["cmake", *effective_cmake_args, shlex.quote(f"{remote_base}/opalx-src")]
             )
             _append_pipeline_line(
-                paths.pipeline_log_path, f"[remote] Configuring build: {cmake_cmd}"
+                paths.pipeline_log_path,
+                f"[{connection_name}] Configuring build (cmake)",
             )
             cmake_rc = remote.run_command(
                 cmake_cmd,
                 remote_cwd=remote_build,  # type: ignore[arg-type]
                 log_path=paths.logs_dir / "cmake.log",
-                module_loads=ac.module_loads or None,
-                module_use_paths=cfg.module_use_paths or None,
-                lmod_init=ac.remote_lmod_init,
             )
         else:
             cmake_cmd = " ".join(["cmake", *effective_cmake_args, str(opalx_repo)])
@@ -1143,9 +1175,6 @@ def run_pipeline(
                 build_cmd,
                 remote_cwd=remote_build,  # type: ignore[arg-type]
                 log_path=paths.logs_dir / "build.log",
-                module_loads=ac.module_loads or None,
-                module_use_paths=cfg.module_use_paths or None,
-                lmod_init=ac.remote_lmod_init,
             )
         else:
             build_rc, _ = _run_command(
@@ -1176,9 +1205,6 @@ def run_pipeline(
                     cfg.unit_test_command,
                     remote_cwd=remote_build,  # type: ignore[arg-type]
                     log_path=paths.unit_log_path,
-                    module_loads=ac.module_loads or None,
-                    module_use_paths=cfg.module_use_paths or None,
-                    lmod_init=ac.remote_lmod_init,
                 )
                 output = paths.unit_log_path.read_text(
                     encoding="utf-8", errors="replace"
@@ -1209,11 +1235,12 @@ def run_pipeline(
         # ── Phase: regression ─────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "regression")
         if build_ok and not skip_regression:
-            if is_remote and remote is not None:
+            if is_remote and remote is not None and connection is not None:
                 reg_report = _run_regression_suite_remote(
                     cfg=cfg,
                     paths=paths,
-                    ac=ac,
+                    connection=connection,
+                    mpi_ranks=ac.mpi_ranks,
                     remote=remote,
                     remote_base=remote_base,  # type: ignore[arg-type]
                     remote_build=remote_build,  # type: ignore[arg-type]
@@ -1268,8 +1295,12 @@ def run_pipeline(
             # Clean up per-run work dir on remote (always).
             if remote_base is not None and run_id:
                 remote.cleanup(f"{remote_base}/work/{run_id}")
-            # Full cleanup only if configured.
-            if ac.remote_cleanup and remote_base is not None:
+            # Full cleanup only if configured on the connection.
+            if (
+                connection is not None
+                and connection.cleanup_after_run
+                and remote_base is not None
+            ):
                 remote.cleanup(remote_base)
             remote.close()
 
@@ -1300,7 +1331,7 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
         started_at=meta.started_at,
         finished_at=meta.finished_at,
         status=meta.status,
-        execution_host=meta.execution_host,
+        connection_name=meta.connection_name,
         unit_tests_total=meta.unit_tests_total,
         unit_tests_failed=meta.unit_tests_failed,
         regression_total=meta.regression_total,

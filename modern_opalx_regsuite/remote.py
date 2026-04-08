@@ -1,14 +1,24 @@
-"""Remote SSH execution via Fabric for the OPALX regression suite."""
+"""Remote SSH execution via Fabric for the OPALX regression suite.
+
+Sensitive-data rule: every line written to ``log_path`` or ``pipeline_log_path``
+under ``data_root`` uses ``self._connection_name`` as the identifier — never
+the underlying SSH host, user, key, or work_dir. The fully-wrapped command
+(``cd <work_dir> && source <init> && module load ... && <cmd>``) is built in
+memory only; only the user-meaningful ``cmd`` and the streamed stdout/stderr
+ever touch a log file.
+"""
 from __future__ import annotations
 
 import io
-import os
 import shlex
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import paramiko
 from fabric import Connection
+
+if TYPE_CHECKING:
+    from .config import EnvActivation, GatewayEndpoint
 
 
 class _TeeWriter(io.RawIOBase):
@@ -39,8 +49,13 @@ class _TeeWriter(io.RawIOBase):
 class RemoteExecutor:
     """SSH execution and file transfer for remote pipeline runs.
 
-    Uses a single persistent Fabric ``Connection`` per executor instance.
-    All methods are blocking (designed to run inside ``asyncio.to_thread``).
+    Uses a single persistent Fabric ``Connection`` per executor instance, with
+    optional ``ProxyJump`` chaining via Fabric's ``gateway=`` parameter. All
+    methods are blocking (designed to run inside ``asyncio.to_thread``).
+
+    The constructor takes resolved key paths — it does not look up keys on
+    disk. Resolution lives in
+    :func:`modern_opalx_regsuite.user_store.resolve_connection_key_paths`.
     """
 
     def __init__(
@@ -49,36 +64,67 @@ class RemoteExecutor:
         user: str,
         key_path: Path,
         port: int = 22,
+        connection_name: str = "remote",
+        gateway: Optional["GatewayEndpoint"] = None,
+        gateway_key_path: Optional[Path] = None,
+        env: Optional["EnvActivation"] = None,
         pipeline_log_path: Optional[Path] = None,
     ) -> None:
         self._host = host
         self._user = user
         self._key_path = key_path
         self._port = port
+        self._connection_name = connection_name
+        self._gateway = gateway
+        self._gateway_key_path = gateway_key_path
+        self._env = env
         self._pipeline_log_path = pipeline_log_path
         self._conn: Optional[Connection] = None
+        self._gateway_conn: Optional[Connection] = None
 
     # ── Connection management ────────────────────────────────────────────
 
     @property
     def conn(self) -> Connection:
-        """Return (and lazily create) the cached Fabric Connection."""
+        """Return (and lazily create) the cached Fabric Connection chain."""
         if self._conn is None:
+            gw_conn: Optional[Connection] = None
+            if self._gateway is not None:
+                if self._gateway_key_path is None:
+                    raise ValueError(
+                        "RemoteExecutor: gateway is set but gateway_key_path is None"
+                    )
+                self._gateway_conn = Connection(
+                    host=self._gateway.host,
+                    user=self._gateway.user,
+                    port=self._gateway.port,
+                    connect_kwargs={"key_filename": str(self._gateway_key_path)},
+                )
+                gw_conn = self._gateway_conn
+
             self._conn = Connection(
                 host=self._host,
                 user=self._user,
                 port=self._port,
+                gateway=gw_conn,
                 connect_kwargs={"key_filename": str(self._key_path)},
             )
         return self._conn
 
     def close(self) -> None:
+        """Close the target connection, then the gateway. Fabric does not cascade."""
         if self._conn is not None:
             try:
                 self._conn.close()
             except Exception:
                 pass
             self._conn = None
+        if self._gateway_conn is not None:
+            try:
+                self._gateway_conn.close()
+            except Exception:
+                pass
+            self._gateway_conn = None
 
     # ── Logging helper ───────────────────────────────────────────────────
 
@@ -88,6 +134,30 @@ class RemoteExecutor:
             with self._pipeline_log_path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
 
+    # ── Environment activation preamble ──────────────────────────────────
+
+    def _build_env_preamble(self) -> list[str]:
+        """Return shell statements that activate the connection's env.
+
+        Returns an empty list when env is None or style="none". The result is
+        joined into the in-memory wrapped command — never written to a log
+        file under ``data_root``.
+        """
+        env = self._env
+        if env is None or env.style == "none":
+            return []
+        if env.style == "prologue":
+            return [env.prologue] if env.prologue else []
+        if env.style == "modules":
+            init_path = env.lmod_init or "/usr/share/lmod/lmod/init/bash"
+            parts = [f"source {shlex.quote(init_path)}"]
+            for p in env.module_use_paths:
+                parts.append(f"module use {shlex.quote(p)}")
+            for m in env.module_loads:
+                parts.append(f"module load {shlex.quote(m)}")
+            return parts
+        return []
+
     # ── Command execution ────────────────────────────────────────────────
 
     def run_command(
@@ -95,32 +165,22 @@ class RemoteExecutor:
         cmd: str,
         remote_cwd: str,
         log_path: Path,
-        module_loads: Optional[list[str]] = None,
-        module_use_paths: Optional[list[str]] = None,
-        lmod_init: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        env_vars: Optional[dict[str, str]] = None,
         append_log: bool = False,
     ) -> int:
         """Execute *cmd* on the remote host inside *remote_cwd*.
 
-        stdout+stderr are streamed to *log_path* (and *pipeline_log_path*
-        if set).  Returns the remote exit code.
+        stdout+stderr are streamed to *log_path* (and *pipeline_log_path* if
+        set). Environment activation comes from ``self._env`` and is applied
+        automatically. Returns the remote exit code.
         """
-        # Build module preamble.
-        prefix_parts: list[str] = []
-        if module_loads:
-            init_path = lmod_init or "/usr/share/lmod/lmod/init/bash"
-            prefix_parts.append(f"source {shlex.quote(init_path)}")
-            for p in (module_use_paths or []):
-                prefix_parts.append(f"module use {shlex.quote(p)}")
-            for m in module_loads:
-                prefix_parts.append(f"module load {shlex.quote(m)}")
+        prefix_parts = self._build_env_preamble()
 
-        # Build env-var prefix.
+        # Inline shell env-var assignment, e.g. ``OMP_NUM_THREADS=4 cmd``.
         env_prefix = ""
-        if env:
+        if env_vars:
             env_prefix = " ".join(
-                f"{k}={shlex.quote(v)}" for k, v in env.items()
+                f"{k}={shlex.quote(v)}" for k, v in env_vars.items()
             ) + " "
 
         full_cmd = cmd
@@ -129,14 +189,15 @@ class RemoteExecutor:
         elif env_prefix:
             full_cmd = env_prefix + cmd
 
-        # Wrap in cd.
+        # Wrap in cd. The wrapped command exists in memory only.
         wrapped = f"cd {shlex.quote(remote_cwd)} && {full_cmd}"
 
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_mode = "a" if append_log else "w"
 
-        header = f"$ [remote:{self._host}] {cmd}\n"
-        self._log(f"[remote] {cmd}")
+        # Sanitized log header — connection_name only, never host/user/work_dir.
+        header = f"$ [{self._connection_name}] {cmd}\n"
+        self._log(f"[{self._connection_name}] {cmd}")
 
         with log_path.open(log_mode, encoding="utf-8") as log_file:
             log_file.write(header)
@@ -172,7 +233,7 @@ class RemoteExecutor:
         Returns True on success.
         """
         if self.path_exists(f"{remote_path}/.git"):
-            self._log(f"[remote-git] Updating {remote_path} branch={branch}")
+            self._log(f"[{self._connection_name}] git update {branch}")
             rc_fetch = self.run_command(
                 f"git fetch origin {shlex.quote(branch)}",
                 remote_cwd=remote_path,
@@ -195,9 +256,7 @@ class RemoteExecutor:
         else:
             parent = str(Path(remote_path).parent)
             self.ensure_dir(parent)
-            self._log(
-                f"[remote-git] Cloning {repo_url} → {remote_path} branch={branch}"
-            )
+            self._log(f"[{self._connection_name}] git clone {branch}")
             rc = self.run_command(
                 f"git clone --branch {shlex.quote(branch)} {shlex.quote(repo_url)} {shlex.quote(remote_path)}",
                 remote_cwd=parent,
@@ -232,13 +291,19 @@ class RemoteExecutor:
     # ── Directory helpers ────────────────────────────────────────────────
 
     def ensure_dir(self, remote_path: str) -> None:
-        """Create a directory (and parents) on the remote."""
+        """Create a directory (and parents) on the remote.
+
+        Bypasses ``self._env`` since ``mkdir -p`` only needs coreutils.
+        """
         self.conn.run(
             f"mkdir -p {shlex.quote(remote_path)}", hide=True, warn=True
         )
 
     def path_exists(self, remote_path: str) -> bool:
-        """Check whether *remote_path* exists on the remote."""
+        """Check whether *remote_path* exists on the remote.
+
+        Bypasses ``self._env`` since ``test -e`` is a bash builtin.
+        """
         result = self.conn.run(
             f"test -e {shlex.quote(remote_path)}", hide=True, warn=True
         )
@@ -246,11 +311,27 @@ class RemoteExecutor:
 
     def cleanup(self, remote_path: str) -> None:
         """Remove *remote_path* on the remote.  Logs warning but does not raise."""
-        self._log(f"[remote] Cleaning up {remote_path}")
+        self._log(f"[{self._connection_name}] cleanup {remote_path}")
         result = self.conn.run(
             f"rm -rf {shlex.quote(remote_path)}", hide=True, warn=True
         )
         if result.return_code != 0:
             self._log(
-                f"[remote] WARNING: cleanup of {remote_path} returned {result.return_code}"
+                f"[{self._connection_name}] WARNING: cleanup returned {result.return_code}"
             )
+
+    # ── Smoke test (used by /api/settings/connections/{name}/test) ───────
+
+    def whoami(self) -> str:
+        """Run ``whoami`` on the remote and return its stdout (stripped).
+
+        This is the authoritative connection test — it exercises the entire
+        SSH chain (gateway included) and validates auth, but does **not**
+        apply ``self._env`` (it's a transport-only check).
+        """
+        result = self.conn.run("whoami", hide=True, warn=True)
+        if result.return_code != 0:
+            raise RuntimeError(
+                f"whoami exit={result.return_code} stderr={result.stderr.strip()}"
+            )
+        return result.stdout.strip()

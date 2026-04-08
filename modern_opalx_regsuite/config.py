@@ -9,7 +9,7 @@ try:
     import tomllib
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
@@ -18,14 +18,116 @@ DATA_ROOT_ENV_VAR = "OPALX_DATA_ROOT"
 SECRET_KEY_ENV_VAR = "OPALX_SECRET_KEY"
 
 
+class EnvActivation(BaseModel):
+    """How to activate the build/test environment.
+
+    Used by both ``ArchConfig.env`` (local runs) and ``Connection.env`` (remote runs).
+    Three styles:
+
+    - ``"none"``: do nothing; commands run in whatever shell environment is the default.
+    - ``"modules"``: source an lmod init script, then ``module use`` + ``module load`` lines.
+    - ``"prologue"``: prepend a free-form shell command (e.g. ``uenv start prgenv-gnu/24.7:v3 --view=default``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    style: Literal["none", "modules", "prologue"] = Field(
+        "none", description="Activation style: 'none', 'modules', or 'prologue'."
+    )
+    # modules style:
+    lmod_init: str = Field(
+        "/usr/share/lmod/lmod/init/bash",
+        description="Path to lmod init script (modules style only).",
+    )
+    module_use_paths: List[str] = Field(
+        default_factory=list,
+        description="Paths added with 'module use' before module loads (modules style only).",
+    )
+    module_loads: List[str] = Field(
+        default_factory=list,
+        description="Modules to load with 'module load' (modules style only).",
+    )
+    # prologue style:
+    prologue: Optional[str] = Field(
+        None,
+        description="Free-form shell command to prepend before each run command (prologue style only).",
+    )
+
+
+class GatewayEndpoint(BaseModel):
+    """SSH ProxyJump gateway. Lives inside Connection.gateway."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(..., description="SSH hostname or IP of the jump host.")
+    user: str = Field(..., description="SSH username on the jump host.")
+    port: int = Field(22, description="SSH port on the jump host.")
+    key_name: str = Field(
+        ...,
+        description="Name of SSH key in this user's ssh-keys dir (without .pem suffix).",
+    )
+
+
+class Connection(BaseModel):
+    """A named, per-user remote execution target.
+
+    Stored in ``<users_root>/<username>/connections.json`` as part of a list.
+    Referenced by ``name`` from the trigger endpoint and selected at run time.
+
+    The ``name`` is the only identity surface that may appear in publicly-shareable
+    ``data_root`` artifacts (run metadata, log headers). Choose it accordingly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Unique name of the connection within a user.")
+    description: Optional[str] = Field(
+        None, description="Optional human-readable description."
+    )
+
+    # SSH target.
+    host: str = Field(..., description="SSH hostname or IP of the target machine.")
+    user: str = Field(..., description="SSH username on the target machine.")
+    port: int = Field(22, description="SSH port on the target machine.")
+    key_name: str = Field(
+        ...,
+        description="Name of SSH key in this user's ssh-keys dir (without .pem suffix).",
+    )
+
+    # Optional ProxyJump.
+    gateway: Optional[GatewayEndpoint] = Field(
+        None,
+        description="Optional jump host. If set, target is reached via this gateway.",
+    )
+
+    # Remote workspace.
+    work_dir: str = Field(
+        "/tmp/opalx-regsuite",
+        description="Persistent base directory on the remote target.",
+    )
+    cleanup_after_run: bool = Field(
+        False,
+        description="If true, delete work_dir after every run.",
+    )
+
+    # Environment activation on the remote target.
+    env: EnvActivation = Field(
+        default_factory=EnvActivation,
+        description="How to activate the environment on the remote target.",
+    )
+
+
 class ArchConfig(BaseModel):
-    """Per-architecture build and execution overrides."""
+    """Per-architecture build recipe.
+
+    Pure run-config: cmake/build/test parameters and (for local runs) environment
+    activation. Execution-target details — SSH host, user, key, gateway, remote
+    work_dir — live in per-user :class:`Connection` objects, not here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     arch: str = Field(..., description="Architecture identifier, e.g. 'cpu-serial'.")
-    execution_mode: Literal["local", "slurm", "remote"] = Field(
-        "local",
-        description="'local' runs directly; 'slurm' submits via sbatch; 'remote' SSHes to remote_host.",
-    )
     cmake_args: Optional[List[str]] = Field(
         None,
         description="Overrides SuiteConfig.cmake_args for this architecture.",
@@ -34,47 +136,17 @@ class ArchConfig(BaseModel):
     mpi_ranks: int = Field(1, description="MPI ranks for regression test execution.")
     slurm_args: List[str] = Field(
         default_factory=list,
-        description="Extra sbatch arguments, e.g. ['--partition=gpu', '--gres=gpu:1'].",
+        description="Extra sbatch arguments, e.g. ['--partition=gpu', '--gres=gpu:1']. Reserved for future slurm support.",
     )
-    module_loads: List[str] = Field(
-        default_factory=list,
-        description="Modules to load, e.g. ['gcc/15.2.0', 'openmpi/4.1.6_slurm'].",
-    )
-
-    # Remote execution fields (only used when execution_mode == "remote").
-    remote_host: Optional[str] = Field(
-        None, description="SSH hostname or IP of the remote machine."
-    )
-    remote_user: Optional[str] = Field(
-        None, description="SSH username on the remote machine."
-    )
-    remote_port: int = Field(22, description="SSH port on the remote machine.")
-    remote_key_name: Optional[str] = Field(
-        None,
-        description="Name of SSH key stored in {ssh_keys_dir}/{name}.pem.",
-    )
-    remote_work_dir: str = Field(
-        "/tmp/opalx-regsuite",
-        description=(
-            "Persistent base directory on the remote. "
-            "Repos, builds, and per-run work dirs live here."
-        ),
-    )
-    remote_cleanup: bool = Field(
-        False,
-        description=(
-            "If true, delete the entire remote_work_dir after a run "
-            "(repos, builds, everything). Default false keeps the workspace "
-            "for fast incremental updates on subsequent runs."
-        ),
-    )
-    remote_lmod_init: str = Field(
-        "/usr/share/lmod/lmod/init/bash",
-        description="Path to lmod init script on the remote host.",
+    env: EnvActivation = Field(
+        default_factory=EnvActivation,
+        description="Environment activation for local runs of this arch. Remote runs use the selected Connection's env instead.",
     )
 
 
 class SuiteConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     opalx_repo_root: Path = Field(..., description="Path to OPALX source checkout.")
     builds_root: Path = Field(
         ..., description="Root directory for per-branch/per-architecture builds."
@@ -167,24 +239,30 @@ class SuiteConfig(BaseModel):
         ),
     )
 
-    # Paths added via 'module use' before any module_loads are applied.
-    module_use_paths: List[str] = Field(
-        default_factory=list,
-        description="Paths to add with 'module use' before loading modules.",
-    )
-
-    # Per-architecture overrides (optional).
+    # Per-architecture build recipes (optional).
     arch_configs: List[ArchConfig] = Field(
         default_factory=list,
-        description="Per-architecture build and execution overrides.",
+        description="Per-architecture build recipes.",
     )
 
-    # SSH key storage for remote execution.
+    # ── Per-user storage ─────────────────────────────────────────────────────
+    # All identity-bearing state (SSH keys, named connections, profile) lives
+    # under <users_root>/<username>/, never under data_root.
+    users_root: Optional[Path] = Field(
+        None,
+        description=(
+            "Root directory for per-user state (ssh-keys, connections.json). "
+            "Defaults to ~/.config/opalx-regsuite/users."
+        ),
+    )
+
+    # Deprecated. SSH keys now live per-user under <users_root>/<username>/ssh-keys.
+    # Kept only as a fallback location read by the migrate-keys CLI helper.
     ssh_keys_dir: Optional[Path] = Field(
         None,
         description=(
-            "Directory for SSH private key files ({name}.pem). "
-            "Defaults to {data_root}/ssh-keys if not set."
+            "DEPRECATED. Legacy global SSH key directory; only used by migrate-keys CLI. "
+            "New keys are stored per-user under <users_root>/<username>/ssh-keys."
         ),
     )
 
@@ -198,7 +276,7 @@ class SuiteConfig(BaseModel):
         ),
     )
     users_file: Path = Field(
-        default=Path("users.json"),
+        default=Path("~/.config/opalx-regsuite/users.json"),
         description="Path to the JSON file storing bcrypt-hashed user credentials.",
     )
 
@@ -212,7 +290,12 @@ class SuiteConfig(BaseModel):
         m = re.search(r"-j\s*(\d+)", self.build_command)
         if m:
             jobs = int(m.group(1))
-        return ArchConfig(arch=arch, build_jobs=jobs, mpi_ranks=self.mpi_ranks)
+        return ArchConfig(
+            arch=arch,
+            build_jobs=jobs,
+            mpi_ranks=self.mpi_ranks,
+            env=EnvActivation(),
+        )
 
     @property
     def resolved_opalx_repo_root(self) -> Path:
@@ -235,11 +318,23 @@ class SuiteConfig(BaseModel):
         return self.regtests_repo_root.expanduser().resolve()
 
     @property
+    def resolved_users_root(self) -> Path:
+        if self.users_root is not None:
+            return self.users_root.expanduser().resolve()
+        # Default to ~/.config/opalx-regsuite/users so identity-bearing state is
+        # never co-located with data_root (which may be publicly shared).
+        return Path.home() / ".config" / "opalx-regsuite" / "users"
+
+    @property
     def resolved_ssh_keys_dir(self) -> Path:
+        """DEPRECATED. Legacy global SSH keys directory.
+
+        Kept only so the ``migrate-keys`` CLI helper can locate pre-existing keys
+        and so old tests/scripts that read this property continue to function.
+        New code must use ``user_store.user_keys_dir(cfg, username)`` instead.
+        """
         if self.ssh_keys_dir is not None:
             return self.ssh_keys_dir.expanduser().resolve()
-        # Default to ~/.config/opalx-regsuite/ssh-keys so that keys are never
-        # co-located with the test-data directory (which may be shared or archived).
         return Path.home() / ".config" / "opalx-regsuite" / "ssh-keys"
 
     @property
@@ -320,43 +415,56 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
         add_kv("opalx_repo_url", data["opalx_repo_url"])
     if data.get("regtests_repo_url"):
         add_kv("regtests_repo_url", data["regtests_repo_url"])
-    if data.get("module_use_paths"):
-        add_kv("module_use_paths", data["module_use_paths"])
+    if data.get("users_root"):
+        add_kv("users_root", str(data["users_root"]))
     if data.get("ssh_keys_dir"):
         add_kv("ssh_keys_dir", str(data["ssh_keys_dir"]))
     add_kv("host", data.get("host", "0.0.0.0"))
     add_kv("port", data.get("port", 8000))
     # Never write the secret key to disk; it lives in the env var.
-    add_kv("users_file", str(data.get("users_file", "users.json")))
+    add_kv("users_file", str(data.get("users_file", "~/.config/opalx-regsuite/users.json")))
+
+    def _emit_env(env: dict, table_prefix: str) -> None:
+        """Emit an [arch_configs.env] sub-table if it has non-default content."""
+        style = env.get("style", "none")
+        is_default = (
+            style == "none"
+            and not env.get("module_use_paths")
+            and not env.get("module_loads")
+            and not env.get("prologue")
+            and env.get("lmod_init", "/usr/share/lmod/lmod/init/bash")
+                == "/usr/share/lmod/lmod/init/bash"
+        )
+        if is_default:
+            return
+        lines.append("")
+        lines.append(f"[{table_prefix}.env]")
+        add_kv("style", style)
+        if style == "modules":
+            if env.get("lmod_init") and env["lmod_init"] != "/usr/share/lmod/lmod/init/bash":
+                add_kv("lmod_init", env["lmod_init"])
+            if env.get("module_use_paths"):
+                add_kv("module_use_paths", env["module_use_paths"])
+            if env.get("module_loads"):
+                add_kv("module_loads", env["module_loads"])
+        elif style == "prologue":
+            if env.get("prologue"):
+                add_kv("prologue", env["prologue"])
 
     # Per-arch configs as TOML array-of-tables.
     for ac in data.get("arch_configs", []):
         lines.append("")
         lines.append("[[arch_configs]]")
         add_kv("arch", ac.get("arch", ""))
-        add_kv("execution_mode", ac.get("execution_mode", "local"))
         if ac.get("cmake_args") is not None:
             add_kv("cmake_args", ac["cmake_args"])
         add_kv("build_jobs", ac.get("build_jobs", 2))
         add_kv("mpi_ranks", ac.get("mpi_ranks", 1))
         if ac.get("slurm_args"):
             add_kv("slurm_args", ac["slurm_args"])
-        if ac.get("module_loads"):
-            add_kv("module_loads", ac["module_loads"])
-        if ac.get("remote_host"):
-            add_kv("remote_host", ac["remote_host"])
-        if ac.get("remote_user"):
-            add_kv("remote_user", ac["remote_user"])
-        if ac.get("remote_port", 22) != 22:
-            add_kv("remote_port", ac["remote_port"])
-        if ac.get("remote_key_name"):
-            add_kv("remote_key_name", ac["remote_key_name"])
-        if ac.get("remote_work_dir", "/tmp/opalx-regsuite") != "/tmp/opalx-regsuite":
-            add_kv("remote_work_dir", ac["remote_work_dir"])
-        if ac.get("remote_cleanup"):
-            add_kv("remote_cleanup", ac["remote_cleanup"])
-        if ac.get("remote_lmod_init", "") and ac["remote_lmod_init"] != "/usr/share/lmod/lmod/init/bash":
-            add_kv("remote_lmod_init", ac["remote_lmod_init"])
+        # Nested env activation as a sibling sub-table.
+        env = ac.get("env") or {}
+        _emit_env(env, "arch_configs")
 
     text = "\n".join(lines) + "\n"
     with config_path.open("w", encoding="utf-8") as f:

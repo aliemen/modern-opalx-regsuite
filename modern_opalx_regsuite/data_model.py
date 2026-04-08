@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Iterable, List, Optional
 
-from pydantic import BaseModel, AfterValidator, Field
+from pydantic import BaseModel, AfterValidator, ConfigDict, Field
 
 
 def _ensure_utc(v: datetime) -> datetime:
@@ -90,6 +90,19 @@ class RegressionTestsReport(BaseModel):
 
 
 class RunMeta(BaseModel):
+    """Per-run metadata stored at ``runs/<branch>/<arch>/<run_id>/run-meta.json``.
+
+    SENSITIVE-DATA RULE: This file lives under ``data_root`` which may be shared
+    publicly. **Never** add fields here that hold raw SSH hostnames, usernames,
+    file paths, or credentials. The user-chosen ``connection_name`` is the only
+    identity surface allowed.
+    """
+
+    # Accept legacy keys (execution_host / execution_user) silently when reading
+    # historical run-meta.json files written by pre-refactor code, but strip
+    # them on the next save by never re-emitting them.
+    model_config = ConfigDict(extra="ignore")
+
     branch: str
     arch: str
     run_id: str
@@ -100,8 +113,9 @@ class RunMeta(BaseModel):
     opalx_commit: Optional[str] = None
     tests_repo_commit: Optional[str] = None
 
-    execution_host: Optional[str] = None  # "local" or remote IP/hostname
-    execution_user: Optional[str] = None  # SSH user for remote runs
+    # The user-chosen connection name (e.g. "daint", "local"). Safe for public
+    # sharing as long as the user did not embed identifying info in the name.
+    connection_name: Optional[str] = None
 
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
@@ -119,13 +133,17 @@ class RunMeta(BaseModel):
 
 
 class RunIndexEntry(BaseModel):
+    """Index entry for a run. Lives under ``data_root`` — same sensitive-data rule as RunMeta."""
+
+    model_config = ConfigDict(extra="ignore")
+
     branch: str
     arch: str
     run_id: str
     started_at: UtcDatetime
     finished_at: Optional[UtcDatetime]
     status: str
-    execution_host: Optional[str] = None
+    connection_name: Optional[str] = None
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
     regression_total: int = 0

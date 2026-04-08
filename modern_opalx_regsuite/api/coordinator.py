@@ -89,8 +89,9 @@ class RunCoordinator:
                 skip_unit=skip_unit,
                 skip_regression=skip_regression,
                 cancel_event=active.cancel_event,
-                execution_host=active.execution_host,
-                execution_user=active.execution_user,
+                connection=active.connection,
+                target_key_path=active.target_key_path,
+                gateway_key_path=active.gateway_key_path,
                 repo_locks=repo_locks,
             )
 
@@ -127,9 +128,11 @@ class RunCoordinator:
             branch=queued.branch,
             arch=queued.arch,
             machine_id=queued.machine_id,
-            execution_host=queued.execution_host,
-            execution_user=queued.execution_user,
+            connection_name=queued.connection_name,
             log_path=queued.log_path,
+            connection=queued.connection,
+            target_key_path=queued.target_key_path,
+            gateway_key_path=queued.gateway_key_path,
         )
         if next_active is not None:
             next_active.cancel_event = queued.cancel_event

@@ -8,6 +8,7 @@ export interface CurrentRunStatus {
   phase: string;
   started_at: string;
   machine_id: string | null;
+  connection_name?: string | null;
 }
 
 export interface TriggerRequest {
@@ -16,6 +17,11 @@ export interface TriggerRequest {
   regtests_branch?: string;
   skip_unit?: boolean;
   skip_regression?: boolean;
+  /**
+   * Name of the per-user Connection to run on. Use `null` or `"local"` for
+   * local execution. Connections are managed in Settings.
+   */
+  connection_name?: string | null;
 }
 
 export interface TriggerResponse {

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..config import SuiteConfig
 from ..data_model import run_dir
+from ..user_store import get_connection, resolve_connection_key_paths
 from .coordinator import get_coordinator
 from .deps import get_config, require_auth
 from .state import (
@@ -40,6 +41,9 @@ class TriggerRequest(BaseModel):
     regtests_branch: Optional[str] = None
     skip_unit: bool = False
     skip_regression: bool = False
+    # None or "local" → local execution. Otherwise → load the calling user's
+    # named connection from <users_root>/<username>/connections.json.
+    connection_name: Optional[str] = None
 
 
 class TriggerResponse(BaseModel):
@@ -57,6 +61,7 @@ class CurrentRunStatus(BaseModel):
     phase: str
     started_at: datetime
     machine_id: Optional[str] = None
+    connection_name: Optional[str] = None
 
 
 class QueuedRunInfo(BaseModel):
@@ -65,6 +70,7 @@ class QueuedRunInfo(BaseModel):
     branch: str
     arch: str
     queued_at: datetime
+    connection_name: Optional[str] = None
 
 
 class MachineStatus(BaseModel):
@@ -112,6 +118,7 @@ def get_current_run(_user: Annotated[str, Depends(require_auth)]):
         phase=run.phase,
         started_at=run.started_at,
         machine_id=run.machine_id,
+        connection_name=run.connection_name,
     )
 
 
@@ -127,6 +134,7 @@ def list_active_runs(_user: Annotated[str, Depends(require_auth)]):
             phase=r.phase,
             started_at=r.started_at,
             machine_id=r.machine_id,
+            connection_name=r.connection_name,
         )
         for r in get_all_active_runs()
     ]
@@ -153,7 +161,7 @@ def get_queue_state_endpoint(_user: Annotated[str, Depends(require_auth)]):
 @router.post("/trigger", response_model=TriggerResponse, status_code=status.HTTP_202_ACCEPTED)
 async def trigger_run(
     body: TriggerRequest,
-    _user: Annotated[str, Depends(require_auth)],
+    username: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
 ):
     run_id = _run_id_from_time()
@@ -164,18 +172,48 @@ async def trigger_run(
     if body.regtests_branch:
         cfg = cfg.model_copy(update={"regtests_branch": body.regtests_branch})
 
-    # Resolve which machine this arch runs on.
-    machine_id, remote_user = resolve_machine_id(cfg, body.arch)
-    execution_host = machine_id
+    # Resolve the connection (None for local) from the *calling user's* store.
+    connection = None
+    target_key_path: Optional[Path] = None
+    gateway_key_path: Optional[Path] = None
+    if body.connection_name and body.connection_name.lower() != "local":
+        connection = get_connection(cfg, username, body.connection_name)
+        if connection is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Connection '{body.connection_name}' not found for user '{username}'.",
+            )
+        target_key_path, gateway_key_path = resolve_connection_key_paths(
+            cfg, username, connection
+        )
+        # Re-check that the key files exist (covers the race window between
+        # connection test and trigger).
+        if not target_key_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"SSH key '{connection.key_name}' is missing on disk.",
+            )
+        if connection.gateway is not None and (
+            gateway_key_path is None or not gateway_key_path.is_file()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Gateway SSH key '{connection.gateway.key_name}' is missing on disk.",
+            )
+
+    machine_id = resolve_machine_id(connection)
+    connection_name = connection.name if connection is not None else "local"
 
     active = await acquire_run_slot(
         run_id=run_id,
         branch=body.branch,
         arch=body.arch,
         machine_id=machine_id,
-        execution_host=execution_host,
-        execution_user=remote_user,
+        connection_name=connection_name,
         log_path=log_path,
+        connection=connection,
+        target_key_path=target_key_path,
+        gateway_key_path=gateway_key_path,
     )
     if active is not None:
         # Machine is free — start immediately via the coordinator.
@@ -192,8 +230,10 @@ async def trigger_run(
             branch=body.branch,
             arch=body.arch,
             machine_id=machine_id,
-            execution_host=execution_host,
-            execution_user=remote_user,
+            connection_name=connection_name,
+            connection=connection,
+            target_key_path=target_key_path,
+            gateway_key_path=gateway_key_path,
             cfg=cfg,
             skip_unit=body.skip_unit,
             skip_regression=body.skip_regression,

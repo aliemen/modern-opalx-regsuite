@@ -310,12 +310,15 @@ def user_add(
     ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
 ) -> None:
-    """Add or update a user in the users.json file."""
+    """Add or update a user and materialize their per-user directory tree."""
     from .api.auth import add_user
+    from .user_store import ensure_user_dir
 
     cfg = _load_config_option(config)
     add_user(cfg, username, password)
+    udir = ensure_user_dir(cfg, username)
     typer.echo(f"User '{username}' saved to {cfg.resolved_users_file}")
+    typer.echo(f"User directory: {udir}")
 
 
 @app.command("user-del")
@@ -332,6 +335,45 @@ def user_del(
     else:
         typer.echo(f"User '{username}' not found.", err=True)
         raise typer.Exit(1)
+
+
+@app.command("migrate-keys")
+def migrate_keys(
+    username: str = typer.Option(..., "--user", "-u", prompt=True),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Copy legacy global SSH keys into the per-user keys directory.
+
+    Reads from ``cfg.resolved_ssh_keys_dir`` (the deprecated global location)
+    and copies every ``*.pem`` into ``<users_root>/<username>/ssh-keys/``.
+    Existing per-user keys with the same name are NOT overwritten — those
+    must be removed manually first.
+    """
+    from .user_store import ensure_user_dir, user_keys_dir
+
+    cfg = _load_config_option(config)
+    src = cfg.resolved_ssh_keys_dir
+    if not src.is_dir():
+        typer.echo(f"No legacy ssh-keys dir at {src}; nothing to migrate.")
+        raise typer.Exit(0)
+
+    ensure_user_dir(cfg, username)
+    dst = user_keys_dir(cfg, username)
+    copied = 0
+    skipped = 0
+    for key in sorted(src.glob("*.pem")):
+        target = dst / key.name
+        if target.exists():
+            typer.echo(f"  skip  {key.name} (already exists in user dir)")
+            skipped += 1
+            continue
+        shutil.copy2(key, target)
+        target.chmod(0o600)
+        typer.echo(f"  copy  {key.name}")
+        copied += 1
+    typer.echo(f"\nMigrated {copied} key(s), skipped {skipped}.")
+    typer.echo(f"Source: {src}")
+    typer.echo(f"Target: {dst}")
 
 
 @app.command("rebuild-indexes")

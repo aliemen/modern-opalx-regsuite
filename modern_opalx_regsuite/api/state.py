@@ -5,11 +5,17 @@ correctly, since the state lives in process memory.
 
 Concurrency model:
 - Each "machine" (identified by ``machine_id``) has at most one active run.
-- ``machine_id`` is ``"local"`` for local/slurm archs, or the ``remote_host``
-  value for remote archs.
+- ``machine_id`` is ``"local"`` for local runs, or ``connection.host`` for
+  remote runs (so two regsuite users with different connections to the same
+  physical host correctly serialize against each other).
 - Different machines can run in parallel.
 - When a machine is busy, new runs are queued (FIFO) and auto-started when the
   slot is released.
+
+Sensitive-data rule: ``ActiveRun`` and ``QueuedRun`` may carry an in-memory
+``Connection`` object containing the actual SSH host/user/work_dir, but the
+public state surface (``connection_name``) is the user-chosen label only. The
+queue snapshot endpoint exposes only the safe fields.
 """
 from __future__ import annotations
 
@@ -20,7 +26,10 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from ..config import Connection
 
 
 @dataclass
@@ -29,8 +38,11 @@ class ActiveRun:
     branch: str
     arch: str
     machine_id: str
-    execution_host: str
-    execution_user: Optional[str] = None
+    connection_name: str  # "local" or the user-chosen connection label
+    # Identity-bearing fields kept in memory only — never serialized to disk.
+    connection: Optional["Connection"] = None
+    target_key_path: Optional[Path] = None
+    gateway_key_path: Optional[Path] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "running"  # running | passed | failed | cancelled
     phase: str = "git"       # git | cmake | build | unit | regression | done
@@ -46,8 +58,10 @@ class QueuedRun:
     branch: str
     arch: str
     machine_id: str
-    execution_host: str
-    execution_user: Optional[str] = None
+    connection_name: str
+    connection: Optional["Connection"] = None
+    target_key_path: Optional[Path] = None
+    gateway_key_path: Optional[Path] = None
     queued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     cfg: object = None  # SuiteConfig snapshot
     skip_unit: bool = False
@@ -84,16 +98,17 @@ def _get_machine(machine_id: str) -> MachineQueue:
 
 # ── Machine ID resolution ───────────────────────────────────────────────────
 
-def resolve_machine_id(cfg: object, arch: str) -> tuple[str, Optional[str]]:
-    """Return ``(machine_id, remote_user)`` for *arch*.
+def resolve_machine_id(connection: Optional["Connection"]) -> str:
+    """Return the queue serialization key for a run.
 
-    For local/slurm archs: ``("local", None)``.
-    For remote archs: ``(remote_host, remote_user)``.
+    For local runs (``connection is None``): ``"local"``.
+    For remote runs: ``connection.host`` (just the host string — per-physical-
+    machine identity, not per-user, so two regsuite users with different
+    connections to the same host serialize against each other).
     """
-    ac = cfg.get_arch_config(arch)  # type: ignore[union-attr]
-    if ac.execution_mode == "remote" and ac.remote_host:
-        return (ac.remote_host, ac.remote_user)
-    return ("local", None)
+    if connection is None:
+        return "local"
+    return connection.host
 
 
 # ── Slot acquisition & release ──────────────────────────────────────────────
@@ -103,9 +118,11 @@ async def acquire_run_slot(
     branch: str,
     arch: str,
     machine_id: str,
-    execution_host: str,
-    execution_user: Optional[str],
+    connection_name: str,
     log_path: Optional[Path],
+    connection: Optional["Connection"] = None,
+    target_key_path: Optional[Path] = None,
+    gateway_key_path: Optional[Path] = None,
 ) -> Optional[ActiveRun]:
     """Try to acquire the run slot for *machine_id*.
 
@@ -122,8 +139,10 @@ async def acquire_run_slot(
             branch=branch,
             arch=arch,
             machine_id=machine_id,
-            execution_host=execution_host,
-            execution_user=execution_user,
+            connection_name=connection_name,
+            connection=connection,
+            target_key_path=target_key_path,
+            gateway_key_path=gateway_key_path,
             log_path=log_path,
         )
         mq.active_run = active
@@ -221,6 +240,7 @@ def get_queue_snapshot() -> list[dict]:
                 "phase": active.phase,
                 "started_at": active.started_at.isoformat(),
                 "machine_id": active.machine_id,
+                "connection_name": active.connection_name,
             }
         queue_list = [
             {
@@ -229,6 +249,7 @@ def get_queue_snapshot() -> list[dict]:
                 "branch": qr.branch,
                 "arch": qr.arch,
                 "queued_at": qr.queued_at.isoformat(),
+                "connection_name": qr.connection_name,
             }
             for qr in mq.queue
         ]

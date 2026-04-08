@@ -1,4 +1,10 @@
-"""SSH key management endpoints."""
+"""SSH key management endpoints (per-user).
+
+Each authenticated regsuite user has their own ``ssh-keys/`` directory under
+``<users_root>/<username>/``. Keys are referenced by name from a
+:class:`~modern_opalx_regsuite.config.Connection`. Deletion of a key that is
+referenced by any of the user's connections returns 409 Conflict.
+"""
 from __future__ import annotations
 
 import os
@@ -6,12 +12,17 @@ import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from ..config import SuiteConfig
-from .deps import get_config, require_auth
+from ..user_store import (
+    connections_referencing_key,
+    user_keys_dir,
+)
+from .deps import get_config, require_user_paths
 
 router = APIRouter(prefix="/api/settings/ssh-keys", tags=["settings"])
 
@@ -22,13 +33,6 @@ class SshKeyInfo(BaseModel):
     name: str
     created_at: str
     fingerprint: str | None = None
-
-
-def _keys_dir(cfg: SuiteConfig) -> Path:
-    d = cfg.resolved_ssh_keys_dir
-    d.mkdir(parents=True, exist_ok=True)
-    os.chmod(d, 0o700)
-    return d
 
 
 def _validate_name(name: str) -> None:
@@ -55,15 +59,38 @@ def _fingerprint(key_path: Path) -> str | None:
     return None
 
 
+def _write_key_atomic(key_path: Path, content: bytes) -> None:
+    """Write *content* to *key_path* with mode 0600 atomically.
+
+    Uses ``O_CREAT | O_EXCL | O_WRONLY`` against a temp file then ``os.replace``
+    so the key file never exists at any other mode (no 0644 race window).
+    """
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(key_path.parent, 0o700)
+    except OSError:
+        pass
+    tmp = key_path.with_suffix(key_path.suffix + ".tmp")
+    if tmp.exists():
+        tmp.unlink()
+    fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, content)
+    finally:
+        os.close(fd)
+    os.replace(tmp, key_path)
+
+
 @router.post("", status_code=201, response_model=SshKeyInfo)
 async def upload_ssh_key(
-    name: str = Form(...),
-    key_file: UploadFile = File(...),
-    _user: str = Depends(require_auth),
-    cfg: SuiteConfig = Depends(get_config),
+    name: Annotated[str, Form(...)],
+    key_file: Annotated[UploadFile, File(...)],
+    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> SshKeyInfo:
     _validate_name(name)
-    keys = _keys_dir(cfg)
+    username, _ = user_paths
+    keys = user_keys_dir(cfg, username)
     key_path = keys / f"{name}.pem"
 
     content = await key_file.read()
@@ -73,8 +100,7 @@ async def upload_ssh_key(
             detail="Key file is empty.",
         )
 
-    key_path.write_bytes(content)
-    os.chmod(key_path, 0o600)
+    _write_key_atomic(key_path, content)
 
     fp = _fingerprint(key_path)
     mtime = datetime.fromtimestamp(key_path.stat().st_mtime, tz=timezone.utc)
@@ -83,11 +109,14 @@ async def upload_ssh_key(
 
 @router.get("", response_model=list[SshKeyInfo])
 def list_ssh_keys(
-    _user: str = Depends(require_auth),
-    cfg: SuiteConfig = Depends(get_config),
+    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> list[SshKeyInfo]:
-    keys = _keys_dir(cfg)
+    username, _ = user_paths
+    keys = user_keys_dir(cfg, username)
     result: list[SshKeyInfo] = []
+    if not keys.is_dir():
+        return result
     for p in sorted(keys.glob("*.pem")):
         mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
         fp = _fingerprint(p)
@@ -100,12 +129,27 @@ def list_ssh_keys(
 @router.delete("/{name}", status_code=204)
 def delete_ssh_key(
     name: str,
-    _user: str = Depends(require_auth),
-    cfg: SuiteConfig = Depends(get_config),
+    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> None:
     _validate_name(name)
-    keys = _keys_dir(cfg)
-    key_path = keys / f"{name}.pem"
+    username, _ = user_paths
+
+    # Block deletion if any connection (or its gateway) references this key.
+    dependents = connections_referencing_key(cfg, username, name)
+    if dependents:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    f"Key '{name}' is in use by {len(dependents)} connection(s). "
+                    "Unlink them before deleting."
+                ),
+                "dependent_connections": dependents,
+            },
+        )
+
+    key_path = user_keys_dir(cfg, username) / f"{name}.pem"
     if not key_path.is_file():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

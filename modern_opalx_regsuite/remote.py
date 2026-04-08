@@ -269,8 +269,11 @@ class RemoteExecutor:
             full_cmd = env_prefix + cmd
 
         # uenv style: wrap the whole thing (including env vars) with uenv run.
+        # uenv run uses execve, not a shell — VAR=value cmd shell syntax does not
+        # work.  Use env(1) to carry the variable assignments instead.
         if self._is_uenv() and self._env and self._env.prologue:
-            full_cmd = self._wrap_with_uenv(env_prefix + cmd if env_prefix else cmd)
+            inner = (f"env {env_prefix}{cmd}") if env_prefix else cmd
+            full_cmd = self._wrap_with_uenv(inner)
 
         # Wrap in cd. The wrapped command exists in memory only.
         wrapped = f"cd {shlex.quote(remote_cwd)} && {full_cmd}"

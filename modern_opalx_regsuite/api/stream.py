@@ -45,7 +45,7 @@ def _validate_token(request: Request, token: str | None) -> bool:
     return bool(auth_token and verify_access_token(auth_token) is not None)
 
 
-def _stream_run(run, run_id: str | None, request: Request):
+def _stream_run(run, run_id: str | None, request: Request, last_id_param: str | None = None):
     """Build an SSE StreamingResponse for a specific active run."""
     if run is None or run.log_path is None:
         # Check if queued.
@@ -57,9 +57,11 @@ def _stream_run(run, run_id: str | None, request: Request):
             yield 'data: {"type": "status", "status": "none"}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
-    last_id_header = request.headers.get("Last-Event-ID", "")
+    # Prefer the SSE-standard header; fall back to the query param sent by the
+    # frontend on a page refresh (native EventSource can't set headers).
+    last_id_str = request.headers.get("Last-Event-ID", "") or last_id_param or ""
     try:
-        start_line = int(last_id_header) + 1
+        start_line = int(last_id_str) + 1
     except (ValueError, TypeError):
         start_line = 0
 
@@ -126,6 +128,7 @@ def _stream_run(run, run_id: str | None, request: Request):
 async def stream_current_run(
     request: Request,
     token: str | None = Query(None, description="Bearer token (for EventSource clients)"),
+    last_id: str | None = Query(None, description="Last received event ID (resume point)"),
 ):
     """SSE endpoint. Streams log lines for the first active run (backward compat)."""
     if not _validate_token(request, token):
@@ -133,7 +136,7 @@ async def stream_current_run(
         return Response("Unauthorized", status_code=401)
 
     run = get_active_run()
-    return _stream_run(run, None, request)
+    return _stream_run(run, None, request, last_id_param=last_id)
 
 
 @router.get("/{run_id}/stream")
@@ -141,6 +144,7 @@ async def stream_run_by_id(
     run_id: str,
     request: Request,
     token: str | None = Query(None, description="Bearer token (for EventSource clients)"),
+    last_id: str | None = Query(None, description="Last received event ID (resume point)"),
 ):
     """SSE endpoint. Streams log lines for a specific active run."""
     if not _validate_token(request, token):
@@ -148,4 +152,4 @@ async def stream_run_by_id(
         return Response("Unauthorized", status_code=401)
 
     run = get_active_run_by_id(run_id)
-    return _stream_run(run, run_id, request)
+    return _stream_run(run, run_id, request, last_id_param=last_id)

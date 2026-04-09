@@ -34,7 +34,11 @@ export function LogViewer({ runId, onStatusChange, onPhaseChange, onLogLine }: P
   useEffect(() => {
     const token = getAccessToken();
     const base = runId ? `/api/runs/${runId}/stream` : `/api/runs/current/stream`;
-    const url = `${base}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    const storedLastId = runId ? sessionStorage.getItem(`sse-last-id-${runId}`) : null;
+    const params = new URLSearchParams();
+    if (token) params.set("token", token);
+    if (storedLastId !== null) params.set("last_id", storedLastId);
+    const url = `${base}?${params.toString()}`;
     const es = new EventSource(url);
 
     function applyLines(incoming: string[]) {
@@ -83,6 +87,11 @@ export function LogViewer({ runId, onStatusChange, onPhaseChange, onLogLine }: P
           status?: string;
         };
 
+        // Persist the last-event-id so a page refresh can resume from here.
+        if (runId && e.lastEventId) {
+          sessionStorage.setItem(`sse-last-id-${runId}`, e.lastEventId);
+        }
+
         if (event.type === "log" && event.line !== undefined) {
           bufRef.current.push(event.line);
         } else if (event.type === "phase" && event.phase) {
@@ -113,6 +122,8 @@ export function LogViewer({ runId, onStatusChange, onPhaseChange, onLogLine }: P
       setHasLines(false);
       setTruncated(0);
       if (preRef.current) preRef.current.textContent = "";
+      // Don't clear sse-last-id here — it must survive page refreshes.
+      // It is keyed by runId, so stale entries from old runs are harmless.
     };
   }, [runId]); // eslint-disable-line react-hooks/exhaustive-deps
 

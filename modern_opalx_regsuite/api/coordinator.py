@@ -149,21 +149,34 @@ class RunCoordinator:
 
     @staticmethod
     async def _log_tailer(active: ActiveRun) -> None:
-        """Poll pipeline.log for new lines and push to SSE subscriber queues."""
+        """Poll pipeline.log for new lines and push to SSE subscriber queues.
+
+        Reads only newly appended bytes on each tick (seek to last offset)
+        instead of re-reading the entire file, keeping the event-loop block
+        proportional to new output rather than total log size.
+        """
         import re
 
         _PHASE_RE = re.compile(r"^== PHASE: (\S+?) ==")
         line_no = 0
+        byte_offset = 0
+        leftovers = b""
 
         def _push_new_lines() -> None:
-            nonlocal line_no
+            nonlocal line_no, byte_offset, leftovers
             if not (active.log_path and active.log_path.exists()):
                 return
-            lines = active.log_path.read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines()
-            while line_no < len(lines):
-                ln = lines[line_no]
+            with active.log_path.open("rb") as f:
+                f.seek(byte_offset)
+                chunk = f.read()
+            if not chunk:
+                return
+            byte_offset += len(chunk)
+            data = leftovers + chunk
+            parts = data.split(b"\n")
+            leftovers = parts[-1]  # incomplete trailing line, buffer for next tick
+            for raw in parts[:-1]:
+                ln = raw.decode("utf-8", errors="replace")
                 m = _PHASE_RE.match(ln)
                 if m:
                     phase_val = m.group(1).split()[0]

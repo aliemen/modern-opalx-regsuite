@@ -306,6 +306,13 @@ async def cancel_active_run(run_id: str) -> bool:
             and mq.active_run.status == "running"
         ):
             mq.active_run.cancel_event.set()
+            # Immediately push a log line so the UI shows feedback before the
+            # pipeline thread notices the event and writes to the log file.
+            for q in list(mq.active_run.sse_queues):
+                try:
+                    q.put_nowait({"type": "log", "line": "== Cancelling run… =="})
+                except asyncio.QueueFull:
+                    pass
             return True
     return False
 

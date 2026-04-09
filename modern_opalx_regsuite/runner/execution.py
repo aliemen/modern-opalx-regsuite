@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -165,6 +166,7 @@ def _run_command(
     pipeline_log_path: Path | None = None,
     env: Optional[dict[str, str]] = None,
     append_log: bool = False,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Tuple[int, str]:  # returncode, output
     cmd_list = shlex.split(cmd)
     proc = subprocess.Popen(
@@ -177,6 +179,14 @@ def _run_command(
         bufsize=1,
     )
     assert proc.stdout is not None
+
+    # Watchdog: kill the subprocess as soon as cancel_event is set.
+    if cancel_event is not None:
+        def _watchdog() -> None:
+            cancel_event.wait()
+            proc.kill()
+        threading.Thread(target=_watchdog, daemon=True).start()
+
     lines: list[str] = []
     log_mode = "a" if append_log else "w"
     with log_path.open(log_mode, encoding="utf-8") as log_file, (

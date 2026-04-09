@@ -327,6 +327,7 @@ def run_pipeline(
                 log_path=paths.logs_dir / "cmake.log",
                 pipeline_log_path=paths.pipeline_log_path,
                 env=module_env,
+                cancel_event=cancel_event,
             )
 
         # ── Phase: build ──────────────────────────────────────────────────────
@@ -345,6 +346,7 @@ def run_pipeline(
                 log_path=paths.logs_dir / "build.log",
                 pipeline_log_path=paths.pipeline_log_path,
                 env=module_env,
+                cancel_event=cancel_event,
             )
 
         build_ok = cmake_rc == 0 and build_rc == 0
@@ -376,6 +378,7 @@ def run_pipeline(
                     log_path=paths.unit_log_path,
                     pipeline_log_path=paths.pipeline_log_path,
                     env=module_env,
+                    cancel_event=cancel_event,
                 )
             unit_report = _parse_unit_output(output)
             meta.unit_tests_total = unit_report.total

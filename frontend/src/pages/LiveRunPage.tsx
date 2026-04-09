@@ -174,6 +174,7 @@ interface StoredLiveState {
   tests: TestInfo[];
   phase: string;
   finalStatus: string | null;
+  cancelling?: boolean;
   // Cached from the first `effectiveRun` seen so the "View results" /
   // "Dashboard" buttons remain visible after the backend removes the run
   // from its active-runs list (which would otherwise clear `effectiveRun`
@@ -285,7 +286,7 @@ export function LiveRunPage() {
   const [finalStatus, setFinalStatus] = useState<string | null>(
     initSnap?.finalStatus ?? null
   );
-  const [cancelling, setCancelling] = useState(false);
+  const [cancelling, setCancelling] = useState(initSnap?.cancelling ?? false);
   const [tests, setTests] = useState<TestInfo[]>(initSnap?.tests ?? []);
   // Cached branch/arch from the first effectiveRun so post-run action buttons
   // stay visible after the backend drops the run from active-runs.
@@ -305,7 +306,7 @@ export function LiveRunPage() {
     setTests(snap?.tests ?? []);
     setPhase(snap?.phase ?? "git");
     setFinalStatus(snap?.finalStatus ?? null);
-    setCancelling(false);
+    setCancelling(snap?.cancelling ?? false);
     setCachedBranch(snap?.branch);
     setCachedArch(snap?.arch);
   }, [runId]);
@@ -339,10 +340,11 @@ export function LiveRunPage() {
       tests,
       phase,
       finalStatus,
+      cancelling,
       branch: cachedBranch,
       arch: cachedArch,
     });
-  }, [tests, phase, finalStatus, runId, cachedBranch, cachedArch]);
+  }, [tests, phase, finalStatus, cancelling, runId, cachedBranch, cachedArch]);
 
   // Parse regression test START/END lines from the log stream.
   const handleLogLine = useCallback(
@@ -410,7 +412,7 @@ export function LiveRunPage() {
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={displayStatus} size="md" />
-          {displayStatus === "running" && (
+          {(displayStatus === "running" || cancelling) && !finalStatus && (
             <button
               onClick={handleCancel}
               disabled={cancelling}

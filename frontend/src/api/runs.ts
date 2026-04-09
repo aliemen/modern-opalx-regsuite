@@ -54,6 +54,7 @@ export interface DashboardStats {
   last_run_branch: string | null;
   last_run_arch: string | null;
   last_run_status: string | null;
+  last_run_id: string | null;
   runs_total: number;
   runs_last_week: number;
   branches_covered: number;

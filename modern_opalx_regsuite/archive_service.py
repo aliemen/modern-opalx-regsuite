@@ -38,6 +38,25 @@ from .data_model import (
 
 ViewMode = Literal["active", "archived", "all"]
 
+#: Branch name that is permanently protected from archive / hard-delete.
+#: master holds the canonical history every developer cares about, so the
+#: surface area to accidentally hide it must be zero. Both the API layer and
+#: the CLI go through this constant.
+PROTECTED_BRANCH = "master"
+
+
+class ProtectedBranchError(Exception):
+    """Raised when a caller tries to archive or hard-delete the protected
+    branch (``master``). The API translates this into HTTP 409, the CLI into
+    a typer.Exit. Unarchiving the protected branch is allowed."""
+
+    def __init__(self, branch: str) -> None:
+        super().__init__(
+            f"Branch '{branch}' is protected and cannot be archived or "
+            f"hard-deleted. Unarchiving is still allowed."
+        )
+        self.branch = branch
+
 
 class ArchiveResult(BaseModel):
     """Outcome of an archive / unarchive / hard-delete operation."""
@@ -261,7 +280,14 @@ def set_archived_for_branch(
     archived: bool,
     protect_run_ids: Iterable[str] = (),
 ) -> ArchiveResult:
-    """Archive or unarchive every run for *branch* (across all archs)."""
+    """Archive or unarchive every run for *branch* (across all archs).
+
+    Raises :class:`ProtectedBranchError` when *branch* is the protected
+    branch and *archived* is True. Unarchiving the protected branch (e.g.
+    after a manual mis-archive on disk) is still allowed.
+    """
+    if archived and branch == PROTECTED_BRANCH:
+        raise ProtectedBranchError(branch)
     protect = set(protect_run_ids)
     total_changed = 0
     skipped: list[str] = []
@@ -286,7 +312,13 @@ def set_archived_for_arch(
     archived: bool,
     protect_run_ids: Iterable[str] = (),
 ) -> ArchiveResult:
-    """Archive or unarchive every run for *branch* + *arch*."""
+    """Archive or unarchive every run for *branch* + *arch*.
+
+    Raises :class:`ProtectedBranchError` when *branch* is the protected
+    branch and *archived* is True.
+    """
+    if archived and branch == PROTECTED_BRANCH:
+        raise ProtectedBranchError(branch)
     protect = set(protect_run_ids)
     changed, skipped, _ = _set_archived_for_index(
         data_root,
@@ -307,7 +339,13 @@ def set_archived_for_runs(
     archived: bool,
     protect_run_ids: Iterable[str] = (),
 ) -> ArchiveResult:
-    """Archive or unarchive an explicit list of run ids in one branch+arch."""
+    """Archive or unarchive an explicit list of run ids in one branch+arch.
+
+    Raises :class:`ProtectedBranchError` when *branch* is the protected
+    branch and *archived* is True.
+    """
+    if archived and branch == PROTECTED_BRANCH:
+        raise ProtectedBranchError(branch)
     requested = set(run_ids)
     if not requested:
         return ArchiveResult()
@@ -338,8 +376,11 @@ def hard_delete_runs(
 
     Defense in depth: even though archived runs cannot be active (active runs
     are skipped at archive time), we still refuse to hard-delete any run id
-    in *protect_run_ids*.
+    in *protect_run_ids*. Also raises :class:`ProtectedBranchError` if the
+    target branch is the protected one.
     """
+    if branch == PROTECTED_BRANCH:
+        raise ProtectedBranchError(branch)
     requested = set(run_ids)
     if not requested:
         return ArchiveResult()
@@ -378,3 +419,47 @@ def hard_delete_runs(
         skipped_active=skipped,
         not_found=not_found,
     )
+
+
+def hard_delete_arch_archived(
+    data_root: Path,
+    branch: str,
+    arch: str,
+    protect_run_ids: Iterable[str] = (),
+) -> ArchiveResult:
+    """Permanently delete every *archived* run for one (branch, arch) cell.
+
+    Skips active (non-archived) entries entirely so the dashboard view of the
+    cell is unaffected. Raises :class:`ProtectedBranchError` for the
+    protected branch — defense in depth even though the dashboard never
+    surfaces a protected-branch cell on the Archive page.
+    """
+    if branch == PROTECTED_BRANCH:
+        raise ProtectedBranchError(branch)
+    protect = set(protect_run_ids)
+    index_path = runs_index_path(data_root, branch, arch)
+
+    deleted: list[str] = []
+    skipped: list[str] = []
+
+    with locked_index(index_path):
+        entries = _read_index(index_path)
+        kept: list[dict] = []
+        for entry in entries:
+            rid = entry.get("run_id")
+            is_archived = bool(entry.get("archived", False))
+            if not isinstance(rid, str) or not is_archived:
+                kept.append(entry)
+                continue
+            if rid in protect:
+                skipped.append(rid)
+                kept.append(entry)
+                continue
+            rdir = run_dir(data_root, branch, arch, rid)
+            if rdir.is_dir():
+                shutil.rmtree(rdir)
+            deleted.append(rid)
+        if deleted:
+            _write_index(index_path, kept)
+
+    return ArchiveResult(changed=len(deleted), skipped_active=skipped)

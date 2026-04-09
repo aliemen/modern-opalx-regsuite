@@ -29,10 +29,15 @@ function LastRunTile() {
 
   if (!stats) return null;
 
+  // Prefer the deepest link we can build: branch+arch+run_id → run detail.
+  // Fall back to the branch+arch run list if the run id is missing (older
+  // index files written before `last_run_id` was added to /api/stats).
   const href =
-    stats.last_run_branch && stats.last_run_arch
-      ? `/results/${stats.last_run_branch}/${stats.last_run_arch}`
-      : null;
+    stats.last_run_branch && stats.last_run_arch && stats.last_run_id
+      ? `/results/${stats.last_run_branch}/${stats.last_run_arch}/${stats.last_run_id}`
+      : stats.last_run_branch && stats.last_run_arch
+        ? `/results/${stats.last_run_branch}/${stats.last_run_arch}`
+        : null;
 
   const inner = (
     <div className="bg-surface border border-border rounded-xl p-5 hover:border-accent/40 transition-colors">

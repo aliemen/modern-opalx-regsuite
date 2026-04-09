@@ -23,8 +23,8 @@ export function ArchivePage() {
   const hasEntries = Object.keys(branches).length > 0;
   const busy =
     mutations.archiveBranch.isPending ||
-    mutations.archiveRuns.isPending ||
-    mutations.hardDeleteRuns.isPending;
+    mutations.archiveCells.isPending ||
+    mutations.hardDeleteCells.isPending;
 
   function groupAction(group: Group) {
     if (group.kind !== "branch") return undefined;
@@ -43,17 +43,22 @@ export function ArchivePage() {
 
   async function confirmBulkUnarchive() {
     setPendingBulkUnarchive(false);
-    const scopes = selection.groupedScopes();
-    if (scopes.length === 0) return;
-    await mutations.archiveRuns.mutateAsync({ scopes, archived: false });
+    const cellRefs = selection.selectedCells();
+    if (cellRefs.length === 0) return;
+    await mutations.archiveCells.mutateAsync({
+      cells: cellRefs,
+      archived: false,
+    });
     selection.clear();
   }
 
   async function confirmBulkHardDelete() {
     setPendingBulkHardDelete(false);
-    const scopes = selection.groupedScopes();
-    if (scopes.length === 0) return;
-    const results = await mutations.hardDeleteRuns.mutateAsync({ scopes });
+    const cellRefs = selection.selectedCells();
+    if (cellRefs.length === 0) return;
+    const results = await mutations.hardDeleteCells.mutateAsync({
+      cells: cellRefs,
+    });
     selection.clear();
     const skipped = mutations.collectSkippedActive(results);
     if (skipped.length > 0) {
@@ -75,8 +80,8 @@ export function ArchivePage() {
       </h1>
       <p className="text-muted text-sm mb-6">
         Archived runs are hidden from the dashboard but still browsable here.
-        Unarchive to restore a run, or hard-delete to permanently remove it
-        from disk.
+        Unarchive to restore a cell, or hard-delete to permanently remove its
+        archived runs from disk.
       </p>
 
       {!hasEntries ? (
@@ -113,8 +118,8 @@ export function ArchivePage() {
 
       <ConfirmDialog
         open={pendingBulkUnarchive}
-        title={`Unarchive ${selection.count} run${selection.count !== 1 ? "s" : ""}?`}
-        message="The selected runs will return to the dashboard."
+        title={`Unarchive ${selection.count} cell${selection.count !== 1 ? "s" : ""}?`}
+        message="Every archived run in the selected branch+arch cells will return to the dashboard."
         confirmLabel="Unarchive"
         onConfirm={confirmBulkUnarchive}
         onCancel={() => setPendingBulkUnarchive(false)}
@@ -122,10 +127,11 @@ export function ArchivePage() {
 
       <ConfirmDialog
         open={pendingBulkHardDelete}
-        title={`Permanently delete ${selection.count} run${selection.count !== 1 ? "s" : ""}?`}
+        title={`Permanently delete ${selection.count} cell${selection.count !== 1 ? "s" : ""}?`}
         message={
-          "This cannot be undone. The run directories (logs, plots, metadata)\n" +
-          "will be removed from disk."
+          "This cannot be undone. Every archived run in the selected " +
+          "branch+arch cells (logs, plots, metadata) will be removed from " +
+          "disk. Active runs in the same cells are not touched."
         }
         confirmLabel="Delete forever"
         destructive

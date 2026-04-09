@@ -174,7 +174,10 @@ def _build_simulation(
         name=test_name,
         description=description,
         state=sim_state,
-        log_file=f"logs/{test_name}-RT.o",
+        # `.log` (not `.o`) so editors auto-open the file when downloaded.
+        # The on-disk filenames in `_run_regression_suite[_remote]` use the
+        # same suffix; if you change one, change the other.
+        log_file=f"logs/{test_name}-RT.log",
         metrics=sim_metrics,
         duration_seconds=time.monotonic() - test_start,
     )
@@ -227,8 +230,8 @@ def _run_regression_suite(
         generated_stat = work_test_dir / f"{test_name}.stat"
         reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
 
-        test_log_local = work_test_dir / f"{test_name}-RT.o"
-        test_log_run = paths.logs_dir / f"{test_name}-RT.o"
+        test_log_local = work_test_dir / f"{test_name}-RT.log"
+        test_log_run = paths.logs_dir / f"{test_name}-RT.log"
         env = (base_env or os.environ).copy()
         env["OPALX_EXE_PATH"] = str(opalx_exe.parent)
 
@@ -386,8 +389,8 @@ def _run_regression_suite_remote(
         rt_file = src_test_dir / f"{test_name}.rt"
         reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
         local_stat = work_test_dir / f"{test_name}.stat"
-        test_log_local = work_test_dir / f"{test_name}-RT.o"
-        test_log_run = paths.logs_dir / f"{test_name}-RT.o"
+        test_log_local = work_test_dir / f"{test_name}-RT.log"
+        test_log_run = paths.logs_dir / f"{test_name}-RT.log"
 
         env = {"OPALX_EXE_PATH": remote_opalx_dir}
 

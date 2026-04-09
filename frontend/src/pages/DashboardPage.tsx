@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Radio } from "lucide-react";
 import { getQueueState } from "../api/runs";
-import { useLatestRuns } from "../hooks/useLatestRuns";
+import { useLatestRuns, type LatestRunCell } from "../hooks/useLatestRuns";
 import { useRunSelection } from "../hooks/useRunSelection";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
 import { useGroupBy } from "../hooks/useGroupBy";
@@ -16,6 +16,10 @@ import { StatsPanel } from "../components/StatsPanel";
 import { QueuePanel } from "../components/QueuePanel";
 import type { Group } from "../lib/grouping";
 
+/** master holds canonical history; we never let the user archive it from
+ *  the dashboard. The backend enforces this too (returns 409). */
+const PROTECTED_BRANCH = "master";
+
 export function DashboardPage() {
   const { cells, branches, isLoading } = useLatestRuns("active");
 
@@ -25,7 +29,14 @@ export function DashboardPage() {
     refetchInterval: 5000,
   });
 
-  const selection = useRunSelection();
+  // Master is filtered out of selection so the bulk-archive bar reflects only
+  // archivable cells; per-card checkboxes for master are also disabled below.
+  const isCellSelectable = useCallback(
+    (cell: LatestRunCell) => cell.branch !== PROTECTED_BRANCH,
+    []
+  );
+
+  const selection = useRunSelection({ isCellSelectable });
   const mutations = useArchiveMutations();
   const [groupBy, setGroupBy] = useGroupBy();
 
@@ -52,7 +63,9 @@ export function DashboardPage() {
   const totalQueued = machines.reduce((s, m) => s + m.queue.length, 0);
 
   function groupAction(group: Group) {
+    // Hide the per-group "Archive branch" shortcut for master.
     if (group.kind !== "branch") return undefined;
+    if (group.label === PROTECTED_BRANCH) return undefined;
     return {
       label: "Archive branch",
       onClick: () => setPendingBranchArchive(group.label),
@@ -76,10 +89,10 @@ export function DashboardPage() {
 
   async function confirmBulkArchive() {
     setPendingBulkArchive(false);
-    const scopes = selection.groupedScopes();
-    if (scopes.length === 0) return;
-    const results = await mutations.archiveRuns.mutateAsync({
-      scopes,
+    const cellRefs = selection.selectedCells();
+    if (cellRefs.length === 0) return;
+    const results = await mutations.archiveCells.mutateAsync({
+      cells: cellRefs,
       archived: true,
     });
     selection.clear();
@@ -92,7 +105,7 @@ export function DashboardPage() {
   }
 
   const busy =
-    mutations.archiveBranch.isPending || mutations.archiveRuns.isPending;
+    mutations.archiveBranch.isPending || mutations.archiveCells.isPending;
   const hasEntries = Object.keys(branches).length > 0;
 
   return (
@@ -175,8 +188,8 @@ export function DashboardPage() {
 
       <ConfirmDialog
         open={pendingBulkArchive}
-        title={`Archive ${selection.count} run${selection.count !== 1 ? "s" : ""}?`}
-        message="The selected runs will be hidden from the dashboard. You can restore them from the Archive tab at any time."
+        title={`Archive ${selection.count} cell${selection.count !== 1 ? "s" : ""}?`}
+        message="The selected branch+arch cells (every run in each) will be hidden from the dashboard. You can restore them from the Archive tab at any time."
         confirmLabel="Archive"
         onConfirm={confirmBulkArchive}
         onCancel={() => setPendingBulkArchive(false)}

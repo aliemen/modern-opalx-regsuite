@@ -23,6 +23,7 @@ class DashboardStats(BaseModel):
     last_run_branch: Optional[str] = None
     last_run_arch: Optional[str] = None
     last_run_status: Optional[str] = None
+    last_run_id: Optional[str] = None
     runs_total: int = 0
     runs_last_week: int = 0
     branches_covered: int = 0
@@ -55,6 +56,7 @@ def get_dashboard_stats(
     last_run_branch: Optional[str] = None
     last_run_arch: Optional[str] = None
     last_run_status: Optional[str] = None
+    last_run_id: Optional[str] = None
 
     master_unit_rates: list[float] = []
     master_reg_rates: list[float] = []
@@ -98,6 +100,7 @@ def get_dashboard_stats(
                             last_run_branch = branch
                             last_run_arch = arch
                             last_run_status = entry.get("status")
+                            last_run_id = entry.get("run_id")
                     except (ValueError, TypeError):
                         pass
 
@@ -134,6 +137,7 @@ def get_dashboard_stats(
         last_run_branch=last_run_branch,
         last_run_arch=last_run_arch,
         last_run_status=last_run_status,
+        last_run_id=last_run_id,
         runs_total=runs_total,
         runs_last_week=runs_last_week,
         branches_covered=len(branches_with_visible_runs),

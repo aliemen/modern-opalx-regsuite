@@ -15,7 +15,15 @@ import { getRuns, type RunIndexEntry } from "../api/results";
 import { useThemeColors } from "../hooks/useThemeColors";
 
 interface TrendPoint {
-  date: string;
+  /** Tick label including time (e.g. "Apr 9, 14:23").
+   *
+   * Older versions used just `Apr 9` which collapsed multiple runs on the
+   * same day into duplicated x-axis labels. Recharts treated each row as a
+   * separate slot (so the tooltip values were correct), but visually it
+   * looked like the tooltip didn't match the dot positions. Including the
+   * minute disambiguates them.
+   */
+  label: string;
   unitPassRate: number | null;
   regressionPassRate: number | null;
 }
@@ -27,9 +35,11 @@ function toTrendData(runs: RunIndexEntry[]): TrendPoint[] {
         new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
     )
     .map((r) => ({
-      date: new Date(r.started_at).toLocaleDateString(undefined, {
+      label: new Date(r.started_at).toLocaleString(undefined, {
         month: "short",
         day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       }),
       unitPassRate:
         r.unit_tests_total > 0
@@ -82,13 +92,15 @@ export function TrendsPanel({ archs }: { archs: string[] }) {
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={trendData}>
+          <LineChart data={trendData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={colors.border} />
             <XAxis
-              dataKey="date"
-              tick={{ fontSize: 11, fill: colors.muted }}
+              dataKey="label"
+              tick={{ fontSize: 10, fill: colors.muted }}
               tickLine={false}
               axisLine={{ stroke: colors.border }}
+              interval="preserveStartEnd"
+              minTickGap={24}
             />
             <YAxis
               domain={[0, 100]}

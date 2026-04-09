@@ -169,28 +169,12 @@ export async function archiveArch(
   return res.data;
 }
 
-export async function archiveRuns(
+export async function hardDeleteArch(
   branch: string,
-  arch: string,
-  runIds: string[],
-  archived: boolean
-): Promise<ArchiveResult> {
-  const url = `/api/archive/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs`;
-  const body = { run_ids: runIds };
-  const res = archived
-    ? await api.post<ArchiveResult>(url, body)
-    : await api.delete<ArchiveResult>(url, { data: body });
-  return res.data;
-}
-
-export async function hardDeleteRuns(
-  branch: string,
-  arch: string,
-  runIds: string[]
+  arch: string
 ): Promise<ArchiveResult> {
   const res = await api.post<ArchiveResult>(
-    `/api/archive/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs/hard-delete`,
-    { run_ids: runIds }
+    `/api/archive/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/hard-delete-arch`
   );
   return res.data;
 }

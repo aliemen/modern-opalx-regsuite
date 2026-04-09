@@ -57,13 +57,20 @@ export function AccordionGroup({
 }: AccordionGroupProps) {
   const counts = summaryCounts(group.cells);
   const allSelected = selection ? selection.areAllSelected(group.cells) : false;
-  const hasRuns = group.cells.some((c) => c.run);
+  // The "select all" checkbox only makes sense when at least one cell in the
+  // group is selectable (e.g. a branch=master arch row in a date bucket
+  // shouldn't make the bucket-level checkbox lit up alone).
+  const hasSelectable = selection
+    ? group.cells.some(
+        (c) => c.run !== undefined && selection.isCellSelectable(c)
+      )
+    : false;
 
   return (
     <div className="border border-border rounded-xl overflow-hidden">
       <div className="w-full flex items-center gap-3 px-5 py-3.5 bg-surface hover:bg-border/30 transition-colors">
         {/* Optional bulk-select-all checkbox (only when selection mode is on). */}
-        {selection && hasRuns && (
+        {selection && hasSelectable && (
           <label
             className="flex items-center cursor-pointer"
             onClick={(e) => e.stopPropagation()}
@@ -131,34 +138,31 @@ export function AccordionGroup({
       {open && (
         <div className="border-t border-border p-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            {group.cells.map((cell) => (
-              <LatestCard
-                key={`${cell.branch}::${cell.arch}`}
-                branch={cell.branch}
-                arch={cell.arch}
-                run={cell.run}
-                showCheckbox={!!selection}
-                selected={
-                  selection && cell.run
-                    ? selection.isSelected(
-                        cell.branch,
-                        cell.arch,
-                        cell.run.run_id
-                      )
-                    : false
-                }
-                onToggleSelect={
-                  selection && cell.run
-                    ? () =>
-                        selection.toggleRun(
-                          cell.branch,
-                          cell.arch,
-                          cell.run!.run_id
-                        )
-                    : undefined
-                }
-              />
-            ))}
+            {group.cells.map((cell) => {
+              const selectable =
+                selection?.isCellSelectable(cell) ?? true;
+              return (
+                <LatestCard
+                  key={`${cell.branch}::${cell.arch}`}
+                  branch={cell.branch}
+                  arch={cell.arch}
+                  run={cell.run}
+                  showCheckbox={!!selection}
+                  selected={
+                    selection ? selection.isSelected(cell.branch, cell.arch) : false
+                  }
+                  checkboxDisabled={!selectable}
+                  checkboxDisabledReason={
+                    !selectable ? "master cannot be archived" : undefined
+                  }
+                  onToggleSelect={
+                    selection && selectable
+                      ? () => selection.toggleCell(cell.branch, cell.arch)
+                      : undefined
+                  }
+                />
+              );
+            })}
           </div>
         </div>
       )}

@@ -1,145 +1,143 @@
 import { useCallback, useMemo, useState } from "react";
 import type { LatestRunCell } from "./useLatestRuns";
 
-/** Encoded as `"<branch>::<arch>::<run_id>"`. */
+/** Encoded as `"<branch>::<arch>"`. */
 type SelectionKey = string;
 
-function makeKey(branch: string, arch: string, runId: string): SelectionKey {
-  return `${branch}::${arch}::${runId}`;
+function makeKey(branch: string, arch: string): SelectionKey {
+  return `${branch}::${arch}`;
 }
 
-function parseKey(key: SelectionKey): {
+function parseKey(key: SelectionKey): { branch: string; arch: string } | null {
+  const idx = key.indexOf("::");
+  if (idx < 0) return null;
+  return { branch: key.slice(0, idx), arch: key.slice(idx + 2) };
+}
+
+/** A (branch, arch) cell — the unit operated on by the bulk endpoints. */
+export interface CellRef {
   branch: string;
   arch: string;
-  runId: string;
-} | null {
-  const parts = key.split("::");
-  if (parts.length !== 3) return null;
-  return { branch: parts[0], arch: parts[1], runId: parts[2] };
 }
 
-/** A group of run ids belonging to the same branch+arch — the unit accepted
- *  by the bulk archive endpoints. */
-export interface BulkScope {
-  branch: string;
-  arch: string;
-  runIds: string[];
-}
-
+/** Cells where the *whole* (branch+arch) — every run in it — is the action target. */
 export interface SelectionHandle {
   count: number;
-  isSelected: (branch: string, arch: string, runId: string) => boolean;
-  toggleRun: (branch: string, arch: string, runId: string) => void;
-  /** Add every run from the given cells to the selection. */
+  isSelected: (branch: string, arch: string) => boolean;
+  toggleCell: (branch: string, arch: string) => void;
+  /** Add every selectable cell from the given list to the selection. */
   selectCells: (cells: LatestRunCell[]) => void;
-  /** Remove every run from the given cells from the selection. */
+  /** Remove every cell from the given list from the selection. */
   deselectCells: (cells: LatestRunCell[]) => void;
-  /** True if every cell with a run is currently selected. */
+  /** True iff every selectable cell in the list is currently selected. */
   areAllSelected: (cells: LatestRunCell[]) => boolean;
   clear: () => void;
-  /** Selection bucketed per branch+arch — what the bulk endpoints want. */
-  groupedScopes: () => BulkScope[];
+  /** Selected (branch, arch) pairs in flat form for the bulk endpoints. */
+  selectedCells: () => CellRef[];
+  /** Predicate the parent uses to filter "selectable" cells (e.g. exclude master). */
+  isCellSelectable: (cell: LatestRunCell) => boolean;
+}
+
+interface UseRunSelectionOptions {
+  /** Cells matching this predicate are not selectable (e.g. the master branch
+   *  on the dashboard). Defaults to "everything is selectable". */
+  isCellSelectable?: (cell: LatestRunCell) => boolean;
 }
 
 /**
  * Selection state for bulk archive / unarchive / hard-delete operations.
  *
- * Selection is keyed by full run id (not group key), so switching the
- * dashboard's `groupBy` axis preserves the user's selection.
+ * Selection is keyed by full (branch, arch) cell — NOT by run id — because the
+ * dashboard shows the latest run per cell and the user's mental model when
+ * checking a card is "hide this branch+arch from my dashboard", which means
+ * archiving every run for that cell, not just the latest one. Selection by
+ * cell also keeps the state stable when switching `groupBy` axes.
  */
-export function useRunSelection(): SelectionHandle {
+export function useRunSelection(
+  options: UseRunSelectionOptions = {}
+): SelectionHandle {
+  const isCellSelectable = options.isCellSelectable ?? (() => true);
   const [keys, setKeys] = useState<Set<SelectionKey>>(() => new Set());
 
   const isSelected = useCallback(
-    (branch: string, arch: string, runId: string) =>
-      keys.has(makeKey(branch, arch, runId)),
+    (branch: string, arch: string) => keys.has(makeKey(branch, arch)),
     [keys]
   );
 
-  const toggleRun = useCallback(
-    (branch: string, arch: string, runId: string) => {
-      setKeys((prev) => {
-        const next = new Set(prev);
-        const k = makeKey(branch, arch, runId);
-        if (next.has(k)) next.delete(k);
-        else next.add(k);
-        return next;
-      });
-    },
-    []
-  );
-
-  const selectCells = useCallback((cells: LatestRunCell[]) => {
+  const toggleCell = useCallback((branch: string, arch: string) => {
     setKeys((prev) => {
       const next = new Set(prev);
-      for (const c of cells) {
-        if (c.run) next.add(makeKey(c.branch, c.arch, c.run.run_id));
-      }
+      const k = makeKey(branch, arch);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
       return next;
     });
   }, []);
 
+  const selectCells = useCallback(
+    (cells: LatestRunCell[]) => {
+      setKeys((prev) => {
+        const next = new Set(prev);
+        for (const c of cells) {
+          if (!isCellSelectable(c)) continue;
+          next.add(makeKey(c.branch, c.arch));
+        }
+        return next;
+      });
+    },
+    [isCellSelectable]
+  );
+
   const deselectCells = useCallback((cells: LatestRunCell[]) => {
     setKeys((prev) => {
       const next = new Set(prev);
-      for (const c of cells) {
-        if (c.run) next.delete(makeKey(c.branch, c.arch, c.run.run_id));
-      }
+      for (const c of cells) next.delete(makeKey(c.branch, c.arch));
       return next;
     });
   }, []);
 
   const areAllSelected = useCallback(
     (cells: LatestRunCell[]) => {
-      const withRuns = cells.filter((c) => c.run);
-      if (withRuns.length === 0) return false;
-      return withRuns.every((c) =>
-        keys.has(makeKey(c.branch, c.arch, c.run!.run_id))
-      );
+      const selectable = cells.filter(isCellSelectable);
+      if (selectable.length === 0) return false;
+      return selectable.every((c) => keys.has(makeKey(c.branch, c.arch)));
     },
-    [keys]
+    [keys, isCellSelectable]
   );
 
   const clear = useCallback(() => setKeys(new Set()), []);
 
-  const groupedScopes = useCallback((): BulkScope[] => {
-    const map = new Map<string, BulkScope>();
+  const selectedCells = useCallback((): CellRef[] => {
+    const out: CellRef[] = [];
     for (const key of keys) {
       const parsed = parseKey(key);
-      if (!parsed) continue;
-      const groupKey = `${parsed.branch}::${parsed.arch}`;
-      if (!map.has(groupKey)) {
-        map.set(groupKey, {
-          branch: parsed.branch,
-          arch: parsed.arch,
-          runIds: [],
-        });
-      }
-      map.get(groupKey)!.runIds.push(parsed.runId);
+      if (parsed) out.push(parsed);
     }
-    return Array.from(map.values());
+    return out;
   }, [keys]);
 
   return useMemo(
     () => ({
       count: keys.size,
       isSelected,
-      toggleRun,
+      toggleCell,
       selectCells,
       deselectCells,
       areAllSelected,
       clear,
-      groupedScopes,
+      selectedCells,
+      isCellSelectable,
     }),
     [
       keys,
       isSelected,
-      toggleRun,
+      toggleCell,
       selectCells,
       deselectCells,
       areAllSelected,
       clear,
-      groupedScopes,
+      selectedCells,
+      isCellSelectable,
     ]
   );
 }

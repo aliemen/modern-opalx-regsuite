@@ -3,36 +3,35 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   archiveArch,
   archiveBranch,
-  archiveRuns,
-  hardDeleteRuns,
+  hardDeleteArch,
   type ArchiveResult,
 } from "../api/results";
-import type { BulkScope } from "./useRunSelection";
+import type { CellRef } from "./useRunSelection";
 
 interface ArchiveBranchVars {
   branch: string;
   archived: boolean;
 }
 
-interface ArchiveArchVars {
-  branch: string;
-  arch: string;
+interface ArchiveCellsVars {
+  cells: CellRef[];
   archived: boolean;
 }
 
-interface ArchiveRunsVars {
-  scopes: BulkScope[];
-  archived: boolean;
-}
-
-interface HardDeleteVars {
-  scopes: BulkScope[];
+interface HardDeleteCellsVars {
+  cells: CellRef[];
 }
 
 /**
  * TanStack mutation wrappers for every archive endpoint plus a single
  * `invalidateAll()` that nukes every view-namespaced query key the dashboard
  * and archive pages care about.
+ *
+ * The bulk mutations operate on whole (branch, arch) cells (not individual
+ * run ids) because the dashboard cards are per-cell and the user's intent
+ * when checking a card is "operate on the whole cell". This also fixes a
+ * bug where archiving "the latest run" of a cell left the rest of the
+ * history active and the cell remained visible on the dashboard.
  *
  * Why aggressive invalidation: a bulk archive can affect any combination of
  * `["branches", view]`, `["runs", branch, arch, view]`, `["all-runs", view]`,
@@ -56,35 +55,28 @@ export function useArchiveMutations() {
     onSuccess: invalidateAll,
   });
 
-  const archMutation = useMutation<ArchiveResult, Error, ArchiveArchVars>({
-    mutationFn: ({ branch, arch, archived }) =>
-      archiveArch(branch, arch, archived),
-    onSuccess: invalidateAll,
-  });
-
-  const runsMutation = useMutation<ArchiveResult[], Error, ArchiveRunsVars>({
-    mutationFn: async ({ scopes, archived }) =>
-      Promise.all(
-        scopes.map((s) => archiveRuns(s.branch, s.arch, s.runIds, archived))
-      ),
-    onSuccess: invalidateAll,
-  });
-
-  const hardDeleteMutation = useMutation<ArchiveResult[], Error, HardDeleteVars>(
+  const archiveCellsMutation = useMutation<ArchiveResult[], Error, ArchiveCellsVars>(
     {
-      mutationFn: async ({ scopes }) =>
-        Promise.all(
-          scopes.map((s) => hardDeleteRuns(s.branch, s.arch, s.runIds))
-        ),
+      mutationFn: async ({ cells, archived }) =>
+        Promise.all(cells.map((c) => archiveArch(c.branch, c.arch, archived))),
       onSuccess: invalidateAll,
     }
   );
 
+  const hardDeleteCellsMutation = useMutation<
+    ArchiveResult[],
+    Error,
+    HardDeleteCellsVars
+  >({
+    mutationFn: async ({ cells }) =>
+      Promise.all(cells.map((c) => hardDeleteArch(c.branch, c.arch))),
+    onSuccess: invalidateAll,
+  });
+
   return {
     archiveBranch: branchMutation,
-    archiveArch: archMutation,
-    archiveRuns: runsMutation,
-    hardDeleteRuns: hardDeleteMutation,
+    archiveCells: archiveCellsMutation,
+    hardDeleteCells: hardDeleteCellsMutation,
     /** Returns the union of skipped_active across an array of results, for
      *  showing a single "N runs skipped (currently running)" toast. */
     collectSkippedActive(results: ArchiveResult[]): string[] {

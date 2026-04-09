@@ -312,18 +312,22 @@ def archive_cmd(
     archived = not unarchive
     action = "archive" if archived else "unarchive"
 
-    if run_id:
-        result = archive_service.set_archived_for_runs(
-            data_root, branch, arch, run_id, archived=archived
-        )
-    elif arch:
-        result = archive_service.set_archived_for_arch(
-            data_root, branch, arch, archived=archived
-        )
-    else:
-        result = archive_service.set_archived_for_branch(
-            data_root, branch, archived=archived
-        )
+    try:
+        if run_id:
+            result = archive_service.set_archived_for_runs(
+                data_root, branch, arch, run_id, archived=archived
+            )
+        elif arch:
+            result = archive_service.set_archived_for_arch(
+                data_root, branch, arch, archived=archived
+            )
+        else:
+            result = archive_service.set_archived_for_branch(
+                data_root, branch, archived=archived
+            )
+    except archive_service.ProtectedBranchError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2)
 
     typer.echo(
         f"{action.title()}d {result.changed} run(s) "

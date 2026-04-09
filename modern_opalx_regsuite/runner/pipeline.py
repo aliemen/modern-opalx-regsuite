@@ -94,6 +94,7 @@ def run_pipeline(
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
     repo_locks: Optional[dict[str, threading.Lock]] = None,
+    triggered_by: str = "",
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
 
@@ -131,6 +132,7 @@ def run_pipeline(
         started_at=datetime.now(timezone.utc),
         status="running",
         connection_name=connection_name,
+        triggered_by=triggered_by or None,
     )
     _write_json(paths.meta_path, meta.model_dump())
 

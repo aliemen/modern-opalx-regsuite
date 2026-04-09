@@ -258,6 +258,10 @@ export function RunDetailPage() {
           </p>
         </div>
         <div className="space-y-1">
+          <p className="text-muted text-xs">Triggered By</p>
+          <p className="text-fg font-mono text-sm">{meta.triggered_by ?? "—"}</p>
+        </div>
+        <div className="space-y-1">
           <p className="text-muted text-xs">Started</p>
           <p className="text-fg">{fmtDate(meta.started_at)}</p>
         </div>

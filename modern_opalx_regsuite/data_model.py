@@ -117,6 +117,9 @@ class RunMeta(BaseModel):
     # sharing as long as the user did not embed identifying info in the name.
     connection_name: Optional[str] = None
 
+    # The username that triggered the run.
+    triggered_by: Optional[str] = None
+
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
 
@@ -144,6 +147,7 @@ class RunIndexEntry(BaseModel):
     finished_at: Optional[UtcDatetime]
     status: str
     connection_name: Optional[str] = None
+    triggered_by: Optional[str] = None
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
     regression_total: int = 0

@@ -93,6 +93,7 @@ class RunCoordinator:
                 target_key_path=active.target_key_path,
                 gateway_key_path=active.gateway_key_path,
                 repo_locks=repo_locks,
+                triggered_by=active.triggered_by,
             )
 
         tailer_task = asyncio.create_task(self._log_tailer(active))
@@ -130,6 +131,7 @@ class RunCoordinator:
             machine_id=queued.machine_id,
             connection_name=queued.connection_name,
             log_path=queued.log_path,
+            triggered_by=queued.triggered_by,
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,

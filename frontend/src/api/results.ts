@@ -7,6 +7,7 @@ export interface RunIndexEntry {
   started_at: string;
   finished_at: string | null;
   status: string;
+  triggered_by: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
   regression_total: number;
@@ -60,6 +61,7 @@ export interface RunMeta {
   opalx_commit: string | null;
   tests_repo_commit: string | null;
   connection_name: string | null;
+  triggered_by: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
   regression_total: number;

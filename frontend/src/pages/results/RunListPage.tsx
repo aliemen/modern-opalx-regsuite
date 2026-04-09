@@ -62,6 +62,7 @@ export function RunListPage() {
                     <Clock size={12} className="inline mr-1" />
                     Started
                   </th>
+                  <th className="px-4 py-3 font-medium">User</th>
                   <th className="px-4 py-3 font-medium">Duration</th>
                   <th className="px-4 py-3 font-medium">Unit</th>
                   <th className="px-4 py-3 font-medium">Regression</th>
@@ -85,6 +86,7 @@ export function RunListPage() {
                       <StatusBadge status={run.status} />
                     </td>
                     <td className="px-4 py-3 text-muted text-xs">{fmtDate(run.started_at)}</td>
+                    <td className="px-4 py-3 text-muted font-mono text-xs">{run.triggered_by ?? "—"}</td>
                     <td className="px-4 py-3 text-muted text-xs">
                       {duration(run.started_at, run.finished_at)}
                     </td>

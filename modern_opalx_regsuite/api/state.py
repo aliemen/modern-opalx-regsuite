@@ -39,6 +39,7 @@ class ActiveRun:
     arch: str
     machine_id: str
     connection_name: str  # "local" or the user-chosen connection label
+    triggered_by: str = ""  # username that triggered the run
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -59,6 +60,7 @@ class QueuedRun:
     arch: str
     machine_id: str
     connection_name: str
+    triggered_by: str = ""  # username that triggered the run
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -120,6 +122,7 @@ async def acquire_run_slot(
     machine_id: str,
     connection_name: str,
     log_path: Optional[Path],
+    triggered_by: str = "",
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -140,6 +143,7 @@ async def acquire_run_slot(
             arch=arch,
             machine_id=machine_id,
             connection_name=connection_name,
+            triggered_by=triggered_by,
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

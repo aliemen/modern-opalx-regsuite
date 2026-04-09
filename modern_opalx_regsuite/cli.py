@@ -550,6 +550,127 @@ def rebuild_indexes(
     typer.echo(f"Branches index written to {branches_path}")
 
 
+@app.command("backfill-users")
+def backfill_users(
+    username: str = typer.Option(
+        "opalx",
+        "--username",
+        "-u",
+        help="Username to assign to runs that have no triggered_by field. "
+             "Default is 'opalx', the legacy bucket.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Only report what would change; do not modify any files.",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml (defaults to ./config.toml or $OPALX_REGSUITE_CONFIG).",
+    ),
+) -> None:
+    """Assign a username to legacy runs that have no ``triggered_by`` value.
+
+    Scans every ``runs/<branch>/<arch>/<run_id>/run-meta.json`` and, for any
+    file whose ``triggered_by`` field is missing or null, sets it to
+    *username* and rewrites the file. The corresponding entry in
+    ``runs-index/<branch>/<arch>.json`` is updated in the same pass so the
+    Archive-tab user dropdown sees the backfilled value without needing a
+    full ``rebuild-indexes``.
+    """
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+    runs_root = data_root / "runs"
+
+    if not runs_root.is_dir():
+        typer.echo(f"No runs directory found at {runs_root}")
+        raise typer.Exit(0)
+
+    # Pass 1: rewrite run-meta.json files. Track (branch, arch, run_id) so
+    # we can patch the matching index entries in pass 2.
+    backfilled: dict[tuple[str, str], list[str]] = {}
+    inspected = 0
+
+    for meta_path in sorted(runs_root.glob("*/*/*/run-meta.json")):
+        inspected += 1
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            typer.echo(f"  skip  {meta_path}: {exc}", err=True)
+            continue
+
+        if data.get("triggered_by"):
+            continue  # already has a user
+
+        data["triggered_by"] = username
+        branch = data.get("branch")
+        arch = data.get("arch")
+        run_id = data.get("run_id")
+        if not (isinstance(branch, str) and isinstance(arch, str) and isinstance(run_id, str)):
+            typer.echo(f"  skip  {meta_path}: missing branch/arch/run_id", err=True)
+            continue
+
+        if not dry_run:
+            with meta_path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, default=str)
+
+        backfilled.setdefault((branch, arch), []).append(run_id)
+
+    total_backfilled = sum(len(ids) for ids in backfilled.values())
+    typer.echo(
+        f"Inspected {inspected} run(s); "
+        f"{total_backfilled} run(s) need backfill → '{username}'."
+    )
+
+    if total_backfilled == 0:
+        return
+
+    # Pass 2: patch matching entries in each affected index file.
+    patched_index_entries = 0
+    for (branch, arch), run_ids in sorted(backfilled.items()):
+        idx_path = runs_index_path(data_root, branch, arch)
+        if not idx_path.is_file():
+            typer.echo(
+                f"  warn  no index for {branch}/{arch}; skipping index patch."
+            )
+            continue
+        try:
+            with idx_path.open("r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            typer.echo(f"  warn  cannot read {idx_path}: {exc}")
+            continue
+        if not isinstance(entries, list):
+            continue
+
+        target = set(run_ids)
+        local_patched = 0
+        for entry in entries:
+            rid = entry.get("run_id")
+            if isinstance(rid, str) and rid in target and not entry.get("triggered_by"):
+                entry["triggered_by"] = username
+                local_patched += 1
+
+        if local_patched and not dry_run:
+            with idx_path.open("w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2, default=str)
+
+        if local_patched:
+            patched_index_entries += local_patched
+            typer.echo(
+                f"  {branch}/{arch}: patched {local_patched} index entry(ies)."
+            )
+
+    typer.echo(
+        f"\n{'[dry-run] would patch' if dry_run else 'Patched'} "
+        f"{total_backfilled} run-meta.json file(s) and "
+        f"{patched_index_entries} index entry(ies)."
+    )
+
+
 if __name__ == "__main__":
     app()
 

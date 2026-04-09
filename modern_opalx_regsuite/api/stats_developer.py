@@ -94,6 +94,15 @@ class ActivityReport(BaseModel):
     days: list[ActivityDay]
 
 
+class UserRunCount(BaseModel):
+    username: str
+    count: int
+
+
+class UsersLeaderboard(BaseModel):
+    users: list[UserRunCount]
+
+
 # ── Internal helpers ────────────────────────────────────────────────────────
 
 
@@ -367,4 +376,44 @@ def activity(
             )
             for d in sorted(counters.keys())
         ]
+    )
+
+
+@router.get("/users-leaderboard", response_model=UsersLeaderboard)
+def users_leaderboard(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+    view: ViewMode = Query("all"),
+) -> UsersLeaderboard:
+    """Run counts grouped by ``triggered_by``, sorted by count descending.
+
+    Default ``view="all"`` so the leaderboard reflects total lifetime runs
+    per user. Pass ``view="archived"`` from the Archive page dropdown to
+    enumerate only users who have archived runs.
+
+    Runs whose ``triggered_by`` is missing or null are reported under the
+    legacy bucket name ``"unknown"`` — once :py:func:`backfill_users` has
+    been run, this bucket should be empty.
+    """
+    data_root = cfg.resolved_data_root
+    branches_path = branches_index_path(data_root)
+    if not branches_path.is_file():
+        return UsersLeaderboard(users=[])
+    try:
+        with branches_path.open("r", encoding="utf-8") as f:
+            branches = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return UsersLeaderboard(users=[])
+
+    counts: dict[str, int] = {}
+    for branch, archs in branches.items():
+        for arch in archs:
+            for entry in _load_index(data_root, branch, arch, view):
+                user = entry.get("triggered_by") or "unknown"
+                counts[user] = counts.get(user, 0) + 1
+
+    # Sort by count descending, then alphabetically for stable ordering.
+    sorted_users = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return UsersLeaderboard(
+        users=[UserRunCount(username=u, count=c) for u, c in sorted_users]
     )

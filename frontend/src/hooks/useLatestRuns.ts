@@ -22,17 +22,21 @@ interface UseLatestRunsResult {
 
 /**
  * Fetch the latest run for every (branch, arch) combination visible under
- * *view*. Owns the per-card `useQueries` fan-out so the dashboard and
- * archive pages don't need to know about it.
+ * *view*, optionally restricted to runs triggered by *triggeredBy*. Owns the
+ * per-card `useQueries` fan-out so the dashboard and archive pages don't
+ * need to know about it.
  *
  * Each cell maps 1:1 to a TanStack React Query cache entry keyed by
- * `["runs", branch, arch, view]`, so bulk-archive mutations can invalidate
- * exactly the affected entries.
+ * `["runs", branch, arch, view, triggeredBy]`, so bulk-archive mutations can
+ * invalidate exactly the affected entries.
  */
-export function useLatestRuns(view: ViewMode = "active"): UseLatestRunsResult {
+export function useLatestRuns(
+  view: ViewMode = "active",
+  triggeredBy: string | null = null
+): UseLatestRunsResult {
   const branchesQuery = useQuery({
-    queryKey: ["branches", view],
-    queryFn: () => getBranches(view),
+    queryKey: ["branches", view, triggeredBy],
+    queryFn: () => getBranches(view, triggeredBy),
     refetchInterval: 60_000,
   });
 
@@ -57,8 +61,8 @@ export function useLatestRuns(view: ViewMode = "active"): UseLatestRunsResult {
 
   const runQueries = useQueries({
     queries: tuples.map(({ branch, arch }) => ({
-      queryKey: ["runs", branch, arch, view] as const,
-      queryFn: () => getRuns(branch, arch, 1, 0, view),
+      queryKey: ["runs", branch, arch, view, triggeredBy] as const,
+      queryFn: () => getRuns(branch, arch, 1, 0, view, triggeredBy),
       refetchInterval: 30_000,
       select: (data: { runs: RunIndexEntry[]; total: number }) =>
         data.runs[0] as RunIndexEntry | undefined,

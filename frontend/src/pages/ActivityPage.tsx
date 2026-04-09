@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Clock, History } from "lucide-react";
+import { Clock, History, User as UserIcon, X } from "lucide-react";
 import { getAllRuns, type RunIndexEntry } from "../api/results";
 import { StatusBadge } from "../components/StatusBadge";
 import { Pagination } from "../components/Pagination";
@@ -21,17 +21,33 @@ function duration(start: string, end: string | null) {
 }
 
 export function ActivityPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const userParam = searchParams.get("user");
+  const triggeredBy = userParam && userParam !== "" ? userParam : null;
+
   const [pageSize, setPageSize] = useState(25);
   const [offset, setOffset] = useState(0);
 
+  // Reset paging whenever the user filter changes so we don't end up
+  // looking at offset 200 of a freshly-narrowed result set.
+  useEffect(() => {
+    setOffset(0);
+  }, [triggeredBy]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["all-runs", pageSize, offset],
-    queryFn: () => getAllRuns(pageSize, offset),
+    queryKey: ["all-runs", pageSize, offset, triggeredBy],
+    queryFn: () => getAllRuns(pageSize, offset, "active", triggeredBy),
     placeholderData: keepPreviousData,
   });
 
   const runs = data?.runs ?? [];
   const total = data?.total ?? 0;
+
+  function clearUserFilter() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("user");
+    setSearchParams(next, { replace: true });
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -39,7 +55,22 @@ export function ActivityPage() {
         <History size={20} />
         Activity
       </h1>
-      <p className="text-muted text-sm mb-6">{total} runs total</p>
+      <p className="text-muted text-sm mb-4">{total} runs total</p>
+
+      {triggeredBy && (
+        <div className="mb-6 inline-flex items-center gap-2 bg-accent/10 border border-accent/30 rounded-full px-3 py-1.5 text-xs">
+          <UserIcon size={12} className="text-accent" />
+          <span className="text-muted">Filtered by user</span>
+          <span className="text-accent font-mono">{triggeredBy}</span>
+          <button
+            onClick={clearUserFilter}
+            className="text-muted hover:text-fg transition-colors"
+            title="Clear user filter"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       {isLoading && !data ? (
         <div className="text-muted text-sm">Loading...</div>

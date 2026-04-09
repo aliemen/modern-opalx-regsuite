@@ -6,6 +6,7 @@ import { LatestMasterMatrix } from "./stats/LatestMasterMatrix";
 import { NewlyBrokenCard } from "./stats/NewlyBrokenCard";
 import { SuiteDurationCard } from "./stats/SuiteDurationCard";
 import { ActivitySparkline } from "./stats/ActivitySparkline";
+import { UsersLeaderboardCard } from "./stats/UsersLeaderboardCard";
 import { StatusBadge } from "./StatusBadge";
 
 function relativeTime(iso: string): string {
@@ -77,6 +78,7 @@ export function StatsPanel() {
       <NewlyBrokenCard />
       <SuiteDurationCard />
       <ActivitySparkline />
+      <UsersLeaderboardCard />
     </div>
   );
 }

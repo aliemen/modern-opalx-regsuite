@@ -56,6 +56,15 @@ export interface ActivityReport {
   days: ActivityDay[];
 }
 
+export interface UserRunCount {
+  username: string;
+  count: number;
+}
+
+export interface UsersLeaderboard {
+  users: UserRunCount[];
+}
+
 // ── Endpoints ──────────────────────────────────────────────────────────────
 
 export async function getLatestMaster(
@@ -91,6 +100,15 @@ export async function getActivity(
 ): Promise<ActivityReport> {
   const res = await api.get<ActivityReport>("/api/stats/activity", {
     params: { view, days },
+  });
+  return res.data;
+}
+
+export async function getUsersLeaderboard(
+  view: ViewMode = "all"
+): Promise<UsersLeaderboard> {
+  const res = await api.get<UsersLeaderboard>("/api/stats/users-leaderboard", {
+    params: { view },
   });
   return res.data;
 }

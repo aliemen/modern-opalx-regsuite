@@ -116,15 +116,20 @@ def _write_index(index_path: Path, entries: list[dict]) -> None:
 # ── Visibility helper used by GET /api/results/branches ─────────────────────
 
 
-def list_visible_branches(data_root: Path, view: ViewMode) -> dict[str, list[str]]:
-    """Return ``{branch: [arch, ...]}`` filtered by *view*.
+def list_visible_branches(
+    data_root: Path,
+    view: ViewMode,
+    triggered_by: Optional[str] = None,
+) -> dict[str, list[str]]:
+    """Return ``{branch: [arch, ...]}`` filtered by *view* and optionally *triggered_by*.
 
-    For ``view="all"`` returns ``branches.json`` verbatim (fast path).
+    For ``view="all"`` with no user filter returns ``branches.json`` verbatim
+    (fast path).
 
-    For ``view="active"`` / ``"archived"`` scans index files and only includes
-    a branch+arch if at least one of its index entries matches the requested
-    archived state. Cost is one ``json.load`` per index file — the same as
-    ``GET /api/results/all-runs`` already does today.
+    Otherwise scans index files and only includes a branch+arch if at least
+    one of its index entries matches the requested archive state AND was
+    triggered by the requested user (when given). Cost is one ``json.load``
+    per index file — same as ``GET /api/results/all-runs``.
     """
     branches_path = branches_index_path(data_root)
     if not branches_path.is_file():
@@ -135,16 +140,18 @@ def list_visible_branches(data_root: Path, view: ViewMode) -> dict[str, list[str
         except json.JSONDecodeError:
             return {}
 
-    if view == "all":
+    if view == "all" and triggered_by is None:
         return all_branches
 
-    want_archived = view == "archived"
     visible: dict[str, list[str]] = {}
     for branch, archs in all_branches.items():
         kept_archs: list[str] = []
         for arch in archs:
             entries = _read_index(runs_index_path(data_root, branch, arch))
-            if any(bool(e.get("archived", False)) is want_archived for e in entries):
+            filtered = filter_entries_by_view(entries, view)
+            if triggered_by is not None:
+                filtered = filter_entries_by_user(filtered, triggered_by)
+            if filtered:
                 kept_archs.append(arch)
         if kept_archs:
             visible[branch] = kept_archs
@@ -157,6 +164,11 @@ def filter_entries_by_view(entries: list[dict], view: ViewMode) -> list[dict]:
         return entries
     want_archived = view == "archived"
     return [e for e in entries if bool(e.get("archived", False)) is want_archived]
+
+
+def filter_entries_by_user(entries: list[dict], triggered_by: str) -> list[dict]:
+    """Keep only entries whose ``triggered_by`` matches *triggered_by* exactly."""
+    return [e for e in entries if e.get("triggered_by") == triggered_by]
 
 
 # ── Internal mutators ───────────────────────────────────────────────────────

@@ -9,7 +9,11 @@ from typing import Annotated, Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
-from ..archive_service import filter_entries_by_view, list_visible_branches
+from ..archive_service import (
+    filter_entries_by_user,
+    filter_entries_by_view,
+    list_visible_branches,
+)
 from ..config import SuiteConfig
 from ..data_model import (
     RegressionTestsReport,
@@ -44,15 +48,18 @@ def list_branches(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
+    triggered_by: Optional[str] = Query(None),
 ) -> dict[str, list[str]]:
-    """Return ``{branch: [arch, ...]}`` filtered by *view*.
+    """Return ``{branch: [arch, ...]}`` filtered by *view* and *triggered_by*.
 
-    With ``view="all"`` returns ``branches.json`` verbatim (every branch+arch
-    that has ever produced a run). With ``view="active"`` (default) or
-    ``"archived"`` only includes branch+arch combinations that currently
-    contain at least one matching index entry.
+    With ``view="all"`` and no user filter, returns ``branches.json`` verbatim
+    (every branch+arch that has ever produced a run). Otherwise only includes
+    branch+arch combinations that currently contain at least one matching
+    index entry (matching both archive state and, if given, the user).
     """
-    return list_visible_branches(cfg.resolved_data_root, view)
+    return list_visible_branches(
+        cfg.resolved_data_root, view, triggered_by=triggered_by
+    )
 
 
 @router.get("/branches/{branch}/archs/{arch}/runs", response_model=list[RunIndexEntry])
@@ -65,6 +72,7 @@ def list_runs(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     view: ViewMode = Query("active"),
+    triggered_by: Optional[str] = Query(None),
 ) -> list[RunIndexEntry]:
     path = runs_index_path(cfg.resolved_data_root, branch, arch)
     if not path.is_file():
@@ -73,6 +81,8 @@ def list_runs(
     with path.open("r", encoding="utf-8") as f:
         raw = json.load(f)
     raw = filter_entries_by_view(raw, view)
+    if triggered_by is not None:
+        raw = filter_entries_by_user(raw, triggered_by)
     entries = [RunIndexEntry.model_validate(e) for e in raw]
     response.headers["X-Total-Count"] = str(len(entries))
     return entries[offset : offset + limit]
@@ -85,10 +95,12 @@ def list_all_runs(
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
     view: ViewMode = Query("active"),
+    triggered_by: Optional[str] = Query(None),
 ) -> PaginatedRuns:
     """Return all runs across every branch/arch, sorted by started_at descending.
 
-    Filtered by *view* (``active`` by default).
+    Filtered by *view* (``active`` by default) and optionally by the username
+    that triggered each run.
     """
     data_root = cfg.resolved_data_root
     branches_path = branches_index_path(data_root)
@@ -108,6 +120,8 @@ def list_all_runs(
                 with idx_path.open("r", encoding="utf-8") as f:
                     raw = json.load(f)
                 raw = filter_entries_by_view(raw, view)
+                if triggered_by is not None:
+                    raw = filter_entries_by_user(raw, triggered_by)
                 all_entries.extend(RunIndexEntry.model_validate(e) for e in raw)
             except (json.JSONDecodeError, OSError):
                 continue

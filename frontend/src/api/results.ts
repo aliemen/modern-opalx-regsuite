@@ -82,12 +82,22 @@ export interface RunDetail {
   regression: RegressionTestsReport;
 }
 
+/** Build a query-param object that omits null/undefined values so axios
+ *  doesn't serialise `?triggered_by=` into the URL when no user is selected. */
+function paramsWithUser(
+  base: Record<string, unknown>,
+  triggeredBy: string | null | undefined
+): Record<string, unknown> {
+  return triggeredBy ? { ...base, triggered_by: triggeredBy } : base;
+}
+
 export async function getBranches(
-  view: ViewMode = "active"
+  view: ViewMode = "active",
+  triggeredBy: string | null = null
 ): Promise<Record<string, string[]>> {
   const res = await api.get<Record<string, string[]>>(
     "/api/results/branches",
-    { params: { view } }
+    { params: paramsWithUser({ view }, triggeredBy) }
   );
   return res.data;
 }
@@ -102,11 +112,12 @@ export async function getRuns(
   arch: string,
   limit = 50,
   offset = 0,
-  view: ViewMode = "active"
+  view: ViewMode = "active",
+  triggeredBy: string | null = null
 ): Promise<{ runs: RunIndexEntry[]; total: number }> {
   const res = await api.get<RunIndexEntry[]>(
     `/api/results/branches/${branch}/archs/${arch}/runs`,
-    { params: { limit, offset, view } }
+    { params: paramsWithUser({ limit, offset, view }, triggeredBy) }
   );
   const total = parseInt(res.headers["x-total-count"] ?? "0", 10);
   return { runs: res.data, total };
@@ -115,10 +126,11 @@ export async function getRuns(
 export async function getAllRuns(
   limit = 25,
   offset = 0,
-  view: ViewMode = "active"
+  view: ViewMode = "active",
+  triggeredBy: string | null = null
 ): Promise<PaginatedRuns> {
   const res = await api.get<PaginatedRuns>("/api/results/all-runs", {
-    params: { limit, offset, view },
+    params: paramsWithUser({ limit, offset, view }, triggeredBy),
   });
   return res.data;
 }

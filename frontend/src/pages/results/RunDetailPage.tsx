@@ -259,7 +259,17 @@ export function RunDetailPage() {
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Triggered By</p>
-          <p className="text-fg font-mono text-sm">{meta.triggered_by ?? "—"}</p>
+          {meta.triggered_by ? (
+            <Link
+              to={`/activity?user=${encodeURIComponent(meta.triggered_by)}`}
+              className="text-accent hover:underline font-mono text-sm"
+              title={`Show all runs triggered by ${meta.triggered_by}`}
+            >
+              {meta.triggered_by}
+            </Link>
+          ) : (
+            <p className="text-fg font-mono text-sm">—</p>
+          )}
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Started</p>

@@ -7,7 +7,7 @@ from ...data_model import UnitTestCase, UnitTestsReport
 
 
 _CTEST_LINE = re.compile(
-    r"^\s*\d+/\d+\s+Test\s+#\d+:\s+(\S+)\s+\.+\s+"
+    r"^\s*\d+/\d+\s+Test\s+#\d+:\s+(\S+)\s+[.*]+\s*"
     r"(Passed|\*{0,3}Failed\*{0,3}|Not Run)\s+([\d.]+)\s+sec",
 )
 

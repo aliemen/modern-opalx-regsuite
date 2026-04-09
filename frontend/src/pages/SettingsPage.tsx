@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, Trash2, Key, Plug, Plus, Pencil, Zap, Check, AlertCircle } from "lucide-react";
-import { listSshKeys, uploadSshKey, deleteSshKey } from "../api/keys";
+import { Upload, Trash2, Key, Plug, Plus, Pencil, Zap, Check, AlertCircle, RefreshCw, X } from "lucide-react";
+import { listSshKeys, uploadSshKey, replaceSshKey, deleteSshKey } from "../api/keys";
 import type { SshKeyInfo } from "../api/keys";
 import {
   listConnections,
@@ -20,6 +20,10 @@ export function SettingsPage() {
   const [keyName, setKeyName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // When set, the upload form is in "replace existing key" mode for this
+  // key name. The key file becomes required, the name field is hidden, and
+  // the submit button calls the PUT endpoint instead of POST.
+  const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
 
   // Connection form state.
   const [editing, setEditing] = useState<Connection | null>(null);
@@ -36,23 +40,49 @@ export function SettingsPage() {
     queryFn: listConnections,
   });
 
+  function clearFormInputs() {
+    setKeyName("");
+    if (fileRef.current) fileRef.current.value = "";
+    if (certRef.current) certRef.current.value = "";
+  }
+
+  function extractErrorDetail(e: unknown, fallback: string): string {
+    return (
+      (e as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail ?? fallback
+    );
+  }
+
   const uploadMut = useMutation({
     mutationFn: ({ name, file, cert }: { name: string; file: File; cert?: File }) =>
       uploadSshKey(name, file, cert),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });
       queryClient.invalidateQueries({ queryKey: ["connections"] });
-      setKeyName("");
-      if (fileRef.current) fileRef.current.value = "";
-      if (certRef.current) certRef.current.value = "";
+      clearFormInputs();
       setError(null);
       setSuccess(`Key "${data.name}" uploaded.`);
     },
     onError: (e: unknown) => {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Upload failed.";
-      setError(msg);
+      setError(extractErrorDetail(e, "Upload failed."));
+      setSuccess(null);
+    },
+  });
+
+  const replaceMut = useMutation({
+    mutationFn: ({ name, file, cert }: { name: string; file: File; cert?: File }) =>
+      replaceSshKey(name, file, cert),
+    onSuccess: (data) => {
+      // Connections reference keys by name, so no Connection records change
+      // — but the key list shows fingerprints, which we want to refresh.
+      queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });
+      clearFormInputs();
+      setReplaceTarget(null);
+      setError(null);
+      setSuccess(`Key "${data.name}" replaced.`);
+    },
+    onError: (e: unknown) => {
+      setError(extractErrorDetail(e, "Replace failed."));
       setSuccess(null);
     },
   });
@@ -116,16 +146,38 @@ export function SettingsPage() {
     setSuccess(null);
     const file = fileRef.current?.files?.[0];
     const cert = certRef.current?.files?.[0];
-    if (!keyName.trim()) {
-      setError("Please enter a key name.");
-      return;
-    }
     if (!file) {
       setError("Please select a private key file.");
       return;
     }
+    if (replaceTarget) {
+      replaceMut.mutate({ name: replaceTarget, file, cert });
+      return;
+    }
+    if (!keyName.trim()) {
+      setError("Please enter a key name.");
+      return;
+    }
     uploadMut.mutate({ name: keyName.trim(), file, cert });
   }
+
+  function startReplace(name: string) {
+    setReplaceTarget(name);
+    clearFormInputs();
+    setError(null);
+    setSuccess(null);
+    // Scroll the form into view so the user sees what they're editing.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function cancelReplace() {
+    setReplaceTarget(null);
+    clearFormInputs();
+    setError(null);
+  }
+
+  const isReplaceMode = replaceTarget !== null;
+  const submitPending = uploadMut.isPending || replaceMut.isPending;
 
   return (
     <div className="p-6 max-w-3xl mx-auto flex flex-col gap-6">
@@ -143,29 +195,46 @@ export function SettingsPage() {
           <span className="text-fg">connections</span> below.
         </p>
 
-        {/* Upload form */}
+        {/* Upload / replace form. The same widgets cover both cases —
+            in replace mode the name input is hidden and the submit button
+            wires to PUT instead of POST. */}
         <div className="flex flex-col gap-3 mb-6">
+          {isReplaceMode && (
+            <div className="flex items-center gap-2 text-sm bg-bg border border-accent/40 rounded-md px-3 py-2">
+              <RefreshCw size={14} className="text-accent" />
+              <span className="text-muted">
+                Replacing key{" "}
+                <code className="text-fg font-mono">{replaceTarget}</code> in
+                place. Connections referencing this key keep working.
+              </span>
+            </div>
+          )}
           <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Key name (e.g. cscs-key)"
-              value={keyName}
-              onChange={(e) => setKeyName(e.target.value)}
-              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-            />
+            {!isReplaceMode && (
+              <input
+                type="text"
+                placeholder="Key name (e.g. cscs-key)"
+                value={keyName}
+                onChange={(e) => setKeyName(e.target.value)}
+                className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+              />
+            )}
             <input
               ref={fileRef}
               type="file"
-              accept=".pem,.key,.pub,.id_rsa,.id_ed25519,*"
+              // No `accept` filter on purpose: keys downloaded from CSCS arrive
+              // as `cscs-key` (no extension), which any extension-based filter
+              // greys out in the OS file picker. Users know what they're picking.
               className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm file:mr-3 file:border-0 file:bg-transparent file:text-accent file:text-sm file:font-medium"
             />
           </div>
           <div className="flex gap-2 items-center">
-            <label className="text-xs text-muted whitespace-nowrap">Certificate (optional):</label>
+            <label className="text-xs text-muted whitespace-nowrap">
+              Certificate {isReplaceMode ? "(optional, blank = keep existing)" : "(optional)"}:
+            </label>
             <input
               ref={certRef}
               type="file"
-              accept=".pub,*"
               className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm file:mr-3 file:border-0 file:bg-transparent file:text-muted file:text-sm file:font-medium"
             />
           </div>
@@ -173,14 +242,32 @@ export function SettingsPage() {
             Upload a certificate file (e.g. <code className="text-fg">cscs-key-cert.pub</code>) if
             your HPC site uses certificate-based SSH authentication (CSCS Alps / Daint).
           </p>
-          <button
-            onClick={handleUpload}
-            disabled={uploadMut.isPending}
-            className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2 text-sm hover:brightness-110 transition disabled:opacity-50 w-fit px-5"
-          >
-            <Upload size={15} />
-            {uploadMut.isPending ? "Uploading..." : "Upload Key"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleUpload}
+              disabled={submitPending}
+              className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2 text-sm hover:brightness-110 transition disabled:opacity-50 w-fit px-5"
+            >
+              {isReplaceMode ? <RefreshCw size={15} /> : <Upload size={15} />}
+              {submitPending
+                ? isReplaceMode
+                  ? "Replacing..."
+                  : "Uploading..."
+                : isReplaceMode
+                  ? "Replace Key"
+                  : "Upload Key"}
+            </button>
+            {isReplaceMode && (
+              <button
+                onClick={cancelReplace}
+                disabled={submitPending}
+                className="flex items-center justify-center gap-2 border border-border text-muted hover:text-fg font-medium rounded-md py-2 text-sm transition disabled:opacity-50 w-fit px-4"
+              >
+                <X size={15} />
+                Cancel
+              </button>
+            )}
+          </div>
           {error && <p className="text-failed text-sm">{error}</p>}
           {success && <p className="text-passed text-sm">{success}</p>}
         </div>
@@ -195,34 +282,53 @@ export function SettingsPage() {
                 <th className="pb-2 font-medium">Name</th>
                 <th className="pb-2 font-medium">Fingerprint</th>
                 <th className="pb-2 font-medium">Added</th>
-                <th className="pb-2 font-medium w-10"></th>
+                <th className="pb-2 font-medium w-20"></th>
               </tr>
             </thead>
             <tbody>
-              {keys.map((k) => (
-                <tr
-                  key={k.name}
-                  className="border-b border-border last:border-0"
-                >
-                  <td className="py-2.5 text-fg font-mono">{k.name}</td>
-                  <td className="py-2.5 text-muted font-mono text-xs truncate max-w-[200px]">
-                    {k.fingerprint ?? "-"}
-                  </td>
-                  <td className="py-2.5 text-muted">
-                    {new Date(k.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="py-2.5">
-                    <button
-                      onClick={() => deleteKeyMut.mutate(k.name)}
-                      disabled={deleteKeyMut.isPending}
-                      className="text-muted hover:text-failed transition p-1"
-                      title={`Delete ${k.name}`}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {keys.map((k) => {
+                const isReplacingThis = replaceTarget === k.name;
+                return (
+                  <tr
+                    key={k.name}
+                    className={`border-b border-border last:border-0 ${
+                      isReplacingThis ? "bg-bg/40" : ""
+                    }`}
+                  >
+                    <td className="py-2.5 text-fg font-mono">{k.name}</td>
+                    <td className="py-2.5 text-muted font-mono text-xs truncate max-w-[200px]">
+                      {k.fingerprint ?? "-"}
+                    </td>
+                    <td className="py-2.5 text-muted">
+                      {new Date(k.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-2.5">
+                      <div className="flex gap-1 justify-end">
+                        <button
+                          onClick={() => startReplace(k.name)}
+                          disabled={submitPending}
+                          className={`transition p-1 ${
+                            isReplacingThis
+                              ? "text-accent"
+                              : "text-muted hover:text-accent"
+                          }`}
+                          title={`Replace ${k.name} (e.g. new daily Daint key)`}
+                        >
+                          <RefreshCw size={15} />
+                        </button>
+                        <button
+                          onClick={() => deleteKeyMut.mutate(k.name)}
+                          disabled={deleteKeyMut.isPending}
+                          className="text-muted hover:text-failed transition p-1"
+                          title={`Delete ${k.name}`}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         ) : (

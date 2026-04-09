@@ -152,6 +152,56 @@ async def upload_ssh_key_cert(
     _write_key_atomic(cert_path, cert_content)
 
 
+@router.put("/{name}", response_model=SshKeyInfo)
+async def replace_ssh_key(
+    name: str,
+    key_file: Annotated[UploadFile, File(...)],
+    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
+    cert_file: Annotated[UploadFile | None, File()] = None,
+) -> SshKeyInfo:
+    """Replace the contents of an existing SSH key in place.
+
+    Useful for short-lived keys (e.g. CSCS Daint, where the key + certificate
+    are valid for only one day): the file on disk is overwritten atomically,
+    so every :class:`~modern_opalx_regsuite.config.Connection` that references
+    this key by name automatically picks up the new credentials on its next
+    use — no unlink/relink dance required.
+
+    A new ``cert_file`` is optional. If provided, it replaces ``<name>-cert.pub``
+    next to the key. If omitted, any existing certificate is left untouched
+    (use ``DELETE /{name}`` + re-upload if you want to remove a stale cert).
+    """
+    _validate_name(name)
+    username, _ = user_paths
+    keys = user_keys_dir(cfg, username)
+    key_path = keys / f"{name}.pem"
+    if not key_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Key '{name}' not found.",
+        )
+
+    content = await key_file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Key file is empty.",
+        )
+
+    _write_key_atomic(key_path, content)
+
+    if cert_file is not None:
+        cert_content = await cert_file.read()
+        if cert_content:
+            cert_path = keys / f"{name}-cert.pub"
+            _write_key_atomic(cert_path, cert_content)
+
+    fp = _fingerprint(key_path)
+    mtime = datetime.fromtimestamp(key_path.stat().st_mtime, tz=timezone.utc)
+    return SshKeyInfo(name=name, created_at=mtime.isoformat(), fingerprint=fp)
+
+
 @router.get("", response_model=list[SshKeyInfo])
 def list_ssh_keys(
     user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],

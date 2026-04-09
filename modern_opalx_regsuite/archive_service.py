@@ -167,8 +167,15 @@ def filter_entries_by_view(entries: list[dict], view: ViewMode) -> list[dict]:
 
 
 def filter_entries_by_user(entries: list[dict], triggered_by: str) -> list[dict]:
-    """Keep only entries whose ``triggered_by`` matches *triggered_by* exactly."""
-    return [e for e in entries if e.get("triggered_by") == triggered_by]
+    """Keep only entries whose ``triggered_by`` matches *triggered_by*.
+
+    Both sides are normalised the same way as the users-leaderboard endpoint:
+    a missing or falsy ``triggered_by`` is treated as ``"unknown"``. This
+    means filtering for ``"unknown"`` correctly returns runs whose field is
+    ``null``, ``""``, or literally ``"unknown"``.
+    """
+    normalized = triggered_by or "unknown"
+    return [e for e in entries if (e.get("triggered_by") or "unknown") == normalized]
 
 
 # ── Internal mutators ───────────────────────────────────────────────────────

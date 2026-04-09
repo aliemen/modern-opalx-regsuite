@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Clock, History, User as UserIcon, X } from "lucide-react";
+import { Clock, History, User as UserIcon } from "lucide-react";
 import { getAllRuns, type RunIndexEntry } from "../api/results";
+import { getUsersLeaderboard } from "../api/stats";
 import { StatusBadge } from "../components/StatusBadge";
 import { Pagination } from "../components/Pagination";
 
@@ -40,12 +41,24 @@ export function ActivityPage() {
     placeholderData: keepPreviousData,
   });
 
+  // Enumerate users that have at least one active run for the dropdown.
+  const { data: leaderboard } = useQuery({
+    queryKey: ["users-leaderboard", "active"],
+    queryFn: () => getUsersLeaderboard("active"),
+    refetchInterval: 60_000,
+  });
+  const userOptions = leaderboard?.users ?? [];
+
   const runs = data?.runs ?? [];
   const total = data?.total ?? 0;
 
-  function clearUserFilter() {
+  function handleUserChange(value: string) {
     const next = new URLSearchParams(searchParams);
-    next.delete("user");
+    if (value) {
+      next.set("user", value);
+    } else {
+      next.delete("user");
+    }
     setSearchParams(next, { replace: true });
   }
 
@@ -57,20 +70,35 @@ export function ActivityPage() {
       </h1>
       <p className="text-muted text-sm mb-4">{total} runs total</p>
 
-      {triggeredBy && (
-        <div className="mb-6 inline-flex items-center gap-2 bg-accent/10 border border-accent/30 rounded-full px-3 py-1.5 text-xs">
-          <UserIcon size={12} className="text-accent" />
-          <span className="text-muted">Filtered by user</span>
-          <span className="text-accent font-mono">{triggeredBy}</span>
-          <button
-            onClick={clearUserFilter}
-            className="text-muted hover:text-fg transition-colors"
-            title="Clear user filter"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      )}
+      <div className="flex items-center gap-3 mb-6">
+        <label
+          htmlFor="activity-user-filter"
+          className="flex items-center gap-1.5 text-muted text-xs"
+        >
+          <UserIcon size={13} />
+          User
+        </label>
+        <select
+          id="activity-user-filter"
+          value={triggeredBy ?? ""}
+          onChange={(e) => handleUserChange(e.target.value)}
+          disabled={userOptions.length === 0 && !triggeredBy}
+          className="bg-surface border border-border rounded-lg text-fg text-xs px-3 py-1.5 focus:outline-none focus:border-accent disabled:opacity-50 min-w-[10rem]"
+        >
+          <option value="">All users</option>
+          {userOptions.map((u) => (
+            <option key={u.username} value={u.username}>
+              {u.username} ({u.count})
+            </option>
+          ))}
+          {/* Keep a deep-linked user visible even if they have no active runs
+              so the select doesn't silently snap back to "All". */}
+          {triggeredBy &&
+            !userOptions.some((u) => u.username === triggeredBy) && (
+              <option value={triggeredBy}>{triggeredBy} (0)</option>
+            )}
+        </select>
+      </div>
 
       {isLoading && !data ? (
         <div className="text-muted text-sm">Loading...</div>

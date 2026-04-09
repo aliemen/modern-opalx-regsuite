@@ -1,41 +1,15 @@
 import { useState } from "react";
-import { Archive, User as UserIcon } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Archive } from "lucide-react";
 import { useLatestRuns } from "../hooks/useLatestRuns";
 import { useRunSelection } from "../hooks/useRunSelection";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
 import { AccordionList } from "../components/AccordionList";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { getUsersLeaderboard } from "../api/stats";
 import type { Group } from "../lib/grouping";
 
 export function ArchivePage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const userParam = searchParams.get("user");
-  const triggeredBy = userParam && userParam !== "" ? userParam : null;
-
-  // Enumerate users that have at least one archived run, so the dropdown
-  // never offers a filter that would always produce zero rows.
-  const { data: leaderboard } = useQuery({
-    queryKey: ["users-leaderboard", "archived"],
-    queryFn: () => getUsersLeaderboard("archived"),
-    refetchInterval: 60_000,
-  });
-  const userOptions = leaderboard?.users ?? [];
-
-  function handleUserChange(value: string) {
-    const next = new URLSearchParams(searchParams);
-    if (value) {
-      next.set("user", value);
-    } else {
-      next.delete("user");
-    }
-    setSearchParams(next, { replace: true });
-  }
-
-  const { cells, branches, isLoading } = useLatestRuns("archived", triggeredBy);
+  const { cells, branches, isLoading } = useLatestRuns("archived");
   const selection = useRunSelection();
   const mutations = useArchiveMutations();
 
@@ -98,11 +72,6 @@ export function ArchivePage() {
     return <div className="p-8 text-muted">Loading…</div>;
   }
 
-  const noUsersAvailable = userOptions.length === 0;
-  const emptyMessage = triggeredBy
-    ? `No archived runs triggered by "${triggeredBy}".`
-    : "No archived runs.";
-
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-fg text-2xl font-semibold mb-2 flex items-center gap-3">
@@ -115,40 +84,9 @@ export function ArchivePage() {
         archived runs from disk.
       </p>
 
-      <div className="flex items-center gap-3 mb-6">
-        <label
-          htmlFor="archive-user-filter"
-          className="flex items-center gap-1.5 text-muted text-xs"
-        >
-          <UserIcon size={13} />
-          User
-        </label>
-        <select
-          id="archive-user-filter"
-          value={triggeredBy ?? ""}
-          onChange={(e) => handleUserChange(e.target.value)}
-          disabled={noUsersAvailable && !triggeredBy}
-          className="bg-surface border border-border rounded-lg text-fg text-xs px-3 py-1.5 focus:outline-none focus:border-accent disabled:opacity-50 min-w-[10rem]"
-        >
-          <option value="">All users</option>
-          {userOptions.map((u) => (
-            <option key={u.username} value={u.username}>
-              {u.username} ({u.count})
-            </option>
-          ))}
-          {/* Make sure a deep-linked user that no longer has archived runs
-              still appears in the dropdown so the user understands what is
-              filtered, instead of the select silently snapping to "All". */}
-          {triggeredBy &&
-            !userOptions.some((u) => u.username === triggeredBy) && (
-              <option value={triggeredBy}>{triggeredBy} (0)</option>
-            )}
-        </select>
-      </div>
-
       {!hasEntries ? (
         <div className="text-muted text-sm py-12 text-center border border-border rounded-xl">
-          {emptyMessage}
+          No archived runs.
         </div>
       ) : (
         <>

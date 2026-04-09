@@ -1,0 +1,167 @@
+import {
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+  Cpu,
+  GitBranch,
+} from "lucide-react";
+import type { LatestRunCell } from "../hooks/useLatestRuns";
+import type { SelectionHandle } from "../hooks/useRunSelection";
+import type { Group } from "../lib/grouping";
+import { LatestCard } from "./LatestCard";
+
+const SUMMARY_COLORS: Record<string, string> = {
+  passed: "text-passed",
+  failed: "text-failed",
+  broken: "text-broken",
+  running: "text-accent",
+  cancelled: "text-cancelled",
+};
+
+function summaryCounts(cells: LatestRunCell[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const c of cells) {
+    const status = c.run?.status ?? "unknown";
+    counts[status] = (counts[status] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function GroupIcon({ kind }: { kind: Group["kind"] }) {
+  if (kind === "branch") return <GitBranch size={14} className="text-muted shrink-0" />;
+  if (kind === "arch") return <Cpu size={14} className="text-muted shrink-0" />;
+  return <Calendar size={14} className="text-muted shrink-0" />;
+}
+
+interface AccordionGroupProps {
+  group: Group;
+  open: boolean;
+  onToggle: () => void;
+  selection?: SelectionHandle;
+  /** Optional shortcut button rendered in the header (e.g. "Archive branch"). */
+  headerAction?: {
+    label: string;
+    onClick: () => void;
+    /** Tailwind classes overriding the default neutral button style. */
+    className?: string;
+  };
+}
+
+/** One accordion section: header + grid of LatestCard when open. */
+export function AccordionGroup({
+  group,
+  open,
+  onToggle,
+  selection,
+  headerAction,
+}: AccordionGroupProps) {
+  const counts = summaryCounts(group.cells);
+  const allSelected = selection ? selection.areAllSelected(group.cells) : false;
+  const hasRuns = group.cells.some((c) => c.run);
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden">
+      <div className="w-full flex items-center gap-3 px-5 py-3.5 bg-surface hover:bg-border/30 transition-colors">
+        {/* Optional bulk-select-all checkbox (only when selection mode is on). */}
+        {selection && hasRuns && (
+          <label
+            className="flex items-center cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() =>
+                allSelected
+                  ? selection.deselectCells(group.cells)
+                  : selection.selectCells(group.cells)
+              }
+              className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+            />
+          </label>
+        )}
+
+        <button
+          onClick={onToggle}
+          className="flex items-center gap-3 flex-1 text-left"
+        >
+          {open ? (
+            <ChevronDown size={14} className="text-muted shrink-0" />
+          ) : (
+            <ChevronRight size={14} className="text-muted shrink-0" />
+          )}
+          <GroupIcon kind={group.kind} />
+          <span className="text-fg font-medium text-sm">{group.label}</span>
+          <span className="text-muted text-xs ml-1">
+            {group.cells.length} {group.kind === "arch" ? "branch" : "arch"}
+            {group.cells.length !== 1 ? (group.kind === "arch" ? "es" : "s") : ""}
+          </span>
+
+          {/* Status summary badges. */}
+          <div className="ml-auto flex items-center gap-3 text-xs">
+            {Object.entries(counts)
+              .filter(([s]) => s !== "unknown")
+              .map(([status, count]) => (
+                <span
+                  key={status}
+                  className={`${SUMMARY_COLORS[status] ?? "text-muted"} font-medium`}
+                >
+                  {count} {status}
+                </span>
+              ))}
+          </div>
+        </button>
+
+        {headerAction && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              headerAction.onClick();
+            }}
+            className={
+              headerAction.className ??
+              "ml-2 px-2.5 py-1 text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded-md transition-colors"
+            }
+          >
+            {headerAction.label}
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="border-t border-border p-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {group.cells.map((cell) => (
+              <LatestCard
+                key={`${cell.branch}::${cell.arch}`}
+                branch={cell.branch}
+                arch={cell.arch}
+                run={cell.run}
+                showCheckbox={!!selection}
+                selected={
+                  selection && cell.run
+                    ? selection.isSelected(
+                        cell.branch,
+                        cell.arch,
+                        cell.run.run_id
+                      )
+                    : false
+                }
+                onToggleSelect={
+                  selection && cell.run
+                    ? () =>
+                        selection.toggleRun(
+                          cell.branch,
+                          cell.arch,
+                          cell.run!.run_id
+                        )
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

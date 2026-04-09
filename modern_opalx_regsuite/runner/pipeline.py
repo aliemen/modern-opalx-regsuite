@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from ..archive_service import locked_index
 from ..config import Connection, SuiteConfig
 from ..data_model import (
     RunIndexEntry,
@@ -43,32 +44,36 @@ def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:
 
 
 def _update_indexes(data_root: Path, meta: RunMeta) -> None:
-    # Update runs index for branch/arch.
+    # Update runs index for branch/arch under the same fcntl lock used by the
+    # archive service, so a bulk-archive flip and a pipeline completion can't
+    # clobber each other.
     index_path = runs_index_path(data_root, meta.branch, meta.arch)
-    entries: list[RunIndexEntry] = []
-    if index_path.is_file():
-        with index_path.open("r", encoding="utf-8") as f:
-            raw = json.load(f)
-        entries = [RunIndexEntry.model_validate(e) for e in raw]
+    with locked_index(index_path):
+        entries: list[RunIndexEntry] = []
+        if index_path.is_file():
+            with index_path.open("r", encoding="utf-8") as f:
+                raw = json.load(f)
+            entries = [RunIndexEntry.model_validate(e) for e in raw]
 
-    entry = RunIndexEntry(
-        branch=meta.branch,
-        arch=meta.arch,
-        run_id=meta.run_id,
-        started_at=meta.started_at,
-        finished_at=meta.finished_at,
-        status=meta.status,
-        connection_name=meta.connection_name,
-        unit_tests_total=meta.unit_tests_total,
-        unit_tests_failed=meta.unit_tests_failed,
-        regression_total=meta.regression_total,
-        regression_passed=meta.regression_passed,
-        regression_failed=meta.regression_failed,
-        regression_broken=meta.regression_broken,
-    )
-    entries.append(entry)
-    entries.sort(key=lambda e: e.started_at, reverse=True)
-    _write_json(index_path, [e.model_dump() for e in entries])
+        entry = RunIndexEntry(
+            branch=meta.branch,
+            arch=meta.arch,
+            run_id=meta.run_id,
+            started_at=meta.started_at,
+            finished_at=meta.finished_at,
+            status=meta.status,
+            connection_name=meta.connection_name,
+            unit_tests_total=meta.unit_tests_total,
+            unit_tests_failed=meta.unit_tests_failed,
+            regression_total=meta.regression_total,
+            regression_passed=meta.regression_passed,
+            regression_failed=meta.regression_failed,
+            regression_broken=meta.regression_broken,
+            archived=meta.archived,
+        )
+        entries.append(entry)
+        entries.sort(key=lambda e: e.started_at, reverse=True)
+        _write_json(index_path, [e.model_dump() for e in entries])
 
     # Update branches index.
     branches_path = branches_index_path(data_root)

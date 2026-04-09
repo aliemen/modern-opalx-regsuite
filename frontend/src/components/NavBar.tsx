@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, History, LogOut, Moon, Play, Settings, Sun, LayoutDashboard } from "lucide-react";
+import { Activity, Archive, History, LogOut, Moon, Play, Settings, Sun, LayoutDashboard } from "lucide-react";
 import { getCurrentRun } from "../api/runs";
 import { logout } from "../api/auth";
 import { setAccessToken } from "../api/client";
+import regsuiteIconUrl from "../assets/regsuite-icon.png";
 
 function useDarkMode() {
   const [dark, setDark] = useState(
@@ -44,7 +45,15 @@ export function NavBar() {
 
   return (
     <nav className="bg-surface border-b border-border px-6 py-3 flex items-center gap-6">
-      <Link to="/" className="text-accent font-semibold text-lg tracking-tight">
+      <Link
+        to="/"
+        className="flex items-center gap-2 text-accent font-semibold text-lg tracking-tight"
+      >
+        <img
+          src={regsuiteIconUrl}
+          alt=""
+          className="w-7 h-7 shrink-0"
+        />
         OPALX Reg Suite
       </Link>
 
@@ -69,6 +78,13 @@ export function NavBar() {
         >
           <Play size={15} />
           Run
+        </Link>
+        <Link
+          to="/archive"
+          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
+        >
+          <Archive size={15} />
+          Archive
         </Link>
         <Link
           to="/settings"

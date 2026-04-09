@@ -51,6 +51,9 @@ export interface QueueStateResponse {
 
 export interface DashboardStats {
   last_run: string | null;
+  last_run_branch: string | null;
+  last_run_arch: string | null;
+  last_run_status: string | null;
   runs_total: number;
   runs_last_week: number;
   branches_covered: number;

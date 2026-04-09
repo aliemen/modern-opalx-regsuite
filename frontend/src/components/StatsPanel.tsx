@@ -1,13 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart3,
-  Calendar,
-  Clock,
-  GitBranch,
-  FlaskConical,
-  TestTubes,
-} from "lucide-react";
+import { Link } from "react-router-dom";
+import { Clock } from "lucide-react";
 import { getDashboardStats } from "../api/runs";
+import { LatestMasterMatrix } from "./stats/LatestMasterMatrix";
+import { NewlyBrokenCard } from "./stats/NewlyBrokenCard";
+import { SuiteDurationCard } from "./stats/SuiteDurationCard";
+import { ActivitySparkline } from "./stats/ActivitySparkline";
+import { StatusBadge } from "./StatusBadge";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -20,20 +19,8 @@ function relativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-function MiniBar({ value }: { value: number }) {
-  const color =
-    value >= 90 ? "bg-passed" : value >= 70 ? "bg-broken" : "bg-failed";
-  return (
-    <div className="w-full h-1.5 bg-border rounded-full mt-1">
-      <div
-        className={`h-full rounded-full ${color}`}
-        style={{ width: `${Math.min(value, 100)}%` }}
-      />
-    </div>
-  );
-}
-
-export function StatsPanel() {
+/** Tiny "Last run" tile, top of the stats column. Lightweight liveness check. */
+function LastRunTile() {
   const { data: stats } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: getDashboardStats,
@@ -42,78 +29,49 @@ export function StatsPanel() {
 
   if (!stats) return null;
 
-  const items = [
-    {
-      icon: Clock,
-      label: "Last Run",
-      value: stats.last_run ? relativeTime(stats.last_run) : "—",
-    },
-    {
-      icon: BarChart3,
-      label: "Runs Overall",
-      value: stats.runs_total.toString(),
-    },
-    {
-      icon: Calendar,
-      label: "Last 7 Days",
-      value: stats.runs_last_week.toString(),
-    },
-    {
-      icon: GitBranch,
-      label: "Branches",
-      value: stats.branches_covered.toString(),
-    },
-  ];
+  const href =
+    stats.last_run_branch && stats.last_run_arch
+      ? `/results/${stats.last_run_branch}/${stats.last_run_arch}`
+      : null;
 
+  const inner = (
+    <div className="bg-surface border border-border rounded-xl p-5 hover:border-accent/40 transition-colors">
+      <div className="flex items-center gap-2 mb-2">
+        <Clock size={13} className="text-muted" />
+        <span className="text-muted text-xs">Last run</span>
+        {stats.last_run_status && (
+          <span className="ml-auto">
+            <StatusBadge status={stats.last_run_status} />
+          </span>
+        )}
+      </div>
+      <p className="text-fg font-medium text-sm">
+        {stats.last_run ? relativeTime(stats.last_run) : "—"}
+      </p>
+      {stats.last_run_branch && stats.last_run_arch && (
+        <p className="text-muted text-xs mt-1">
+          {stats.last_run_branch} / {stats.last_run_arch}
+        </p>
+      )}
+    </div>
+  );
+
+  return href ? <Link to={href}>{inner}</Link> : inner;
+}
+
+/**
+ * Composes the developer-facing stats column. Each card fetches its own
+ * endpoint via React Query so the cards are independently shippable and
+ * any single-card failure doesn't take down the whole panel.
+ */
+export function StatsPanel() {
   return (
-    <div className="bg-surface border border-border rounded-xl p-5">
-      <h2 className="text-fg font-medium text-sm mb-4">Statistics</h2>
-
-      <div className="grid grid-cols-2 gap-3">
-        {items.map((item) => (
-          <div key={item.label} className="flex items-start gap-2">
-            <item.icon size={13} className="text-muted mt-0.5 shrink-0" />
-            <div>
-              <p className="text-muted text-xs">{item.label}</p>
-              <p className="text-fg font-medium text-sm">{item.value}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Pass rates */}
-      <div className="mt-4 pt-3 border-t border-border space-y-2.5">
-        <div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted text-xs flex items-center gap-1.5">
-              <TestTubes size={11} /> Unit Tests (master avg)
-            </span>
-            <span className="text-fg text-xs font-medium">
-              {stats.avg_unit_pass_rate_master != null
-                ? `${stats.avg_unit_pass_rate_master.toFixed(1)}%`
-                : "—"}
-            </span>
-          </div>
-          {stats.avg_unit_pass_rate_master != null && (
-            <MiniBar value={stats.avg_unit_pass_rate_master} />
-          )}
-        </div>
-        <div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted text-xs flex items-center gap-1.5">
-              <FlaskConical size={11} /> Regression (master avg)
-            </span>
-            <span className="text-fg text-xs font-medium">
-              {stats.avg_regression_pass_rate_master != null
-                ? `${stats.avg_regression_pass_rate_master.toFixed(1)}%`
-                : "—"}
-            </span>
-          </div>
-          {stats.avg_regression_pass_rate_master != null && (
-            <MiniBar value={stats.avg_regression_pass_rate_master} />
-          )}
-        </div>
-      </div>
+    <div className="space-y-4">
+      <LastRunTile />
+      <LatestMasterMatrix />
+      <NewlyBrokenCard />
+      <SuiteDurationCard />
+      <ActivitySparkline />
     </div>
   );
 }

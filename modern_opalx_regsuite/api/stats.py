@@ -3,20 +3,26 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from ..archive_service import filter_entries_by_view
 from ..config import SuiteConfig
 from ..data_model import branches_index_path, runs_index_path
 from .deps import get_config, require_auth
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
+ViewMode = Literal["active", "archived", "all"]
+
 
 class DashboardStats(BaseModel):
     last_run: Optional[datetime] = None
+    last_run_branch: Optional[str] = None
+    last_run_arch: Optional[str] = None
+    last_run_status: Optional[str] = None
     runs_total: int = 0
     runs_last_week: int = 0
     branches_covered: int = 0
@@ -28,8 +34,9 @@ class DashboardStats(BaseModel):
 def get_dashboard_stats(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
+    view: ViewMode = Query("active"),
 ) -> DashboardStats:
-    """Compute aggregate statistics from run index files."""
+    """Compute aggregate statistics from run index files (filtered by *view*)."""
     data_root = cfg.resolved_data_root
     branches_path = branches_index_path(data_root)
 
@@ -45,9 +52,13 @@ def get_dashboard_stats(
     runs_total = 0
     runs_last_week = 0
     last_run_time: Optional[datetime] = None
+    last_run_branch: Optional[str] = None
+    last_run_arch: Optional[str] = None
+    last_run_status: Optional[str] = None
 
     master_unit_rates: list[float] = []
     master_reg_rates: list[float] = []
+    branches_with_visible_runs: set[str] = set()
 
     for branch, archs in branches.items():
         for arch in archs:
@@ -59,6 +70,9 @@ def get_dashboard_stats(
                     entries = json.load(f)
             except (json.JSONDecodeError, OSError):
                 continue
+            entries = filter_entries_by_view(entries, view)
+            if entries:
+                branches_with_visible_runs.add(branch)
 
             for entry in entries:
                 runs_total += 1
@@ -81,6 +95,9 @@ def get_dashboard_stats(
                             finished = finished.replace(tzinfo=timezone.utc)
                         if last_run_time is None or finished > last_run_time:
                             last_run_time = finished
+                            last_run_branch = branch
+                            last_run_arch = arch
+                            last_run_status = entry.get("status")
                     except (ValueError, TypeError):
                         pass
 
@@ -114,9 +131,12 @@ def get_dashboard_stats(
 
     return DashboardStats(
         last_run=last_run_time,
+        last_run_branch=last_run_branch,
+        last_run_arch=last_run_arch,
+        last_run_status=last_run_status,
         runs_total=runs_total,
         runs_last_week=runs_last_week,
-        branches_covered=len(branches),
+        branches_covered=len(branches_with_visible_runs),
         avg_unit_pass_rate_master=avg_unit,
         avg_regression_pass_rate_master=avg_reg,
     )

@@ -9,6 +9,7 @@ import shutil
 import typer
 
 from . import config as config_mod
+from . import archive_service
 from .config import SuiteConfig
 from .data_model import RunIndexEntry, RunMeta, branches_index_path, run_dir, runs_index_path
 from .runner import run_pipeline
@@ -249,6 +250,95 @@ def del_test(
         typer.echo(
             f"No runs matched pattern '{run_id}' "
             f"(branch={branch}, archs={', '.join(archs)})."
+        )
+
+
+@app.command("archive")
+def archive_cmd(
+    branch: str = typer.Option(
+        ...,
+        "--branch",
+        "-b",
+        help="Branch to archive (or unarchive with --unarchive).",
+    ),
+    arch: Optional[str] = typer.Option(
+        None,
+        "--arch",
+        "-a",
+        help="Restrict to a single architecture. Omit to apply to all archs of the branch.",
+    ),
+    run_id: Optional[list[str]] = typer.Option(
+        None,
+        "--run-id",
+        help="Restrict to specific run id(s). Repeat the flag to pass multiple. "
+             "Requires --arch.",
+    ),
+    unarchive: bool = typer.Option(
+        False,
+        "--unarchive",
+        help="Restore archived runs instead of archiving them.",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml.",
+    ),
+) -> None:
+    """Bulk archive or unarchive runs.
+
+    Examples
+    --------
+    # Archive every run on the 'feature/x' branch.
+    $ opalx-regsuite archive --branch feature/x
+
+    # Archive only the cpu-serial runs of master.
+    $ opalx-regsuite archive --branch master --arch cpu-serial
+
+    # Archive two specific runs.
+    $ opalx-regsuite archive -b master -a cpu-serial \
+        --run-id 20260305-131642 --run-id 20260306-091200
+
+    # Restore an archived branch.
+    $ opalx-regsuite archive --branch feature/x --unarchive
+    """
+    if run_id and not arch:
+        typer.echo("Error: --run-id requires --arch.", err=True)
+        raise typer.Exit(code=2)
+
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+
+    archived = not unarchive
+    action = "archive" if archived else "unarchive"
+
+    if run_id:
+        result = archive_service.set_archived_for_runs(
+            data_root, branch, arch, run_id, archived=archived
+        )
+    elif arch:
+        result = archive_service.set_archived_for_arch(
+            data_root, branch, arch, archived=archived
+        )
+    else:
+        result = archive_service.set_archived_for_branch(
+            data_root, branch, archived=archived
+        )
+
+    typer.echo(
+        f"{action.title()}d {result.changed} run(s) "
+        f"(branch={branch}"
+        + (f", arch={arch}" if arch else "")
+        + ")."
+    )
+    if result.skipped_active:
+        typer.echo(
+            f"Skipped {len(result.skipped_active)} actively-running run(s): "
+            + ", ".join(sorted(result.skipped_active))
+        )
+    if result.not_found:
+        typer.echo(
+            f"Not found in index: " + ", ".join(sorted(result.not_found))
         )
 
 

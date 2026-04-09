@@ -4,3 +4,4 @@ config.toml
 site/
 **/__pycache__/
 users.json
+*.DS_Store

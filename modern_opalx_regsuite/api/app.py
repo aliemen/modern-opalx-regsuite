@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import load_config
 from ..data_model import runs_index_path
+from .archive import router as archive_router
 from .auth import REFRESH_COOKIE_NAME, TokenResponse
 from .tokens import create_access_token, verify_refresh_token
 from .branches import router as branches_router
@@ -42,6 +43,10 @@ def _heal_stale_runs(data_root: Path) -> None:
 
     Also patches the corresponding runs_index.json so the dashboard doesn't
     show a stale 'running' badge after a server crash.
+
+    Invariant: this function only writes ``status`` and ``finished_at``. It
+    must NOT touch the ``archived`` field — a crash recovery should preserve
+    whatever archive state the run had before the crash.
     """
     runs_root = data_root / "runs"
     if not runs_root.is_dir():
@@ -112,10 +117,14 @@ def create_app() -> FastAPI:
     app.include_router(runs_router)
     app.include_router(stream_router)
     app.include_router(results_router)
+    app.include_router(archive_router)
     app.include_router(branches_router)
 
     from .stats import router as stats_router
     app.include_router(stats_router)
+
+    from .stats_developer import router as stats_developer_router
+    app.include_router(stats_developer_router)
 
     # Auth router — login, logout endpoints.
     from .auth import router as auth_router

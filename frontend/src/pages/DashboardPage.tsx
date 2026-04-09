@@ -1,19 +1,23 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Radio } from "lucide-react";
-import { getBranches } from "../api/results";
 import { getQueueState } from "../api/runs";
-import { BranchSection } from "../components/BranchSection";
+import { useLatestRuns } from "../hooks/useLatestRuns";
+import { useRunSelection } from "../hooks/useRunSelection";
+import { useArchiveMutations } from "../hooks/useArchiveMutations";
+import { useGroupBy } from "../hooks/useGroupBy";
+import { AccordionList } from "../components/AccordionList";
+import { BulkActionBar } from "../components/BulkActionBar";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { GroupingControl } from "../components/GroupingControl";
 import { TrendsPanel } from "../components/TrendsPanel";
 import { StatsPanel } from "../components/StatsPanel";
 import { QueuePanel } from "../components/QueuePanel";
+import type { Group } from "../lib/grouping";
 
 export function DashboardPage() {
-  const { data: branches, isLoading } = useQuery({
-    queryKey: ["branches"],
-    queryFn: getBranches,
-    refetchInterval: 60_000,
-  });
+  const { cells, branches, isLoading } = useLatestRuns("active");
 
   const { data: queueState } = useQuery({
     queryKey: ["queue-state"],
@@ -21,27 +25,75 @@ export function DashboardPage() {
     refetchInterval: 5000,
   });
 
-  if (isLoading) {
-    return <div className="p-8 text-muted">Loading\u2026</div>;
+  const selection = useRunSelection();
+  const mutations = useArchiveMutations();
+  const [groupBy, setGroupBy] = useGroupBy();
+
+  // Confirmation state for the per-group "Archive branch" shortcut.
+  const [pendingBranchArchive, setPendingBranchArchive] = useState<string | null>(
+    null
+  );
+  // Confirmation for the bulk-bar "Archive selected" action.
+  const [pendingBulkArchive, setPendingBulkArchive] = useState(false);
+  // Toast for "N runs skipped (currently running)".
+  const [skippedToast, setSkippedToast] = useState<string | null>(null);
+
+  if (isLoading && Object.keys(branches).length === 0) {
+    return <div className="p-8 text-muted">Loading…</div>;
   }
-
-  const entries = Object.entries(branches ?? {});
-
-  // master always first, then alphabetical
-  entries.sort(([a], [b]) => {
-    if (a === "master") return -1;
-    if (b === "master") return 1;
-    return a.localeCompare(b);
-  });
 
   const masterArchs = branches?.["master"] ?? [];
 
-  // Compute active/queued counts from queue state.
+  // Active/queued counts from queue state.
   const machines = queueState?.machines ?? [];
   const activeRuns = machines.flatMap((m) =>
     m.active_run ? [m.active_run] : []
   );
   const totalQueued = machines.reduce((s, m) => s + m.queue.length, 0);
+
+  function groupAction(group: Group) {
+    if (group.kind !== "branch") return undefined;
+    return {
+      label: "Archive branch",
+      onClick: () => setPendingBranchArchive(group.label),
+    };
+  }
+
+  async function confirmBranchArchive() {
+    const branch = pendingBranchArchive;
+    setPendingBranchArchive(null);
+    if (!branch) return;
+    const result = await mutations.archiveBranch.mutateAsync({
+      branch,
+      archived: true,
+    });
+    if (result.skipped_active.length > 0) {
+      setSkippedToast(
+        `${result.skipped_active.length} run${result.skipped_active.length !== 1 ? "s" : ""} skipped (currently running)`
+      );
+    }
+  }
+
+  async function confirmBulkArchive() {
+    setPendingBulkArchive(false);
+    const scopes = selection.groupedScopes();
+    if (scopes.length === 0) return;
+    const results = await mutations.archiveRuns.mutateAsync({
+      scopes,
+      archived: true,
+    });
+    selection.clear();
+    const skipped = mutations.collectSkippedActive(results);
+    if (skipped.length > 0) {
+      setSkippedToast(
+        `${skipped.length} run${skipped.length !== 1 ? "s" : ""} skipped (currently running)`
+      );
+    }
+  }
+
+  const busy =
+    mutations.archiveBranch.isPending || mutations.archiveRuns.isPending;
+  const hasEntries = Object.keys(branches).length > 0;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -75,7 +127,7 @@ export function DashboardPage() {
 
       <h1 className="text-fg text-2xl font-semibold mb-6">Dashboard</h1>
 
-      {entries.length === 0 ? (
+      {!hasEntries ? (
         <div className="text-muted text-sm">
           No results yet.{" "}
           <Link to="/trigger" className="text-accent hover:underline">
@@ -85,16 +137,22 @@ export function DashboardPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Left: branch accordion */}
-          <div className="lg:col-span-3 space-y-3">
-            {entries.map(([branch, archs], i) => (
-              <BranchSection
-                key={branch}
-                branch={branch}
-                archs={archs}
-                defaultOpen={i === 0}
-              />
-            ))}
+          {/* Left: grouping control + bulk action bar + accordion */}
+          <div className="lg:col-span-3">
+            <GroupingControl value={groupBy} onChange={setGroupBy} />
+            <BulkActionBar
+              selection={selection}
+              view="active"
+              onArchiveToggle={() => setPendingBulkArchive(true)}
+              busy={busy}
+            />
+            <AccordionList
+              cells={cells}
+              groupBy={groupBy}
+              storageNamespace="opalx-dashboard-open"
+              selection={selection}
+              groupAction={groupAction}
+            />
           </div>
 
           {/* Right: trends + stats + queue */}
@@ -103,6 +161,34 @@ export function DashboardPage() {
             <StatsPanel />
             <QueuePanel />
           </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={pendingBranchArchive !== null}
+        title={`Archive branch "${pendingBranchArchive}"?`}
+        message={`This will hide every run for "${pendingBranchArchive}" from the dashboard. You can restore them from the Archive tab at any time. Currently-running runs are skipped.`}
+        confirmLabel="Archive"
+        onConfirm={confirmBranchArchive}
+        onCancel={() => setPendingBranchArchive(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingBulkArchive}
+        title={`Archive ${selection.count} run${selection.count !== 1 ? "s" : ""}?`}
+        message="The selected runs will be hidden from the dashboard. You can restore them from the Archive tab at any time."
+        confirmLabel="Archive"
+        onConfirm={confirmBulkArchive}
+        onCancel={() => setPendingBulkArchive(false)}
+      />
+
+      {skippedToast && (
+        <div
+          className="fixed bottom-6 right-6 z-40 bg-surface border border-broken/40 rounded-xl px-4 py-3 text-sm text-fg shadow-lg cursor-pointer"
+          onClick={() => setSkippedToast(null)}
+        >
+          {skippedToast}
+          <span className="text-muted text-xs ml-3">(click to dismiss)</span>
         </div>
       )}
     </div>

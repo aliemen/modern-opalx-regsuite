@@ -128,6 +128,11 @@ class RunMeta(BaseModel):
     regression_failed: int = 0
     regression_broken: int = 0
 
+    # Soft-delete flag. False for newly written runs and for any historical
+    # run-meta.json file that predates this field (default applies). Flipped
+    # in-place by the archive service; never moves files on disk.
+    archived: bool = False
+
     @property
     def duration_seconds(self) -> Optional[float]:
         if self.finished_at is None:
@@ -154,6 +159,7 @@ class RunIndexEntry(BaseModel):
     regression_passed: int = 0
     regression_failed: int = 0
     regression_broken: int = 0
+    archived: bool = False
 
 
 class BranchIndex(BaseModel):

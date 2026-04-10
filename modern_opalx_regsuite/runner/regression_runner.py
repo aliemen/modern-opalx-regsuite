@@ -28,6 +28,7 @@ from .parsing.regression import (
     _read_stat_data,
 )
 from .plotting import _write_stat_plot
+from ..beamline_viz import generate_beamline_svg
 
 
 def _find_opalx_executable(build_dir: Path, relpath: str) -> Optional[Path]:
@@ -77,6 +78,7 @@ def _build_simulation(
     plots_dir: Path,
     pipeline_log_path: Path,
     test_start: float,
+    input_file: Optional[Path] = None,
 ) -> RegressionSimulation:
     """Shared post-processing: parse .rt, read stats, compute deltas, plot, assemble result."""
     description, checks = _parse_rt_file(rt_file)
@@ -170,6 +172,29 @@ def _build_simulation(
     elif any(m.state == "broken" for m in sim_metrics):
         sim_state = "broken"
 
+    # --- Beamline visualization -------------------------------------------
+    # Look for the ElementPositions.txt file that OPALX writes to a data/
+    # subdirectory next to the .stat file.
+    beamline_plot: Optional[str] = None
+    work_dir = generated_stat.parent
+    data_dir = work_dir / "data"
+    positions_file: Optional[Path] = next(
+        data_dir.glob("*_ElementPositions.txt"), None
+    ) if data_dir.is_dir() else None
+    if positions_file is None:
+        positions_file = next(work_dir.glob("*_ElementPositions.txt"), None)
+
+    if positions_file is not None:
+        beamline_out = plots_dir / f"{test_name}_beamline.svg"
+        try:
+            generate_beamline_svg(positions_file, input_file, beamline_out)
+            beamline_plot = f"plots/{test_name}_beamline.svg"
+        except Exception as exc:
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] beamline SVG failed for {test_name}: {exc}",
+            )
+
     return RegressionSimulation(
         name=test_name,
         description=description,
@@ -180,6 +205,7 @@ def _build_simulation(
         log_file=f"logs/{test_name}-RT.log",
         metrics=sim_metrics,
         duration_seconds=time.monotonic() - test_start,
+        beamline_plot=beamline_plot,
     )
 
 
@@ -270,6 +296,8 @@ def _run_regression_suite(
             if not out_file.exists():
                 shutil.copy2(test_log_local, out_file)
 
+        # Resolve the input file path so _build_simulation can look up element types
+        in_file = test_input if test_input.exists() else (local_script if local_script.is_file() else None)
         sim = _build_simulation(
             test_name=test_name,
             rc=rc,
@@ -279,6 +307,7 @@ def _run_regression_suite(
             plots_dir=paths.plots_dir,
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
+            input_file=in_file,
         )
         report.simulations.append(sim)
         _append_pipeline_line(
@@ -436,6 +465,18 @@ def _run_regression_suite_remote(
                 f"[regression] WARNING: could not fetch {test_name}.stat: {exc}",
             )
 
+        # Try to fetch the element positions file for beamline visualization
+        remote_positions = f"{remote_test_work}/data/{test_name}_ElementPositions.txt"
+        local_positions = work_test_dir / "data" / f"{test_name}_ElementPositions.txt"
+        try:
+            local_positions.parent.mkdir(parents=True, exist_ok=True)
+            remote.fetch_file(remote_positions, local_positions)
+        except Exception:
+            pass  # Not critical — beamline SVG will simply be skipped if absent
+
+        # Use the source-side .in file for element type resolution
+        src_in_file = src_test_dir / f"{test_name}.in"
+        in_file = src_in_file if src_in_file.exists() else None
         sim = _build_simulation(
             test_name=test_name,
             rc=rc,
@@ -445,6 +486,7 @@ def _run_regression_suite_remote(
             plots_dir=paths.plots_dir,
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
+            input_file=in_file,
         )
         report.simulations.append(sim)
         _append_pipeline_line(

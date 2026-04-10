@@ -45,6 +45,7 @@ class RegressionSimulation(BaseModel):
     log_file: Optional[str] = None
     metrics: List[RegressionMetric] = Field(default_factory=list)
     duration_seconds: Optional[float] = None
+    beamline_plot: Optional[str] = None  # relative path, e.g. "plots/AWAGun-1_beamline.svg"
 
 
 class UnitTestsReport(BaseModel):

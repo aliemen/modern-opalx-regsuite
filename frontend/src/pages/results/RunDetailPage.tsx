@@ -336,6 +336,28 @@ export function RunDetailPage() {
         </div>
       </div>
 
+      {/* Beamline visualization */}
+      {regression.simulations.some((s) => s.beamline_plot) && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            Beamline
+          </h2>
+          {regression.simulations
+            .filter((s) => s.beamline_plot)
+            .map((s) => (
+              <div key={s.name} className="bg-surface border border-border rounded-xl p-4">
+                <p className="text-xs text-muted mb-3 font-mono">{s.name}</p>
+                <img
+                  src={`/data/${runPath}/${s.beamline_plot}`}
+                  alt={`${s.name} beamline diagram`}
+                  className="w-full rounded"
+                  loading="lazy"
+                />
+              </div>
+            ))}
+        </div>
+      )}
+
       {/* Unit tests */}
       {unit.tests.length > 0 && (
         <div className="bg-surface border border-border rounded-xl overflow-hidden">

@@ -50,6 +50,7 @@ export interface RegressionSimulation {
   log_file: string | null;
   metrics: RegressionMetric[];
   duration_seconds: number | null;
+  beamline_plot: string | null;
 }
 
 export interface RegressionTestsReport {

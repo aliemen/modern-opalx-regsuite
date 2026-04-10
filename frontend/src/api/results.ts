@@ -181,6 +181,20 @@ export async function archiveArch(
   return res.data;
 }
 
+export async function archiveRun(
+  branch: string,
+  arch: string,
+  runId: string,
+  archived: boolean
+): Promise<ArchiveResult> {
+  const url = `/api/archive/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs`;
+  const payload = { run_ids: [runId] };
+  const res = archived
+    ? await api.post<ArchiveResult>(url, payload)
+    : await api.delete<ArchiveResult>(url, { data: payload });
+  return res.data;
+}
+
 export async function hardDeleteArch(
   branch: string,
   arch: string

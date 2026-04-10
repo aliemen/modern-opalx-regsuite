@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Trash2 } from "lucide-react";
-import { deleteRun, getRunDetail, type RegressionSimulation } from "../../api/results";
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Trash2 } from "lucide-react";
+import { archiveRun, deleteRun, getRunDetail, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 
 function fmtNum(n: number | null | undefined, digits = 4) {
@@ -183,8 +183,18 @@ export function RunDetailPage() {
     },
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (archived: boolean) => archiveRun(branch!, arch!, runId!, archived),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["run-detail", branch, arch, runId] });
+      queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
+      queryClient.invalidateQueries({ queryKey: ["branches"] });
+    },
+  });
+
   const [showUnitDetails, setShowUnitDetails] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   if (isLoading) return <div className="p-8 text-muted">Loading…</div>;
   if (error || !data)
@@ -203,7 +213,24 @@ export function RunDetailPage() {
           <ArrowLeft size={14} /> {branch} / {arch}
         </Link>
 
-        {confirmDelete ? (
+        {confirmArchive ? (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted">{meta.archived ? "Unarchive" : "Archive"} this run?</span>
+            <button
+              onClick={() => { archiveMutation.mutate(!meta.archived); setConfirmArchive(false); }}
+              disabled={archiveMutation.isPending}
+              className="px-3 py-1 rounded bg-accent/20 border border-accent/40 text-accent hover:bg-accent/30 transition disabled:opacity-50"
+            >
+              {archiveMutation.isPending ? "Saving…" : "Confirm"}
+            </button>
+            <button
+              onClick={() => setConfirmArchive(false)}
+              className="px-3 py-1 rounded border border-border text-muted hover:text-fg transition"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : confirmDelete ? (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">Delete this run?</span>
             <button
@@ -221,13 +248,22 @@ export function RunDetailPage() {
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="flex items-center gap-1.5 text-muted hover:text-failed text-sm transition-colors"
-            title="Delete run"
-          >
-            <Trash2 size={14} /> Delete run
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setConfirmArchive(true)}
+              className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
+              title={meta.archived ? "Unarchive run" : "Archive run"}
+            >
+              <Archive size={14} /> {meta.archived ? "Unarchive run" : "Archive run"}
+            </button>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1.5 text-muted hover:text-failed text-sm transition-colors"
+              title="Delete run"
+            >
+              <Trash2 size={14} /> Delete run
+            </button>
+          </div>
         )}
       </div>
 

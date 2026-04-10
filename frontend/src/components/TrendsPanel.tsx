@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { TrendingUp } from "lucide-react";
 import {
   LineChart,
@@ -54,14 +54,34 @@ function toTrendData(runs: RunIndexEntry[]): TrendPoint[] {
 }
 
 export function TrendsPanel({ archs }: { archs: string[] }) {
-  const [selectedArch, setSelectedArch] = useState(archs[0] ?? "");
+  // Reuse the counts already cached by useLatestRuns (same query keys) to sort
+  // the dropdown by number of runs descending — no extra network requests.
+  const countQueries = useQueries({
+    queries: archs.map((arch) => ({
+      queryKey: ["runs", "master", arch, "active", null] as const,
+      queryFn: () => getRuns("master", arch, 1, 0, "active", null),
+      staleTime: 30_000,
+    })),
+  });
+
+  const sortedArchs = useMemo(() => {
+    const counts = new Map(
+      archs.map((arch, i) => [arch, countQueries[i]?.data?.total ?? 0])
+    );
+    return [...archs].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
+  }, [archs, countQueries]);
+
+  // Default to the arch with the most runs; user selection overrides.
+  const [selectedArch, setSelectedArch] = useState("");
+  const effectiveArch = selectedArch || sortedArchs[0] || "";
+
   const colors = useThemeColors();
 
   const { data } = useQuery({
-    queryKey: ["trend-runs", "master", selectedArch],
-    queryFn: () => getRuns("master", selectedArch, 20, 0),
+    queryKey: ["trend-runs", "master", effectiveArch],
+    queryFn: () => getRuns("master", effectiveArch, 20, 0),
     refetchInterval: 60_000,
-    enabled: !!selectedArch,
+    enabled: !!effectiveArch,
   });
 
   const trendData = useMemo(() => toTrendData(data?.runs ?? []), [data]);
@@ -74,11 +94,11 @@ export function TrendsPanel({ archs }: { archs: string[] }) {
           Pass Rate Trends
         </h2>
         <select
-          value={selectedArch}
+          value={effectiveArch}
           onChange={(e) => setSelectedArch(e.target.value)}
           className="bg-bg border border-border rounded-md px-2 py-1 text-fg text-xs focus:outline-none focus:border-accent"
         >
-          {archs.map((a) => (
+          {sortedArchs.map((a) => (
             <option key={a} value={a}>
               {a}
             </option>
@@ -88,7 +108,7 @@ export function TrendsPanel({ archs }: { archs: string[] }) {
 
       {trendData.length === 0 ? (
         <p className="text-muted text-sm py-12 text-center">
-          No data yet for master / {selectedArch}.
+          No data yet for master / {effectiveArch}.
         </p>
       ) : (
         <ResponsiveContainer width="100%" height={280}>

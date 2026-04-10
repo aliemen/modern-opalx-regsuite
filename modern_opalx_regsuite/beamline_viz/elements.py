@@ -42,6 +42,6 @@ ELEMENT_STYLES: dict[str, dict[str, str]] = {
     "hkicker":              {"color": "#884EA0", "label": "H-Kicker"},
     "vkicker":              {"color": "#884EA0", "label": "V-Kicker"},
     "cyclotron":            {"color": "#2471A3", "label": "Cyclotron"},
-    "constantefieldcavity": {"color": "#2471A3", "label": "E-Field"},
+    "constantefieldcavity": {"color": "#fff154", "label": "E-Field"},
     "_default":             {"color": "#7F8C8D", "label": "Element"},
 }

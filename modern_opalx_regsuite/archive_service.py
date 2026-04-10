@@ -360,11 +360,10 @@ def set_archived_for_runs(
 ) -> ArchiveResult:
     """Archive or unarchive an explicit list of run ids in one branch+arch.
 
-    Raises :class:`ProtectedBranchError` when *branch* is the protected
-    branch and *archived* is True.
+    Unlike branch-wide or arch-wide archiving, per-run archiving is allowed
+    on the protected branch so that individual runs can be tidied up without
+    hiding the entire branch from the dashboard.
     """
-    if archived and branch == PROTECTED_BRANCH:
-        raise ProtectedBranchError(branch)
     requested = set(run_ids)
     if not requested:
         return ArchiveResult()

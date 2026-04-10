@@ -54,7 +54,9 @@ function toTrendData(runs: RunIndexEntry[]): TrendPoint[] {
 }
 
 export function TrendsPanel({ archs }: { archs: string[] }) {
-  const [selectedArch, setSelectedArch] = useState(archs[0] ?? "");
+  // Track only explicit user selections; default comes from the (sorted) prop.
+  const [userSelected, setUserSelected] = useState<string | null>(null);
+  const selectedArch = userSelected && archs.includes(userSelected) ? userSelected : archs[0] ?? "";
   const colors = useThemeColors();
 
   const { data } = useQuery({
@@ -75,7 +77,7 @@ export function TrendsPanel({ archs }: { archs: string[] }) {
         </h2>
         <select
           value={selectedArch}
-          onChange={(e) => setSelectedArch(e.target.value)}
+          onChange={(e) => setUserSelected(e.target.value)}
           className="bg-bg border border-border rounded-md px-2 py-1 text-fg text-xs focus:outline-none focus:border-accent"
         >
           {archs.map((a) => (

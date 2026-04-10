@@ -142,17 +142,14 @@ def archive_runs(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
 ) -> ArchiveResult:
-    try:
-        return set_archived_for_runs(
-            cfg.resolved_data_root,
-            branch,
-            arch,
-            payload.run_ids,
-            archived=True,
-            protect_run_ids=_protected_run_ids(),
-        )
-    except ProtectedBranchError as exc:
-        raise _conflict_for_protected_branch(exc) from exc
+    return set_archived_for_runs(
+        cfg.resolved_data_root,
+        branch,
+        arch,
+        payload.run_ids,
+        archived=True,
+        protect_run_ids=_protected_run_ids(),
+    )
 
 
 @router.delete("/branches/{branch}/archs/{arch}/runs", response_model=ArchiveResult)

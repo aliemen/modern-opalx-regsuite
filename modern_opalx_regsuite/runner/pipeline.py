@@ -63,6 +63,7 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
             finished_at=meta.finished_at,
             status=meta.status,
             connection_name=meta.connection_name,
+            triggered_by=meta.triggered_by,
             unit_tests_total=meta.unit_tests_total,
             unit_tests_failed=meta.unit_tests_failed,
             regression_total=meta.regression_total,

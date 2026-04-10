@@ -1,0 +1,65 @@
+opalx_repo_root = "/home/aliemen/opalx"
+builds_root = "/home/aliemen/builds"
+data_root = "/home/aliemen/test-data"
+regtests_repo_root = "/home/aliemen/regression-tests-x"
+regtests_branch = "master"
+regtests_subdir = "RegressionTests"
+default_branch = "master"
+default_architectures = ["cpu-serial"]
+unit_test_command = "ctest --output-on-failure"
+# Global build defaults below are currently unused because every configured
+# architecture defines its own cmake_args/build_jobs/mpi_ranks.
+# cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON"]
+# build_command = "make -j8"
+# build_jobs = 8
+# mpi_ranks = 1
+opalx_executable_relpath = "src/opalx"
+opalx_args = []
+keep_work_dirs = false
+host = "0.0.0.0"
+port = 8000
+users_file = "~/.config/opalx-regsuite/users.json"
+# Deprecated legacy global key directory (used only by migrate-keys helper).
+# ssh_keys_dir = "~/.config/opalx-regsuite/ssh-keys"
+
+[[arch_configs]]
+arch = "cpu-serial"
+cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DOPALX_USE_INSTALLED_HDF5=ON", "-DOPALX_USE_INSTALLED_H5HUT=ON", "-DOPALX_USE_INSTALLED_GTEST=ON"]
+build_jobs = 8
+mpi_ranks = 1
+
+[arch_configs.env]
+style = "modules"
+module_use_paths = ["/home/aliemen/modulefiles"]
+module_loads = ["gcc/15", "openmpi/5.0.5-gcc15", "hdf5/1.14.6-gcc15", "gtest/1.16.0-gcc15", "h5hut/cmake-gcc15"]
+
+[[arch_configs]]
+arch = "cpu-openmp"
+cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=OPENMP", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DOPALX_USE_INSTALLED_HDF5=ON", "-DOPALX_USE_INSTALLED_H5HUT=ON", "-DOPALX_USE_INSTALLED_GTEST=ON"]
+build_jobs = 8
+mpi_ranks = 1
+
+[arch_configs.env]
+style = "modules"
+module_use_paths = ["/home/aliemen/modulefiles"]
+module_loads = ["gcc/15", "openmpi/5.0.5-gcc15", "hdf5/1.14.6-gcc15", "gtest/1.16.0-gcc15", "h5hut/cmake-gcc15"]
+
+[[arch_configs]]
+arch = "cpu-serial-opalx-lxc"
+cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DOPALX_USE_INSTALLED_HDF5=ON", "-DOPALX_USE_INSTALLED_H5HUT=ON", "-DOPALX_USE_INSTALLED_GTEST=ON"]
+build_jobs = 8
+mpi_ranks = 1
+
+[arch_configs.env]
+style = "modules"
+lmod_init = "/usr/share/lmod/lmod/init/profile"
+module_loads = ["opalx/1.2"]
+
+[[arch_configs]]
+arch = "cuda-daint"
+cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=CUDA", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DARCH=HOPPER90", "-DHeffte_VERSION=git.v2.4.1", "-DCMAKE_TEST_LAUNCHER=\"srun;-n;1;--overlap\"", "-DKokkos_VERSION=git.4.7.01"]
+build_jobs = 16
+mpi_ranks = 1
+slurm_args = ["--nodes=1", "--ntasks-per-node=1", "--gpus=1", "--time=00:30:00", "--partition=debug", "--cpus-per-task=16", "--gpus-per-task=1", "--account=c41"]
+# No [arch_configs.env] — environment activation is defined in the "daint-gh200" Connection
+# (Settings → Connections), using uenv style.

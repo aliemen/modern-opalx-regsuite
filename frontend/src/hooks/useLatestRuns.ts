@@ -17,6 +17,8 @@ export interface LatestRunCell {
 interface UseLatestRunsResult {
   cells: LatestRunCell[];
   branches: Record<string, string[]>;
+  /** Total run count per arch for a given branch, keyed as `${branch}/${arch}`. */
+  runCounts: Map<string, number>;
   isLoading: boolean;
 }
 
@@ -64,19 +66,26 @@ export function useLatestRuns(
       queryKey: ["runs", branch, arch, view, triggeredBy] as const,
       queryFn: () => getRuns(branch, arch, 1, 0, view, triggeredBy),
       refetchInterval: 30_000,
-      select: (data: { runs: RunIndexEntry[]; total: number }) =>
-        data.runs[0] as RunIndexEntry | undefined,
     })),
   });
 
   const cells: LatestRunCell[] = tuples.map((t, i) => ({
     branch: t.branch,
     arch: t.arch,
-    run: runQueries[i]?.data,
+    run: runQueries[i]?.data?.runs[0],
   }));
+
+  const runCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    tuples.forEach((t, i) => {
+      const total = runQueries[i]?.data?.total ?? 0;
+      map.set(`${t.branch}/${t.arch}`, total);
+    });
+    return map;
+  }, [tuples, runQueries]);
 
   const isLoading =
     branchesQuery.isLoading || runQueries.some((q) => q.isLoading);
 
-  return { cells, branches, isLoading };
+  return { cells, branches, runCounts, isLoading };
 }

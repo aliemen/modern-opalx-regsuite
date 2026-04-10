@@ -21,7 +21,7 @@ import type { Group } from "../lib/grouping";
 const PROTECTED_BRANCH = "master";
 
 export function DashboardPage() {
-  const { cells, branches, isLoading } = useLatestRuns("active");
+  const { cells, branches, runCounts, isLoading } = useLatestRuns("active");
 
   const { data: queueState } = useQuery({
     queryKey: ["queue-state"],
@@ -53,7 +53,9 @@ export function DashboardPage() {
     return <div className="p-8 text-muted">Loading…</div>;
   }
 
-  const masterArchs = branches?.["master"] ?? [];
+  const masterArchs = [...(branches?.["master"] ?? [])].sort(
+    (a, b) => (runCounts.get(`master/${b}`) ?? 0) - (runCounts.get(`master/${a}`) ?? 0)
+  );
 
   // Active/queued counts from queue state.
   const machines = queueState?.machines ?? [];

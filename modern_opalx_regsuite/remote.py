@@ -390,7 +390,11 @@ class RemoteExecutor:
     def _connect_through_control_socket(self) -> Connection:
         """Create a target connection routed through the ControlMaster socket."""
         proxy_cmd = (
-            f"ssh -o ControlPath={shlex.quote(self._control_path)}"
+            f"ssh"
+            f" -o ControlMaster=auto"
+            f" -o ControlPath={shlex.quote(self._control_path)}"
+            f" -o BatchMode=yes"
+            f" -o StrictHostKeyChecking=accept-new"
             f" -p {self._gateway.port}"
             f" -W {self._host}:{self._port}"
             f" {self._gateway.user}@{self._gateway.host}"

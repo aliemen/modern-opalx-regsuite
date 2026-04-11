@@ -12,8 +12,9 @@ Robustness features:
   restart the server.
 - Slurm allocation timeout: prevents ``salloc`` from waiting forever for
   resources.
-- Interactive gateway auth: supports keyboard-interactive (password + 2FA)
-  authentication for SSH hop gateways like ``hopx.psi.ch``.
+- Interactive gateway auth: supports hop gateways like ``hopx.psi.ch`` that
+  require password + 2FA via SSH ControlMaster multiplexing.  Uses the system
+  ``ssh(1)`` binary with ``SSH_ASKPASS`` for credential handling.
 
 Sensitive-data rule: every line written to ``log_path`` or ``pipeline_log_path``
 under ``data_root`` uses ``self._connection_name`` as the identifier — never
@@ -23,10 +24,14 @@ the underlying SSH host, user, key, or work_dir.  Gateway credentials
 from __future__ import annotations
 
 import io
+import os
 import re
 import shlex
 import socket
+import subprocess
+import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -101,59 +106,32 @@ def _connect_kwargs(key_path: Path) -> dict:
     }
 
 
-# ── Interactive gateway authentication ───────────────────────────────────────
+# ── Interactive gateway helpers (SSH ControlMaster + ASKPASS) ─────────────────
 
 
-def _open_interactive_gateway(
-    host: str,
-    port: int,
-    username: str,
-    password: str,
-    otp: str,
-    keepalive_interval: int = 30,
-) -> paramiko.Transport:
-    """Establish an SSH transport via keyboard-interactive auth (password + 2FA).
+def _write_askpass_script() -> str:
+    """Create a temporary ``SSH_ASKPASS`` helper script.
 
-    Used for hop gateways (e.g. ``hopx.psi.ch``) that require a password
-    followed by a one-time 2FA code.  The transport is returned with keepalive
-    enabled; the caller opens a ``direct-tcpip`` channel through it to reach
-    the final target.
-
-    Credentials are consumed immediately during the handshake and never stored
-    beyond this call.  OTPs are single-use, so reconnection after a transport
-    failure is not possible — the caller should treat this as a fatal error.
+    The script itself contains **no credentials** — it reads them from
+    environment variables ``_HOPX_PW`` and ``_HOPX_OTP`` that only exist in
+    the child SSH process's environment.  The file is placed in ``/dev/shm``
+    (memory-backed tmpfs on Linux) when available to avoid touching physical
+    storage.
     """
-    sock = socket.create_connection((host, port), timeout=30)
-    transport = paramiko.Transport(sock)
-    transport.banner_timeout = 60
-    transport.start_client()
-
-    if keepalive_interval > 0:
-        transport.set_keepalive(keepalive_interval)
-
-    # Send a "none" auth request first.  This always fails, but is required
-    # by servers like hopx.psi.ch to initialize the PAM module and advertise
-    # allowed auth methods before keyboard-interactive can proceed.  OpenSSH's
-    # client does this automatically; raw Paramiko Transport does not.
+    tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else tempfile.gettempdir()
+    fd, path = tempfile.mkstemp(prefix=".opalx_askpass_", dir=tmpdir, suffix=".sh")
     try:
-        transport.auth_none(username)
-    except paramiko.BadAuthenticationType:
-        pass  # Expected — server returns the list of allowed methods.
-    except paramiko.AuthenticationException:
-        pass  # Also acceptable for servers that reject "none" generically.
-
-    # Build response list for keyboard-interactive prompts.
-    # Servers may send prompts individually or bundled; the iterator handles
-    # both cases — one response per prompt, in order.
-    responses = [password, otp]
-    response_iter = iter(responses)
-
-    def _kbd_interactive_handler(_title, _instructions, prompt_list):
-        """Return one credential per prompt in order: password, then OTP."""
-        return [next(response_iter, "") for _ in prompt_list]
-
-    transport.auth_interactive(username, _kbd_interactive_handler)
-    return transport
+        os.write(fd, (
+            b"#!/bin/sh\n"
+            b'case "$1" in\n'
+            b'  *[Pp]assword*) printf \'%s\\n\' "$_HOPX_PW";;\n'
+            b'  *) printf \'%s\\n\' "$_HOPX_OTP";;\n'
+            b"esac\n"
+        ))
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o700)
+    return path
 
 
 # ── Tee writer for dual-stream logging ───────────────────────────────────────
@@ -248,6 +226,10 @@ class RemoteExecutor:
         self._gateway_conn: Optional[Connection] = None
         self._gateway_transport: Optional[paramiko.Transport] = None
         self._allocation_id: Optional[str] = None
+        # SSH ControlMaster state for interactive gateways.
+        self._gateway_process: Optional[subprocess.Popen] = None
+        self._control_path: Optional[str] = None
+        self._askpass_path: Optional[str] = None
 
     # ── Connection management ────────────────────────────────────────────
 
@@ -296,32 +278,124 @@ class RemoteExecutor:
         return conn
 
     def _open_via_interactive_gateway(self) -> Connection:
-        """Open a connection through a keyboard-interactive (password+2FA) gateway.
+        """Open a connection through an interactive (password+2FA) gateway.
 
-        The gateway transport is established via ``_open_interactive_gateway``
-        using the in-memory password and OTP.  A ``direct-tcpip`` channel is
-        opened through it to tunnel to the target, which is then authenticated
-        via the regular SSH key.
+        Uses the system ``ssh(1)`` binary to establish a ``ControlMaster``
+        session to the gateway with keyboard-interactive authentication
+        handled via ``SSH_ASKPASS``.  Subsequent target connections tunnel
+        through the control socket using ``ssh -W`` as a ``ProxyCommand`` —
+        exactly how PSI's hopx.psi.ch architecture works.
 
-        OTPs are single-use, so this connection cannot be auto-reconnected if
-        the transport drops.
+        This approach uses SSH multiplexing, which is required by gateways
+        like hopx.psi.ch where a persistent "setup connection" must stay
+        open for forwarding to work.
+
+        The ControlMaster session stays alive for the duration of the run.
+        If the target connection drops but the gateway is still alive,
+        reconnection through the existing control socket is possible
+        without re-authenticating.
         """
-        self._gateway_transport = _open_interactive_gateway(
-            host=self._gateway.host,
-            port=self._gateway.port,
-            username=self._gateway.user,
-            password=self._gateway_password or "",
-            otp=self._gateway_otp or "",
-            keepalive_interval=self._keepalive_interval,
+        # If we already have a live control master, just create a new proxy.
+        if self._is_gateway_alive():
+            self._log(
+                f"[{self._connection_name}] Reusing existing gateway session"
+            )
+            return self._connect_through_control_socket()
+
+        # ── Establish a new ControlMaster session ────────────────────────
+
+        # Create ASKPASS script (contains NO credentials — reads from env).
+        self._askpass_path = _write_askpass_script()
+
+        # Control socket in memory-backed tmpfs when available.
+        tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else tempfile.gettempdir()
+        self._control_path = tempfile.mktemp(
+            prefix=".opalx_ctl_", dir=tmpdir
         )
-        # Tunnel to the target via direct-tcpip channel through the gateway.
-        gw_channel = self._gateway_transport.open_channel(
-            "direct-tcpip",
-            (self._host, self._port),
-            ("127.0.0.1", 0),
+
+        # Environment for the SSH subprocess — credentials live here only.
+        gw_env = os.environ.copy()
+        gw_env["SSH_ASKPASS"] = self._askpass_path
+        gw_env["SSH_ASKPASS_REQUIRE"] = "force"
+        gw_env["_HOPX_PW"] = self._gateway_password or ""
+        gw_env["_HOPX_OTP"] = self._gateway_otp or ""
+        gw_env.setdefault("DISPLAY", ":0")
+
+        ssh_cmd = [
+            "ssh", "-N",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ControlMaster=auto",
+            "-o", f"ControlPath={self._control_path}",
+            "-o", "PreferredAuthentications=keyboard-interactive",
+            "-o", "NumberOfPasswordPrompts=1",
+            "-p", str(self._gateway.port),
+            f"{self._gateway.user}@{self._gateway.host}",
+        ]
+
+        self._gateway_process = subprocess.Popen(
+            ssh_cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=gw_env,
+            preexec_fn=os.setsid,
         )
+
+        # Wait for the control socket to appear (= successful auth).
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            if os.path.exists(self._control_path):
+                break
+            if self._gateway_process.poll() is not None:
+                stderr = self._gateway_process.stderr.read().decode(
+                    "utf-8", errors="replace"
+                )
+                self._cleanup_gateway_files()
+                raise RuntimeError(
+                    f"SSH gateway authentication to {self._gateway.host} "
+                    f"failed: {stderr.strip() or 'unknown error'}"
+                )
+            time.sleep(0.5)
+        else:
+            self._gateway_process.kill()
+            self._cleanup_gateway_files()
+            raise RuntimeError(
+                f"Timed out (60s) waiting for SSH gateway "
+                f"{self._gateway.host} to authenticate"
+            )
+
+        # ASKPASS script is no longer needed after auth.
+        if self._askpass_path and os.path.exists(self._askpass_path):
+            os.unlink(self._askpass_path)
+            self._askpass_path = None
+
+        self._log(
+            f"[{self._connection_name}] SSH gateway to "
+            f"{self._gateway.host} established (ControlMaster)"
+        )
+
+        return self._connect_through_control_socket()
+
+    def _is_gateway_alive(self) -> bool:
+        """Check if the SSH ControlMaster gateway process is still running."""
+        return (
+            self._gateway_process is not None
+            and self._gateway_process.poll() is None
+            and self._control_path is not None
+            and os.path.exists(self._control_path)
+        )
+
+    def _connect_through_control_socket(self) -> Connection:
+        """Create a target connection routed through the ControlMaster socket."""
+        proxy_cmd = (
+            f"ssh -o ControlPath={shlex.quote(self._control_path)}"
+            f" -p {self._gateway.port}"
+            f" -W {self._host}:{self._port}"
+            f" {self._gateway.user}@{self._gateway.host}"
+        )
+        proxy = paramiko.ProxyCommand(proxy_cmd)
         ckw = _connect_kwargs(self._key_path)
-        ckw["sock"] = gw_channel
+        ckw["sock"] = proxy
         conn = Connection(
             host=self._host,
             user=self._user,
@@ -331,6 +405,17 @@ class RemoteExecutor:
         conn.open()
         self._apply_keepalive(conn)
         return conn
+
+    def _cleanup_gateway_files(self) -> None:
+        """Remove temporary gateway files (askpass script, control socket)."""
+        for attr in ("_askpass_path", "_control_path"):
+            path = getattr(self, attr, None)
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            setattr(self, attr, None)
 
     def _apply_keepalive(self, conn: Connection) -> None:
         """Enable SSH keepalive on a connection's transport."""
@@ -343,9 +428,13 @@ class RemoteExecutor:
 
         Checks transport health on every access; reconnects if the transport
         has gone stale (e.g. after a network interruption detected by
-        keepalive).  Interactive-gateway connections cannot be auto-reconnected
-        because OTPs are single-use — a stale interactive transport raises
-        ``RuntimeError``.
+        keepalive).
+
+        For interactive gateways using ControlMaster: if the target connection
+        drops but the gateway process is still alive, the target connection is
+        re-established through the existing control socket without needing a
+        fresh OTP.  If the gateway process itself has died, a ``RuntimeError``
+        is raised.
         """
         if self._conn is not None:
             transport = self._conn.transport
@@ -359,19 +448,32 @@ class RemoteExecutor:
                 self._gateway is not None
                 and self._gateway.auth_method == "interactive"
             ):
-                self._close_connections()
-                raise RuntimeError(
-                    f"SSH connection to [{self._connection_name}] dropped and "
-                    "cannot be re-established because the gateway uses "
-                    "single-use 2FA credentials.  Please re-trigger the run."
+                if not self._is_gateway_alive():
+                    self._close_connections()
+                    raise RuntimeError(
+                        f"SSH gateway to {self._gateway.host} has terminated. "
+                        "Cannot reconnect — please re-trigger the run with "
+                        "a fresh OTP."
+                    )
+                # Gateway is alive — reconnect through existing control socket.
+                self._log(
+                    f"[{self._connection_name}] Reconnecting through "
+                    "existing gateway"
                 )
-            self._close_connections()
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+                # Fall through to _open_connection which reuses the socket.
+            else:
+                self._close_connections()
 
         self._conn = self._open_connection()
         return self._conn
 
     def _close_connections(self) -> None:
-        """Close SSH connections and transports (without Slurm cleanup)."""
+        """Close SSH connections, transports, and gateway processes."""
         if self._conn is not None:
             try:
                 self._conn.close()
@@ -390,6 +492,29 @@ class RemoteExecutor:
             except Exception:
                 pass
             self._gateway_transport = None
+        # Shut down SSH ControlMaster for interactive gateways.
+        if self._gateway_process is not None:
+            if self._control_path:
+                try:
+                    subprocess.run(
+                        ["ssh",
+                         "-o", f"ControlPath={self._control_path}",
+                         "-O", "exit",
+                         f"{self._gateway.user}@{self._gateway.host}"],
+                        capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
+            try:
+                self._gateway_process.terminate()
+                self._gateway_process.wait(timeout=5)
+            except Exception:
+                try:
+                    self._gateway_process.kill()
+                except Exception:
+                    pass
+            self._gateway_process = None
+        self._cleanup_gateway_files()
 
     def close(self) -> None:
         """Cancel any active Slurm allocation, then close SSH connections."""

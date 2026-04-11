@@ -3,6 +3,8 @@ import { api } from "./client";
 export type EnvActivationStyle = "none" | "modules" | "prologue" | "uenv";
 export const ENV_STYLES: EnvActivationStyle[] = ["none", "modules", "prologue", "uenv"];
 
+export type GatewayAuthMethod = "key" | "interactive";
+
 export interface EnvActivation {
   style: EnvActivationStyle;
   lmod_init?: string;
@@ -15,7 +17,8 @@ export interface GatewayEndpoint {
   host: string;
   user: string;
   port: number;
-  key_name: string;
+  key_name: string | null;
+  auth_method: GatewayAuthMethod;
 }
 
 export interface Connection {
@@ -28,6 +31,7 @@ export interface Connection {
   gateway?: GatewayEndpoint | null;
   work_dir: string;
   cleanup_after_run: boolean;
+  keepalive_interval: number;
   env: EnvActivation;
 }
 
@@ -35,6 +39,11 @@ export interface ConnectionTestResult {
   ok: boolean;
   whoami?: string | null;
   error?: string | null;
+}
+
+export interface ConnectionTestCredentials {
+  gateway_password?: string;
+  gateway_otp?: string;
 }
 
 export async function listConnections(): Promise<Connection[]> {
@@ -64,9 +73,13 @@ export async function deleteConnection(name: string): Promise<void> {
   await api.delete(`/api/settings/connections/${encodeURIComponent(name)}`);
 }
 
-export async function testConnection(name: string): Promise<ConnectionTestResult> {
+export async function testConnection(
+  name: string,
+  credentials?: ConnectionTestCredentials,
+): Promise<ConnectionTestResult> {
   const res = await api.post<ConnectionTestResult>(
     `/api/settings/connections/${encodeURIComponent(name)}/test`,
+    credentials ?? undefined,
   );
   return res.data;
 }

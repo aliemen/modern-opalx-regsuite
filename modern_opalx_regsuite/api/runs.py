@@ -245,6 +245,22 @@ async def trigger_run(
         )
         return TriggerResponse(run_id=run_id)
     else:
+        # Interactive gateways cannot be queued — OTPs are single-use and
+        # will expire before the queued run starts.
+        if (
+            connection is not None
+            and connection.gateway is not None
+            and connection.gateway.auth_method == "interactive"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This machine is currently busy and the connection uses an "
+                    "interactive gateway with single-use 2FA credentials. "
+                    "Queuing is not possible — the OTP would expire before the "
+                    "run starts. Please try again when the machine is free."
+                ),
+            )
         # Machine is busy — enqueue.
         queued = QueuedRun(
             queue_id=str(uuid.uuid4()),

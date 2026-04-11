@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Play, Info } from "lucide-react";
+import { RefreshCw, Play, Info, ShieldAlert } from "lucide-react";
 import {
   getArchConfigs,
   getOpalxBranches,
   getRegtestsBranches,
   triggerRun,
+  type TriggerRequest,
 } from "../api/runs";
 import { listConnections, LOCAL_CONNECTION } from "../api/connections";
 
@@ -21,6 +22,10 @@ export function TriggerPage() {
   const [skipRegression, setSkipRegression] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [queuedInfo, setQueuedInfo] = useState<{ runId: string; position: number } | null>(null);
+
+  // Interactive gateway credentials (held in state only, never persisted).
+  const [gatewayPassword, setGatewayPassword] = useState("");
+  const [gatewayOtp, setGatewayOtp] = useState("");
 
   const {
     data: opalxBranches,
@@ -46,18 +51,46 @@ export function TriggerPage() {
     queryFn: listConnections,
   });
 
+  // Detect if the selected connection uses an interactive gateway.
+  const selectedConnection =
+    connections?.find((c) => c.name === connectionName) ?? null;
+  const needsInteractiveCredentials =
+    selectedConnection !== null &&
+    selectedConnection.gateway != null &&
+    selectedConnection.gateway.auth_method === "interactive";
+
   async function handleStart() {
     setError(null);
     setQueuedInfo(null);
+
+    if (needsInteractiveCredentials) {
+      if (!gatewayPassword.trim()) {
+        setError("Gateway password is required.");
+        return;
+      }
+      if (!gatewayOtp.trim()) {
+        setError("Microsoft Authenticator OTP is required.");
+        return;
+      }
+    }
+
     try {
-      const res = await triggerRun({
+      const body: TriggerRequest = {
         branch: opalxBranch,
         arch,
         regtests_branch: regtestsBranch,
         skip_unit: skipUnit,
         skip_regression: skipRegression,
         connection_name: connectionName,
-      });
+      };
+      if (needsInteractiveCredentials) {
+        body.gateway_password = gatewayPassword;
+        body.gateway_otp = gatewayOtp;
+      }
+      const res = await triggerRun(body);
+      // Clear credentials from memory immediately after sending.
+      setGatewayPassword("");
+      setGatewayOtp("");
       if (res.queued) {
         setQueuedInfo({ runId: res.run_id, position: res.position ?? 1 });
       } else {
@@ -68,6 +101,9 @@ export function TriggerPage() {
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
         "Failed to start run.";
       setError(msg);
+      // Clear OTP on failure (it may have been consumed or expired),
+      // but keep the password so the user can re-enter just a new OTP.
+      setGatewayOtp("");
     }
   }
 
@@ -146,7 +182,12 @@ export function TriggerPage() {
           <label className="block text-sm text-muted mb-1">Connection</label>
           <select
             value={connectionName}
-            onChange={(e) => setConnectionName(e.target.value)}
+            onChange={(e) => {
+              setConnectionName(e.target.value);
+              // Clear gateway credentials when switching connections.
+              setGatewayPassword("");
+              setGatewayOtp("");
+            }}
             className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
             disabled={loadingConnections}
           >
@@ -162,6 +203,57 @@ export function TriggerPage() {
             Manage connections in <span className="text-fg">Settings</span>.
           </p>
         </div>
+
+        {/* Interactive gateway credentials */}
+        {needsInteractiveCredentials && (
+          <div className="border border-border rounded-md p-4 flex flex-col gap-3 bg-bg">
+            <div className="flex items-start gap-2 text-sm text-muted">
+              <ShieldAlert size={16} className="mt-0.5 shrink-0 text-accent" />
+              <p className="text-xs">
+                This connection uses an interactive SSH gateway
+                ({selectedConnection!.gateway!.host}). Enter your password and
+                Microsoft Authenticator OTP code below. Credentials are used for
+                this run only and are never stored.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-muted mb-1">
+                  Gateway password
+                </label>
+                <input
+                  type="password"
+                  value={gatewayPassword}
+                  onChange={(e) => setGatewayPassword(e.target.value)}
+                  placeholder="PSI password"
+                  className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">
+                  Authenticator OTP
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={gatewayOtp}
+                  onChange={(e) => setGatewayOtp(e.target.value)}
+                  placeholder="6-digit code"
+                  className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted">
+              Use the OTP code from Microsoft Authenticator (not the push
+              notification). The code is time-limited — enter it just before
+              clicking Start Run. If the target machine is busy, the run cannot
+              be queued (the OTP would expire).
+            </p>
+          </div>
+        )}
 
         {/* Options */}
         <div className="flex gap-6">

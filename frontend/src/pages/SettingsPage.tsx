@@ -9,6 +9,7 @@ import {
   testConnection,
   type Connection,
   type ConnectionTestResult,
+  type ConnectionTestCredentials,
 } from "../api/connections";
 import { ConnectionForm } from "../components/ConnectionForm";
 
@@ -29,6 +30,11 @@ export function SettingsPage() {
   const [editing, setEditing] = useState<Connection | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
+
+  // Interactive gateway test: which connection is requesting credentials.
+  const [testCredsFor, setTestCredsFor] = useState<string | null>(null);
+  const [testPassword, setTestPassword] = useState("");
+  const [testOtp, setTestOtp] = useState("");
 
   const { data: keys, isLoading: keysLoading } = useQuery<SshKeyInfo[]>({
     queryKey: ["ssh-keys"],
@@ -124,11 +130,20 @@ export function SettingsPage() {
   });
 
   const testConnMut = useMutation({
-    mutationFn: testConnection,
-    onSuccess: (data, name) => {
+    mutationFn: ({
+      name,
+      credentials,
+    }: {
+      name: string;
+      credentials?: ConnectionTestCredentials;
+    }) => testConnection(name, credentials),
+    onSuccess: (data, { name }) => {
       setTestResults((prev) => ({ ...prev, [name]: data }));
+      setTestCredsFor(null);
+      setTestPassword("");
+      setTestOtp("");
     },
-    onError: (e: unknown, name) => {
+    onError: (e: unknown, { name }) => {
       const detail = (e as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail;
       setTestResults((prev) => ({
@@ -138,6 +153,9 @@ export function SettingsPage() {
           error: typeof detail === "string" ? detail : "Test failed.",
         },
       }));
+      setTestCredsFor(null);
+      setTestPassword("");
+      setTestOtp("");
     },
   });
 
@@ -395,6 +413,8 @@ export function SettingsPage() {
             <tbody>
               {connections.map((c) => {
                 const result = testResults[c.name];
+                const isInteractiveGateway =
+                  c.gateway != null && c.gateway.auth_method === "interactive";
                 return (
                   <tr
                     key={c.name}
@@ -421,6 +441,65 @@ export function SettingsPage() {
                           {result.error}
                         </div>
                       )}
+
+                      {/* Inline credential form for testing interactive gateways */}
+                      {testCredsFor === c.name && (
+                        <div className="mt-2 p-3 bg-bg border border-border rounded-md flex flex-col gap-2 font-sans">
+                          <p className="text-xs text-muted">
+                            Enter gateway credentials for{" "}
+                            <span className="text-fg">{c.gateway?.host}</span>{" "}
+                            to test the connection. Used once and discarded.
+                          </p>
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              placeholder="Gateway password"
+                              value={testPassword}
+                              onChange={(e) => setTestPassword(e.target.value)}
+                              className="flex-1 bg-bg border border-border rounded-md px-2 py-1.5 text-fg text-xs focus:outline-none focus:border-accent"
+                              autoComplete="off"
+                            />
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="OTP code"
+                              value={testOtp}
+                              onChange={(e) => setTestOtp(e.target.value)}
+                              className="w-24 bg-bg border border-border rounded-md px-2 py-1.5 text-fg text-xs focus:outline-none focus:border-accent"
+                              autoComplete="off"
+                            />
+                            <button
+                              onClick={() => {
+                                testConnMut.mutate({
+                                  name: c.name,
+                                  credentials: {
+                                    gateway_password: testPassword,
+                                    gateway_otp: testOtp,
+                                  },
+                                });
+                              }}
+                              disabled={
+                                testConnMut.isPending ||
+                                !testPassword ||
+                                !testOtp
+                              }
+                              className="bg-accent text-bg text-xs font-medium rounded-md px-3 py-1.5 hover:brightness-110 transition disabled:opacity-50"
+                            >
+                              {testConnMut.isPending ? "Testing..." : "Test"}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setTestCredsFor(null);
+                                setTestPassword("");
+                                setTestOtp("");
+                              }}
+                              className="text-muted hover:text-fg transition p-1"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 text-muted font-mono text-xs">
                       {c.user}@{c.host}
@@ -428,14 +507,24 @@ export function SettingsPage() {
                     </td>
                     <td className="py-2.5 text-muted font-mono text-xs">
                       {c.gateway
-                        ? `${c.gateway.user}@${c.gateway.host}`
-                        : "—"}
+                        ? `${c.gateway.user}@${c.gateway.host}${
+                            isInteractiveGateway ? " (2FA)" : ""
+                          }`
+                        : "\u2014"}
                     </td>
                     <td className="py-2.5 text-muted text-xs">{c.env.style}</td>
                     <td className="py-2.5">
                       <div className="flex gap-1 justify-end">
                         <button
-                          onClick={() => testConnMut.mutate(c.name)}
+                          onClick={() => {
+                            if (isInteractiveGateway) {
+                              setTestCredsFor(c.name);
+                              setTestPassword("");
+                              setTestOtp("");
+                            } else {
+                              testConnMut.mutate({ name: c.name });
+                            }
+                          }}
                           disabled={testConnMut.isPending}
                           className="text-muted hover:text-accent transition p-1"
                           title="Test connection"

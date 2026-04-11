@@ -22,6 +22,9 @@ export interface TriggerRequest {
    * local execution. Connections are managed in Settings.
    */
   connection_name?: string | null;
+  /** Interactive gateway credentials -- never persisted, used once. */
+  gateway_password?: string;
+  gateway_otp?: string;
 }
 
 export interface TriggerResponse {

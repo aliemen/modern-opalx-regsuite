@@ -7,6 +7,7 @@ import {
   createConnection,
   updateConnection,
   type Connection,
+  type GatewayEndpoint,
   type EnvActivationStyle,
   ENV_STYLES,
 } from "../api/connections";
@@ -16,6 +17,14 @@ interface Props {
   onCancel: () => void;
   onSaved: () => void;
 }
+
+const EMPTY_GATEWAY: GatewayEndpoint = {
+  host: "",
+  user: "",
+  port: 22,
+  key_name: null,
+  auth_method: "key",
+};
 
 const EMPTY_CONNECTION: Connection = {
   name: "",
@@ -27,6 +36,7 @@ const EMPTY_CONNECTION: Connection = {
   gateway: null,
   work_dir: "/tmp/opalx-regsuite",
   cleanup_after_run: false,
+  keepalive_interval: 30,
   env: { style: "none", module_use_paths: [], module_loads: [] },
 };
 
@@ -77,8 +87,12 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
       return;
     }
     if (useGateway) {
-      if (!form.gateway?.host || !form.gateway?.user || !form.gateway?.key_name) {
-        setError("Gateway host, user, and SSH key are required.");
+      if (!form.gateway?.host || !form.gateway?.user) {
+        setError("Gateway host and user are required.");
+        return;
+      }
+      if (form.gateway.auth_method === "key" && !form.gateway.key_name) {
+        setError("Gateway SSH key is required for key-based authentication.");
         return;
       }
     }
@@ -200,82 +214,144 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
               const enabled = e.target.checked;
               setUseGateway(enabled);
               if (enabled && !form.gateway) {
-                setForm({
-                  ...form,
-                  gateway: { host: "", user: "", port: 22, key_name: "" },
-                });
+                setForm({ ...form, gateway: { ...EMPTY_GATEWAY } });
               }
             }}
             className="accent-accent"
           />
-          Use ProxyJump (SSH gateway)
+          Use SSH gateway (ProxyJump / hop)
         </label>
 
         {useGateway && form.gateway && (
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            <div className="col-span-2">
-              <label className="block text-xs text-muted mb-1">Gateway host</label>
-              <input
-                type="text"
-                placeholder="ela.cscs.ch"
-                value={form.gateway.host}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    gateway: { ...form.gateway!, host: e.target.value },
-                  })
-                }
-                className={inputCls}
-              />
+          <div className="mt-3 flex flex-col gap-3">
+            {/* Gateway auth method */}
+            <div className="flex gap-4">
+              <label className="flex items-center gap-1.5 text-sm text-muted cursor-pointer">
+                <input
+                  type="radio"
+                  name="gw-auth"
+                  checked={form.gateway.auth_method === "key"}
+                  onChange={() =>
+                    setForm({
+                      ...form,
+                      gateway: {
+                        ...form.gateway!,
+                        auth_method: "key",
+                        key_name: form.gateway!.key_name ?? "",
+                      },
+                    })
+                  }
+                  className="accent-accent"
+                />
+                SSH key
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-muted cursor-pointer">
+                <input
+                  type="radio"
+                  name="gw-auth"
+                  checked={form.gateway.auth_method === "interactive"}
+                  onChange={() =>
+                    setForm({
+                      ...form,
+                      gateway: {
+                        ...form.gateway!,
+                        auth_method: "interactive",
+                        key_name: null,
+                      },
+                    })
+                  }
+                  className="accent-accent"
+                />
+                Password + 2FA (keyboard-interactive)
+              </label>
             </div>
-            <div>
-              <label className="block text-xs text-muted mb-1">Gateway port</label>
-              <input
-                type="number"
-                value={form.gateway.port}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    gateway: {
-                      ...form.gateway!,
-                      port: Number(e.target.value) || 22,
-                    },
-                  })
-                }
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-muted mb-1">Gateway user</label>
-              <input
-                type="text"
-                value={form.gateway.user}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    gateway: { ...form.gateway!, user: e.target.value },
-                  })
-                }
-                className={inputCls}
-              />
-            </div>
-            <div className="col-span-2">
-              <label className="block text-xs text-muted mb-1">Gateway SSH key</label>
-              <select
-                value={form.gateway.key_name}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    gateway: { ...form.gateway!, key_name: e.target.value },
-                  })
-                }
-                className={inputCls}
-              >
-                <option value="">— select a key —</option>
-                {keyOptions.map((k) => (
-                  <option key={k.name}>{k.name}</option>
-                ))}
-              </select>
+
+            {/* Gateway host / port / user */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs text-muted mb-1">Gateway host</label>
+                <input
+                  type="text"
+                  placeholder={
+                    form.gateway.auth_method === "interactive"
+                      ? "hopx.psi.ch"
+                      : "ela.cscs.ch"
+                  }
+                  value={form.gateway.host}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      gateway: { ...form.gateway!, host: e.target.value },
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">Gateway port</label>
+                <input
+                  type="number"
+                  value={form.gateway.port}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      gateway: {
+                        ...form.gateway!,
+                        port: Number(e.target.value) || 22,
+                      },
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">Gateway user</label>
+                <input
+                  type="text"
+                  value={form.gateway.user}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      gateway: { ...form.gateway!, user: e.target.value },
+                    })
+                  }
+                  className={inputCls}
+                />
+              </div>
+
+              {/* Gateway SSH key (key auth only) */}
+              {form.gateway.auth_method === "key" ? (
+                <div className="col-span-2">
+                  <label className="block text-xs text-muted mb-1">
+                    Gateway SSH key
+                  </label>
+                  <select
+                    value={form.gateway.key_name ?? ""}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        gateway: { ...form.gateway!, key_name: e.target.value },
+                      })
+                    }
+                    className={inputCls}
+                  >
+                    <option value="">— select a key —</option>
+                    {keyOptions.map((k) => (
+                      <option key={k.name}>{k.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="col-span-2">
+                  <p className="text-muted text-xs bg-bg border border-border rounded-md px-3 py-2">
+                    This gateway uses keyboard-interactive authentication (e.g.
+                    hopx.psi.ch with Microsoft MFA). You will be prompted for
+                    your password and authenticator OTP code each time you
+                    trigger a run or test the connection. Credentials are used
+                    once and never stored.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

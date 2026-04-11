@@ -131,6 +131,17 @@ def _open_interactive_gateway(
     if keepalive_interval > 0:
         transport.set_keepalive(keepalive_interval)
 
+    # Send a "none" auth request first.  This always fails, but is required
+    # by servers like hopx.psi.ch to initialize the PAM module and advertise
+    # allowed auth methods before keyboard-interactive can proceed.  OpenSSH's
+    # client does this automatically; raw Paramiko Transport does not.
+    try:
+        transport.auth_none(username)
+    except paramiko.BadAuthenticationType:
+        pass  # Expected — server returns the list of allowed methods.
+    except paramiko.AuthenticationException:
+        pass  # Also acceptable for servers that reject "none" generically.
+
     # Build response list for keyboard-interactive prompts.
     # Servers may send prompts individually or bundled; the iterator handles
     # both cases — one response per prompt, in order.

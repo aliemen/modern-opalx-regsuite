@@ -13,9 +13,10 @@ Robustness features:
 - Slurm allocation timeout: prevents ``salloc`` from waiting forever for
   resources.
 - Interactive gateway auth: supports hop gateways like ``hopx.psi.ch`` that
-  require password + 2FA via SSH ControlMaster multiplexing.  Uses the system
-  ``ssh(1)`` binary driven by ``pexpect`` to interact with keyboard-interactive
-  prompts via a PTY (reliable across platforms; avoids SSH_ASKPASS limitations).
+  require password + 2FA.  Uses a Paramiko Transport directly to authenticate
+  via keyboard-interactive (password + TOTP/OTP), then opens a
+  ``direct-tcpip`` channel to the target host — no system ``ssh`` binary,
+  no ControlMaster socket, no ProxyCommand subprocess needed.
 
 Sensitive-data rule: every line written to ``log_path`` or ``pipeline_log_path``
 under ``data_root`` uses ``self._connection_name`` as the identifier — never
@@ -25,19 +26,15 @@ the underlying SSH host, user, key, or work_dir.  Gateway credentials
 from __future__ import annotations
 
 import io
-import os
 import re
 import shlex
 import socket
-import subprocess
-import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import paramiko
-import pexpect
 from fabric import Connection
 
 if TYPE_CHECKING:
@@ -200,9 +197,6 @@ class RemoteExecutor:
         self._gateway_conn: Optional[Connection] = None
         self._gateway_transport: Optional[paramiko.Transport] = None
         self._allocation_id: Optional[str] = None
-        # SSH ControlMaster state for interactive gateways (pexpect child).
-        self._gateway_process: Optional[pexpect.spawn] = None
-        self._control_path: Optional[str] = None
 
     # ── Connection management ────────────────────────────────────────────
 
@@ -253,155 +247,74 @@ class RemoteExecutor:
     def _open_via_interactive_gateway(self) -> Connection:
         """Open a connection through an interactive (password+2FA) gateway.
 
-        Uses the system ``ssh(1)`` binary driven by ``pexpect`` via a PTY to
-        establish a ``ControlMaster`` session to the gateway.  pexpect is used
-        instead of ``SSH_ASKPASS`` because Apple's OpenSSH does not reliably
-        invoke ``SSH_ASKPASS`` for keyboard-interactive prompts.
+        Uses Paramiko's ``Transport`` directly to authenticate to the gateway
+        via keyboard-interactive (password + TOTP/OTP challenge).  Once
+        authenticated, a ``direct-tcpip`` channel is opened through the gateway
+        to the target host and a Fabric ``Connection`` is wrapped around it.
 
-        Flow:
-        1. pexpect spawns ``ssh -N -o ControlMaster=auto`` with a PTY so SSH
-           can prompt for credentials interactively.
-        2. We match the "Password:" prompt and send the gateway password.
-        3. We match the "verification code" OTP prompt and send the TOTP.
-        4. After auth the SSH process stays alive and the ControlMaster socket
-           appears on disk — this confirms successful authentication.
-        5. Subsequent target connections tunnel through the socket via
-           ``ssh -W`` (``ProxyCommand``) without re-authenticating.
-
-        The ControlMaster session stays alive for the duration of the run.
-        If the target connection drops but the gateway is still alive,
-        reconnection through the existing control socket is possible
-        without a new OTP.
+        If the gateway transport is already alive (from a previous successful
+        call), it is reused — a new channel is opened without re-authenticating
+        and without needing a fresh OTP.
         """
-        # If we already have a live control master, reuse the socket.
-        if self._is_gateway_alive():
+        if not self._is_gateway_alive():
             self._log(
-                f"[{self._connection_name}] Reusing existing gateway session"
+                f"[{self._connection_name}] Connecting to gateway "
+                f"{self._gateway.host}:{self._gateway.port}"
             )
-            return self._connect_through_control_socket()
+            sock = socket.create_connection(
+                (self._gateway.host, self._gateway.port), timeout=30
+            )
+            gw_transport = paramiko.Transport(sock)
+            gw_transport.banner_timeout = 60
+            gw_transport.auth_timeout = 60
+            gw_transport.start_client(timeout=60)
 
-        # ── Establish a new ControlMaster session ────────────────────────
+            if self._keepalive_interval > 0:
+                gw_transport.set_keepalive(self._keepalive_interval)
 
-        self._control_path = tempfile.mktemp(
-            prefix=".opalx_ctl_", dir=tempfile.gettempdir()
-        )
+            def _auth_handler(title, instructions, prompts):
+                """Match keyboard-interactive prompts to password / OTP."""
+                responses = []
+                for prompt, _echo in prompts:
+                    p = prompt.lower()
+                    if "password" in p:
+                        responses.append(self._gateway_password or "")
+                    else:
+                        # Any other prompt (verification code, OTP, token…)
+                        responses.append(self._gateway_otp or "")
+                return responses
 
-        child = pexpect.spawn(
-            "ssh",
-            [
-                "-N",
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ControlMaster=auto",
-                "-o", f"ControlPath={self._control_path}",
-                "-o", "PreferredAuthentications=keyboard-interactive",
-                "-p", str(self._gateway.port),
-                f"{self._gateway.user}@{self._gateway.host}",
-            ],
-            timeout=60,
-            encoding="utf-8",
-        )
-        self._gateway_process = child
+            gw_transport.auth_interactive(self._gateway.user, _auth_handler)
 
+            if not gw_transport.is_authenticated():
+                gw_transport.close()
+                raise RuntimeError(
+                    f"Keyboard-interactive authentication to "
+                    f"{self._gateway.host} failed — check password and OTP."
+                )
+
+            self._gateway_transport = gw_transport
+            self._log(
+                f"[{self._connection_name}] Gateway "
+                f"{self._gateway.host} authenticated"
+            )
+
+        # Open a direct-tcpip channel through the authenticated transport
         try:
-            # ── Prompt 1: password ────────────────────────────────────────
-            idx = child.expect([
-                r"[Pp]assword\s*:",
-                r"[Pp]ermission\s+[Dd]enied",
-                pexpect.EOF,
-                pexpect.TIMEOUT,
-            ])
-            if idx != 0:
-                output = (child.before or "").strip()
-                self._gateway_process = None
-                self._cleanup_gateway_files()
-                raise RuntimeError(
-                    f"SSH gateway authentication to {self._gateway.host} "
-                    f"failed: expected password prompt, got: {output!r}"
-                )
-            child.sendline(self._gateway_password or "")
-
-            # ── Prompt 2: OTP / verification code ────────────────────────
-            idx = child.expect([
-                r"[Vv]erification\s+code",
-                r"[Cc]ode\s*:",
-                r"[Pp]ermission\s+[Dd]enied",
-                pexpect.EOF,
-                pexpect.TIMEOUT,
-            ])
-            if idx >= 2:
-                output = (child.before or "").strip()
-                self._gateway_process = None
-                self._cleanup_gateway_files()
-                raise RuntimeError(
-                    f"SSH gateway authentication to {self._gateway.host} "
-                    f"failed after password: {output!r}"
-                )
-            child.sendline(self._gateway_otp or "")
-
-        except pexpect.TIMEOUT:
-            child.close(force=True)
-            self._gateway_process = None
-            self._cleanup_gateway_files()
-            raise RuntimeError(
-                f"Timed out waiting for auth prompt from {self._gateway.host}"
+            channel = self._gateway_transport.open_channel(
+                "direct-tcpip",
+                (self._host, self._port),
+                ("", 0),
+                timeout=30,
             )
-
-        # ── Wait for ControlMaster socket (= auth succeeded) ─────────────
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if os.path.exists(self._control_path):
-                break
-            if not child.isalive():
-                try:
-                    remaining = child.read_nonblocking(size=4096, timeout=0)
-                except Exception:
-                    remaining = ""
-                self._gateway_process = None
-                self._cleanup_gateway_files()
-                raise RuntimeError(
-                    f"SSH gateway to {self._gateway.host} exited after auth. "
-                    f"Output: {remaining!r}"
-                )
-            time.sleep(0.5)
-        else:
-            child.close(force=True)
-            self._gateway_process = None
-            self._cleanup_gateway_files()
+        except paramiko.SSHException as exc:
             raise RuntimeError(
-                f"Timed out (30s) waiting for SSH ControlMaster socket "
-                f"for {self._gateway.host}"
-            )
+                f"Could not open forwarding channel through "
+                f"{self._gateway.host} to {self._host}:{self._port}: {exc}"
+            ) from exc
 
-        self._log(
-            f"[{self._connection_name}] SSH gateway to "
-            f"{self._gateway.host} established (ControlMaster)"
-        )
-        return self._connect_through_control_socket()
-
-    def _is_gateway_alive(self) -> bool:
-        """Check if the SSH ControlMaster gateway process is still running."""
-        return (
-            self._gateway_process is not None
-            and self._gateway_process.isalive()
-            and self._control_path is not None
-            and os.path.exists(self._control_path)
-        )
-
-    def _connect_through_control_socket(self) -> Connection:
-        """Create a target connection routed through the ControlMaster socket."""
-        proxy_cmd = (
-            f"ssh"
-            f" -o ControlMaster=auto"
-            f" -o ControlPath={shlex.quote(self._control_path)}"
-            f" -o BatchMode=yes"
-            f" -o StrictHostKeyChecking=accept-new"
-            f" -p {self._gateway.port}"
-            f" -W {self._host}:{self._port}"
-            f" {self._gateway.user}@{self._gateway.host}"
-        )
-        proxy = paramiko.ProxyCommand(proxy_cmd)
         ckw = _connect_kwargs(self._key_path)
-        ckw["sock"] = proxy
+        ckw["sock"] = channel
         conn = Connection(
             host=self._host,
             user=self._user,
@@ -412,14 +325,13 @@ class RemoteExecutor:
         self._apply_keepalive(conn)
         return conn
 
-    def _cleanup_gateway_files(self) -> None:
-        """Remove the ControlMaster socket file."""
-        if self._control_path and os.path.exists(self._control_path):
-            try:
-                os.unlink(self._control_path)
-            except OSError:
-                pass
-        self._control_path = None
+    def _is_gateway_alive(self) -> bool:
+        """Check if the gateway Paramiko transport is connected and authenticated."""
+        return (
+            self._gateway_transport is not None
+            and self._gateway_transport.is_active()
+            and self._gateway_transport.is_authenticated()
+        )
 
     def _apply_keepalive(self, conn: Connection) -> None:
         """Enable SSH keepalive on a connection's transport."""
@@ -434,11 +346,11 @@ class RemoteExecutor:
         has gone stale (e.g. after a network interruption detected by
         keepalive).
 
-        For interactive gateways using ControlMaster: if the target connection
-        drops but the gateway process is still alive, the target connection is
-        re-established through the existing control socket without needing a
-        fresh OTP.  If the gateway process itself has died, a ``RuntimeError``
-        is raised.
+        For interactive gateways: if the target connection drops but the
+        gateway transport is still alive, the target connection is
+        re-established via a new direct-tcpip channel without needing a
+        fresh OTP.  If the gateway transport itself has died, a
+        ``RuntimeError`` is raised.
         """
         if self._conn is not None:
             transport = self._conn.transport
@@ -459,7 +371,7 @@ class RemoteExecutor:
                         "Cannot reconnect — please re-trigger the run with "
                         "a fresh OTP."
                     )
-                # Gateway is alive — reconnect through existing control socket.
+                # Gateway transport alive — open a new channel to the target.
                 self._log(
                     f"[{self._connection_name}] Reconnecting through "
                     "existing gateway"
@@ -469,7 +381,7 @@ class RemoteExecutor:
                 except Exception:
                     pass
                 self._conn = None
-                # Fall through to _open_connection which reuses the socket.
+                # Fall through to _open_connection which reuses the transport.
             else:
                 self._close_connections()
 
@@ -477,7 +389,7 @@ class RemoteExecutor:
         return self._conn
 
     def _close_connections(self) -> None:
-        """Close SSH connections, transports, and gateway processes."""
+        """Close SSH connections and gateway transport."""
         if self._conn is not None:
             try:
                 self._conn.close()
@@ -496,25 +408,6 @@ class RemoteExecutor:
             except Exception:
                 pass
             self._gateway_transport = None
-        # Shut down SSH ControlMaster for interactive gateways.
-        if self._gateway_process is not None:
-            if self._control_path:
-                try:
-                    subprocess.run(
-                        ["ssh",
-                         "-o", f"ControlPath={self._control_path}",
-                         "-O", "exit",
-                         f"{self._gateway.user}@{self._gateway.host}"],
-                        capture_output=True, timeout=5,
-                    )
-                except Exception:
-                    pass
-            try:
-                self._gateway_process.close(force=True)
-            except Exception:
-                pass
-            self._gateway_process = None
-        self._cleanup_gateway_files()
 
     def close(self) -> None:
         """Cancel any active Slurm allocation, then close SSH connections."""

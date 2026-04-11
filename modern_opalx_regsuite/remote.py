@@ -1,17 +1,32 @@
 """Remote SSH execution via Fabric for the OPALX regression suite.
 
+Robustness features:
+- SSH keepalive: prevents silent connection drops caused by NAT/firewall
+  timeouts during long-running builds (configurable interval, default 30s).
+- Connection health checking: detects stale transports and auto-reconnects
+  before command execution.
+- Per-command timeout: shell-level ``timeout`` wrapper prevents runaway remote
+  commands from blocking the pipeline indefinitely.
+- Cancel support: a ``threading.Event``-based watchdog interrupts the SSH
+  channel when a pipeline cancellation is requested, avoiding the need to
+  restart the server.
+- Slurm allocation timeout: prevents ``salloc`` from waiting forever for
+  resources.
+- Interactive gateway auth: supports keyboard-interactive (password + 2FA)
+  authentication for SSH hop gateways like ``hopx.psi.ch``.
+
 Sensitive-data rule: every line written to ``log_path`` or ``pipeline_log_path``
 under ``data_root`` uses ``self._connection_name`` as the identifier — never
-the underlying SSH host, user, key, or work_dir. The fully-wrapped command
-(``cd <work_dir> && source <init> && module load ... && <cmd>``) is built in
-memory only; only the user-meaningful ``cmd`` and the streamed stdout/stderr
-ever touch a log file.
+the underlying SSH host, user, key, or work_dir.  Gateway credentials
+(password, OTP) are held in memory only and never logged or persisted.
 """
 from __future__ import annotations
 
 import io
 import re
 import shlex
+import socket
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -20,6 +35,9 @@ from fabric import Connection
 
 if TYPE_CHECKING:
     from .config import EnvActivation, GatewayEndpoint
+
+
+# ── Key loading ──────────────────────────────────────────────────────────────
 
 
 def _load_pkey(key_path: Path) -> paramiko.PKey:
@@ -83,6 +101,53 @@ def _connect_kwargs(key_path: Path) -> dict:
     }
 
 
+# ── Interactive gateway authentication ───────────────────────────────────────
+
+
+def _open_interactive_gateway(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    otp: str,
+    keepalive_interval: int = 30,
+) -> paramiko.Transport:
+    """Establish an SSH transport via keyboard-interactive auth (password + 2FA).
+
+    Used for hop gateways (e.g. ``hopx.psi.ch``) that require a password
+    followed by a one-time 2FA code.  The transport is returned with keepalive
+    enabled; the caller opens a ``direct-tcpip`` channel through it to reach
+    the final target.
+
+    Credentials are consumed immediately during the handshake and never stored
+    beyond this call.  OTPs are single-use, so reconnection after a transport
+    failure is not possible — the caller should treat this as a fatal error.
+    """
+    sock = socket.create_connection((host, port), timeout=30)
+    transport = paramiko.Transport(sock)
+    transport.banner_timeout = 60
+    transport.start_client()
+
+    if keepalive_interval > 0:
+        transport.set_keepalive(keepalive_interval)
+
+    # Build response list for keyboard-interactive prompts.
+    # Servers may send prompts individually or bundled; the iterator handles
+    # both cases — one response per prompt, in order.
+    responses = [password, otp]
+    response_iter = iter(responses)
+
+    def _kbd_interactive_handler(_title, _instructions, prompt_list):
+        """Return one credential per prompt in order: password, then OTP."""
+        return [next(response_iter, "") for _ in prompt_list]
+
+    transport.auth_interactive(username, _kbd_interactive_handler)
+    return transport
+
+
+# ── Tee writer for dual-stream logging ───────────────────────────────────────
+
+
 class _TeeWriter(io.RawIOBase):
     """File-like that writes each chunk to two underlying file objects."""
 
@@ -108,15 +173,29 @@ class _TeeWriter(io.RawIOBase):
         return True
 
 
+# ── Remote executor ──────────────────────────────────────────────────────────
+
+
 class RemoteExecutor:
     """SSH execution and file transfer for remote pipeline runs.
 
     Uses a single persistent Fabric ``Connection`` per executor instance, with
-    optional ``ProxyJump`` chaining via Fabric's ``gateway=`` parameter. All
-    methods are blocking (designed to run inside ``asyncio.to_thread``).
+    optional ``ProxyJump`` chaining via Fabric's ``gateway=`` parameter or a
+    manually established keyboard-interactive transport for hop gateways.
+
+    Robustness guarantees:
+
+    - SSH keepalive detects dead connections within ``keepalive_interval`` s.
+    - Stale transports are detected and reconnected automatically before each
+      command (except interactive gateways, where OTPs are single-use).
+    - Commands can be interrupted via ``cancel_event`` (``threading.Event``).
+    - Individual commands are subject to ``command_timeout`` (shell timeout).
+    - Slurm allocations have a configurable ``salloc_timeout``.
+
+    All methods are blocking (designed to run inside ``asyncio.to_thread``).
 
     The constructor takes resolved key paths — it does not look up keys on
-    disk. Resolution lives in
+    disk.  Resolution lives in
     :func:`modern_opalx_regsuite.user_store.resolve_connection_key_paths`.
     """
 
@@ -131,6 +210,13 @@ class RemoteExecutor:
         gateway_key_path: Optional[Path] = None,
         env: Optional["EnvActivation"] = None,
         pipeline_log_path: Optional[Path] = None,
+        # ── Robustness settings ──────────────────────────────────────
+        keepalive_interval: int = 30,
+        command_timeout: int = 0,
+        salloc_timeout: int = 0,
+        # ── Interactive gateway credentials (held in memory only) ────
+        gateway_password: Optional[str] = None,
+        gateway_otp: Optional[str] = None,
     ) -> None:
         self._host = host
         self._user = user
@@ -141,42 +227,140 @@ class RemoteExecutor:
         self._gateway_key_path = gateway_key_path
         self._env = env
         self._pipeline_log_path = pipeline_log_path
+        self._keepalive_interval = keepalive_interval
+        self._command_timeout = command_timeout
+        self._salloc_timeout = salloc_timeout
+        self._gateway_password = gateway_password
+        self._gateway_otp = gateway_otp
+
         self._conn: Optional[Connection] = None
         self._gateway_conn: Optional[Connection] = None
+        self._gateway_transport: Optional[paramiko.Transport] = None
         self._allocation_id: Optional[str] = None
 
     # ── Connection management ────────────────────────────────────────────
 
+    def _open_connection(self) -> Connection:
+        """Create, open, and configure a new Fabric Connection."""
+        if self._gateway is not None:
+            if self._gateway.auth_method == "interactive":
+                return self._open_via_interactive_gateway()
+            return self._open_via_key_gateway()
+        return self._open_direct()
+
+    def _open_direct(self) -> Connection:
+        """Open a direct SSH connection (no gateway)."""
+        conn = Connection(
+            host=self._host,
+            user=self._user,
+            port=self._port,
+            connect_kwargs=_connect_kwargs(self._key_path),
+        )
+        conn.open()
+        self._apply_keepalive(conn)
+        return conn
+
+    def _open_via_key_gateway(self) -> Connection:
+        """Open a connection through a key-authenticated gateway."""
+        if self._gateway_key_path is None:
+            raise ValueError(
+                "RemoteExecutor: gateway is set but gateway_key_path is None"
+            )
+        self._gateway_conn = Connection(
+            host=self._gateway.host,
+            user=self._gateway.user,
+            port=self._gateway.port,
+            connect_kwargs=_connect_kwargs(self._gateway_key_path),
+        )
+        conn = Connection(
+            host=self._host,
+            user=self._user,
+            port=self._port,
+            gateway=self._gateway_conn,
+            connect_kwargs=_connect_kwargs(self._key_path),
+        )
+        conn.open()
+        self._apply_keepalive(conn)
+        self._apply_keepalive(self._gateway_conn)
+        return conn
+
+    def _open_via_interactive_gateway(self) -> Connection:
+        """Open a connection through a keyboard-interactive (password+2FA) gateway.
+
+        The gateway transport is established via ``_open_interactive_gateway``
+        using the in-memory password and OTP.  A ``direct-tcpip`` channel is
+        opened through it to tunnel to the target, which is then authenticated
+        via the regular SSH key.
+
+        OTPs are single-use, so this connection cannot be auto-reconnected if
+        the transport drops.
+        """
+        self._gateway_transport = _open_interactive_gateway(
+            host=self._gateway.host,
+            port=self._gateway.port,
+            username=self._gateway.user,
+            password=self._gateway_password or "",
+            otp=self._gateway_otp or "",
+            keepalive_interval=self._keepalive_interval,
+        )
+        # Tunnel to the target via direct-tcpip channel through the gateway.
+        gw_channel = self._gateway_transport.open_channel(
+            "direct-tcpip",
+            (self._host, self._port),
+            ("127.0.0.1", 0),
+        )
+        ckw = _connect_kwargs(self._key_path)
+        ckw["sock"] = gw_channel
+        conn = Connection(
+            host=self._host,
+            user=self._user,
+            port=self._port,
+            connect_kwargs=ckw,
+        )
+        conn.open()
+        self._apply_keepalive(conn)
+        return conn
+
+    def _apply_keepalive(self, conn: Connection) -> None:
+        """Enable SSH keepalive on a connection's transport."""
+        if self._keepalive_interval > 0 and conn.transport:
+            conn.transport.set_keepalive(self._keepalive_interval)
+
     @property
     def conn(self) -> Connection:
-        """Return (and lazily create) the cached Fabric Connection chain."""
-        if self._conn is None:
-            gw_conn: Optional[Connection] = None
-            if self._gateway is not None:
-                if self._gateway_key_path is None:
-                    raise ValueError(
-                        "RemoteExecutor: gateway is set but gateway_key_path is None"
-                    )
-                self._gateway_conn = Connection(
-                    host=self._gateway.host,
-                    user=self._gateway.user,
-                    port=self._gateway.port,
-                    connect_kwargs=_connect_kwargs(self._gateway_key_path),
-                )
-                gw_conn = self._gateway_conn
+        """Return (and lazily create) the cached Fabric Connection chain.
 
-            self._conn = Connection(
-                host=self._host,
-                user=self._user,
-                port=self._port,
-                gateway=gw_conn,
-                connect_kwargs=_connect_kwargs(self._key_path),
+        Checks transport health on every access; reconnects if the transport
+        has gone stale (e.g. after a network interruption detected by
+        keepalive).  Interactive-gateway connections cannot be auto-reconnected
+        because OTPs are single-use — a stale interactive transport raises
+        ``RuntimeError``.
+        """
+        if self._conn is not None:
+            transport = self._conn.transport
+            if transport is not None and transport.is_active():
+                return self._conn
+            # Transport died — clean up and reconnect.
+            self._log(
+                f"[{self._connection_name}] SSH transport inactive, reconnecting"
             )
+            if (
+                self._gateway is not None
+                and self._gateway.auth_method == "interactive"
+            ):
+                self._close_connections()
+                raise RuntimeError(
+                    f"SSH connection to [{self._connection_name}] dropped and "
+                    "cannot be re-established because the gateway uses "
+                    "single-use 2FA credentials.  Please re-trigger the run."
+                )
+            self._close_connections()
+
+        self._conn = self._open_connection()
         return self._conn
 
-    def close(self) -> None:
-        """Cancel any active Slurm allocation, then close SSH connections."""
-        self.release_slurm_job()
+    def _close_connections(self) -> None:
+        """Close SSH connections and transports (without Slurm cleanup)."""
         if self._conn is not None:
             try:
                 self._conn.close()
@@ -189,31 +373,50 @@ class RemoteExecutor:
             except Exception:
                 pass
             self._gateway_conn = None
+        if self._gateway_transport is not None:
+            try:
+                self._gateway_transport.close()
+            except Exception:
+                pass
+            self._gateway_transport = None
+
+    def close(self) -> None:
+        """Cancel any active Slurm allocation, then close SSH connections."""
+        self.release_slurm_job()
+        self._close_connections()
 
     # ── Slurm allocation ─────────────────────────────────────────────────
 
     def allocate_slurm_job(self, slurm_args: list[str]) -> str:
-        """Allocate a Slurm job via ``salloc --parsable --no-shell``.
+        """Allocate a Slurm job via ``salloc --no-shell``.
 
         Returns the job ID string and records it in ``self._allocation_id``.
         From this point on, every :meth:`run_command` call is automatically
         wrapped in ``srun --jobid=<ID> --overlap -- bash -c '...'`` so that
         MPI-linked executables can find the allocated host list.
 
-        ``--parsable`` makes salloc emit only ``JOBID`` or ``JOBID;CLUSTER``
-        (no human-readable banner text).  ``--no-shell`` allocates resources
-        without launching an interactive shell and returns immediately after
-        the allocation is granted.  Supported in Slurm ≥ 20.11.
+        Respects ``self._salloc_timeout``; exit code 124 from the shell
+        ``timeout`` wrapper is translated to a clear error message.
         """
         args_str = " ".join(shlex.quote(a) for a in slurm_args)
-        result = self.conn.run(
-            f"salloc --no-shell {args_str}",
-            hide=True,
-            warn=True,
-        )
+        salloc_cmd = f"salloc --no-shell {args_str}"
+
+        if self._salloc_timeout > 0:
+            salloc_cmd = (
+                f"timeout --signal=TERM --kill-after=30 {self._salloc_timeout} "
+                f"bash -c {shlex.quote(salloc_cmd)}"
+            )
+
+        result = self.conn.run(salloc_cmd, hide=True, warn=True)
         if result.return_code != 0:
+            stderr = result.stderr.strip()
+            if result.return_code == 124:
+                raise RuntimeError(
+                    f"salloc timed out after {self._salloc_timeout}s waiting "
+                    f"for resources: {stderr}"
+                )
             raise RuntimeError(
-                f"salloc failed (rc={result.return_code}): {result.stderr.strip()}"
+                f"salloc failed (rc={result.return_code}): {stderr}"
             )
         # salloc writes "salloc: Granted job allocation 12345" to stderr.
         combined = result.stdout + result.stderr
@@ -228,7 +431,12 @@ class RemoteExecutor:
         return job_id
 
     def release_slurm_job(self) -> None:
-        """Cancel the active Slurm allocation. No-op if none is active."""
+        """Cancel the active Slurm allocation (best-effort).
+
+        Tolerates stale or closed connections — if ``scancel`` cannot be
+        delivered, the job will time out on its own via Slurm's ``--time``
+        limit.
+        """
         if self._allocation_id is None:
             return
         job_id = self._allocation_id
@@ -236,12 +444,17 @@ class RemoteExecutor:
         try:
             self.conn.run(f"scancel {shlex.quote(job_id)}", hide=True, warn=True)
         except Exception:
-            pass
-        self._log(f"[{self._connection_name}] Slurm job {job_id} cancelled")
+            self._log(
+                f"[{self._connection_name}] WARNING: could not cancel Slurm "
+                f"job {job_id} (connection may be unavailable)"
+            )
+        else:
+            self._log(f"[{self._connection_name}] Slurm job {job_id} cancelled")
 
     # ── Logging helper ───────────────────────────────────────────────────
 
     def _log(self, line: str) -> None:
+        """Append a line to the pipeline log (if configured)."""
         if self._pipeline_log_path is not None:
             self._pipeline_log_path.parent.mkdir(parents=True, exist_ok=True)
             with self._pipeline_log_path.open("a", encoding="utf-8") as f:
@@ -250,6 +463,7 @@ class RemoteExecutor:
     # ── Environment activation preamble ──────────────────────────────────
 
     def _is_uenv(self) -> bool:
+        """Check if the environment style is uenv."""
         return self._env is not None and self._env.style == "uenv"
 
     def _build_env_preamble(self) -> list[str]:
@@ -332,13 +546,23 @@ class RemoteExecutor:
         log_path: Path,
         env_vars: Optional[dict[str, str]] = None,
         append_log: bool = False,
+        timeout: Optional[int] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> int:
         """Execute *cmd* on the remote host inside *remote_cwd*.
 
         stdout+stderr are streamed to *log_path* (and *pipeline_log_path* if
-        set). Environment activation comes from ``self._env`` and is applied
-        automatically. Returns the remote exit code.
+        set).  Environment activation comes from ``self._env`` and is applied
+        automatically.
+
+        Returns the remote exit code, or ``-1`` if the command was cancelled.
+        Exit code ``124`` from the shell ``timeout`` wrapper indicates a
+        command timeout.
         """
+        # Early bail-out if already cancelled.
+        if cancel_event is not None and cancel_event.is_set():
+            return -1
+
         prefix_parts = self._build_env_preamble()
 
         # Inline shell env-var assignment, e.g. ``OMP_NUM_THREADS=4 cmd``.
@@ -400,12 +624,42 @@ class RemoteExecutor:
                 f" -- bash -c {shlex.quote(wrapped)}"
             )
 
+        # Apply per-command timeout (shell-level).  Skipped for srun commands
+        # because Slurm's --time flag is the proper timeout mechanism there.
+        effective_timeout = timeout if timeout is not None else self._command_timeout
+        if effective_timeout > 0 and self._allocation_id is None:
+            wrapped = (
+                f"timeout --signal=TERM --kill-after=30 {effective_timeout} "
+                f"bash -c {shlex.quote(wrapped)}"
+            )
+
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_mode = "a" if append_log else "w"
 
         # Sanitized log header — connection_name only, never host/user/work_dir.
         header = f"$ [{self._connection_name}] {cmd}\n"
         self._log(f"[{self._connection_name}] {cmd}")
+
+        # ── Cancel watchdog ──────────────────────────────────────────────
+        # A daemon thread that waits on the cancel_event and closes the SSH
+        # transport to interrupt ``conn.run()``.  This unblocks the main
+        # thread which is stuck reading from the SSH channel.
+        command_done = threading.Event()
+
+        if cancel_event is not None:
+            def _cancel_watchdog() -> None:
+                cancel_event.wait()
+                if not command_done.is_set():
+                    try:
+                        transport = self._conn.transport if self._conn else None
+                        if transport:
+                            transport.close()
+                    except Exception:
+                        pass
+
+            threading.Thread(
+                target=_cancel_watchdog, daemon=True, name="cancel-ssh"
+            ).start()
 
         with log_path.open(log_mode, encoding="utf-8") as log_file:
             log_file.write(header)
@@ -422,8 +676,20 @@ class RemoteExecutor:
                 result = self.conn.run(
                     wrapped, out_stream=tee, err_stream=tee, hide=True, warn=True
                 )
+                command_done.set()
                 return result.return_code
+            except Exception as exc:
+                command_done.set()
+                if cancel_event is not None and cancel_event.is_set():
+                    self._log(
+                        f"[{self._connection_name}] command interrupted by cancellation"
+                    )
+                    self._close_connections()
+                    return -1
+                # Re-raise SSH/transport errors so the pipeline can handle them.
+                raise
             finally:
+                command_done.set()
                 if pipeline_file is not None:
                     pipeline_file.close()
 
@@ -435,6 +701,7 @@ class RemoteExecutor:
         remote_path: str,
         branch: str,
         log_path: Path,
+        cancel_event: Optional[threading.Event] = None,
     ) -> bool:
         """Clone *repo_url* to *remote_path* or update if it already exists.
 
@@ -447,18 +714,21 @@ class RemoteExecutor:
                 remote_cwd=remote_path,
                 log_path=log_path,
                 append_log=True,
+                cancel_event=cancel_event,
             )
             rc_checkout = self.run_command(
                 f"git checkout {shlex.quote(branch)}",
                 remote_cwd=remote_path,
                 log_path=log_path,
                 append_log=True,
+                cancel_event=cancel_event,
             )
             rc_pull = self.run_command(
                 f"git pull --ff-only origin {shlex.quote(branch)}",
                 remote_cwd=remote_path,
                 log_path=log_path,
                 append_log=True,
+                cancel_event=cancel_event,
             )
             return rc_fetch == 0 and rc_checkout == 0 and rc_pull == 0
         else:
@@ -470,6 +740,7 @@ class RemoteExecutor:
                 remote_cwd=parent,
                 log_path=log_path,
                 append_log=True,
+                cancel_event=cancel_event,
             )
             return rc == 0
 

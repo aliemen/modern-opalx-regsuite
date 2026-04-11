@@ -173,7 +173,7 @@ def connections_referencing_key(
         if c.key_name == key_name:
             referencing.append(c.name)
             continue
-        if c.gateway is not None and c.gateway.key_name == key_name:
+        if c.gateway is not None and c.gateway.key_name and c.gateway.key_name == key_name:
             referencing.append(c.name)
     return referencing
 
@@ -192,6 +192,10 @@ def resolve_connection_key_paths(
     keys = user_keys_dir(cfg, username)
     target = keys / f"{conn.key_name}.pem"
     gateway = None
-    if conn.gateway is not None:
+    if (
+        conn.gateway is not None
+        and conn.gateway.auth_method != "interactive"
+        and conn.gateway.key_name
+    ):
         gateway = keys / f"{conn.gateway.key_name}.pem"
     return target, gateway

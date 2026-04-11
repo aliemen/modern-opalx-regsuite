@@ -83,6 +83,7 @@ def _build_simulation(
     """Shared post-processing: parse .rt, read stats, compute deltas, plot, assemble result."""
     description, checks = _parse_rt_file(rt_file)
     sim_metrics: list[RegressionMetric] = []
+    any_stat_plots = False
 
     if checks:
         for var_name, mode, eps in checks:
@@ -115,6 +116,7 @@ def _build_simulation(
                 and min(len(values), len(ref_values)) > 1
             )
             if can_plot:
+                any_stat_plots = True
                 plot_name = f"{test_name}_{var_name}.svg"
                 plot_path = plots_dir / plot_name
                 try:
@@ -184,7 +186,7 @@ def _build_simulation(
     if positions_file is None:
         positions_file = next(work_dir.glob("*_ElementPositions.txt"), None)
 
-    if positions_file is not None:
+    if positions_file is not None and any_stat_plots:
         beamline_out = plots_dir / f"{test_name}_beamline.svg"
         try:
             generate_beamline_svg(positions_file, input_file, beamline_out)
@@ -451,6 +453,7 @@ def _run_regression_suite_remote(
             remote_cwd=remote_test_work,
             log_path=test_log_local,
             env_vars=env,
+            cancel_event=cancel_event,
         )
 
         if test_log_local.exists():

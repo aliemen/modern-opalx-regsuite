@@ -44,6 +44,9 @@ class ActiveRun:
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
+    # Interactive gateway credentials — held in memory only, never serialized.
+    gateway_password: Optional[str] = None
+    gateway_otp: Optional[str] = None
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "running"  # running | passed | failed | cancelled
     phase: str = "git"       # git | cmake | build | unit | regression | done
@@ -64,6 +67,9 @@ class QueuedRun:
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
+    # Interactive gateway credentials — held in memory only, never serialized.
+    gateway_password: Optional[str] = None
+    gateway_otp: Optional[str] = None
     queued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     cfg: object = None  # SuiteConfig snapshot
     skip_unit: bool = False
@@ -126,6 +132,8 @@ async def acquire_run_slot(
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
+    gateway_password: Optional[str] = None,
+    gateway_otp: Optional[str] = None,
 ) -> Optional[ActiveRun]:
     """Try to acquire the run slot for *machine_id*.
 
@@ -147,6 +155,8 @@ async def acquire_run_slot(
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,
+            gateway_password=gateway_password,
+            gateway_otp=gateway_otp,
             log_path=log_path,
         )
         mq.active_run = active

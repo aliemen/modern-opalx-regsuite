@@ -51,7 +51,7 @@ def _validate_keys_exist(cfg: SuiteConfig, username: str, conn: Connection) -> N
     missing: list[str] = []
     if not target_key.is_file():
         missing.append(conn.key_name)
-    if conn.gateway is not None:
+    if conn.gateway is not None and conn.gateway.auth_method != "interactive":
         gw_key = keys / f"{conn.gateway.key_name}.pem"
         if not gw_key.is_file() and conn.gateway.key_name not in missing:
             missing.append(conn.gateway.key_name)
@@ -159,11 +159,18 @@ class ConnectionTestResult(BaseModel):
     error: str | None = None
 
 
+class ConnectionTestRequest(BaseModel):
+    """Optional request body for testing interactive gateway connections."""
+    gateway_password: str | None = None
+    gateway_otp: str | None = None
+
+
 @router.post("/{name}/test", response_model=ConnectionTestResult)
 async def test_user_connection(
     name: str,
     user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
+    body: ConnectionTestRequest | None = None,
 ) -> ConnectionTestResult:
     """Open the SSH chain (gateway included) and run ``whoami``.
 
@@ -185,9 +192,26 @@ async def test_user_connection(
         return ConnectionTestResult(
             ok=False, error=f"target key '{conn.key_name}' is missing"
         )
-    if conn.gateway is not None and (gateway_key is None or not gateway_key.is_file()):
+    if (
+        conn.gateway is not None
+        and conn.gateway.auth_method != "interactive"
+        and (gateway_key is None or not gateway_key.is_file())
+    ):
         return ConnectionTestResult(
             ok=False, error=f"gateway key '{conn.gateway.key_name}' is missing"
+        )
+    # Validate interactive gateway credentials are provided for testing.
+    if (
+        conn.gateway is not None
+        and conn.gateway.auth_method == "interactive"
+        and (not (body and body.gateway_password) or not (body and body.gateway_otp))
+    ):
+        return ConnectionTestResult(
+            ok=False,
+            error=(
+                "Interactive gateway requires 'gateway_password' and "
+                "'gateway_otp' in the request body for testing."
+            ),
         )
 
     # Run the blocking SSH call in a worker thread so we don't stall the loop.
@@ -215,6 +239,9 @@ async def test_user_connection(
             gateway=conn.gateway,
             gateway_key_path=gateway_key,
             env=None,  # transport-only check; do not apply env activation
+            keepalive_interval=conn.keepalive_interval,
+            gateway_password=body.gateway_password if body else None,
+            gateway_otp=body.gateway_otp if body else None,
         )
         try:
             who = executor.whoami()

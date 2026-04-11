@@ -44,6 +44,10 @@ class TriggerRequest(BaseModel):
     # None or "local" → local execution. Otherwise → load the calling user's
     # named connection from <users_root>/<username>/connections.json.
     connection_name: Optional[str] = None
+    # Interactive gateway credentials — required when the connection's gateway
+    # uses auth_method="interactive".  Held in memory only; never persisted.
+    gateway_password: Optional[str] = None
+    gateway_otp: Optional[str] = None
 
 
 class TriggerResponse(BaseModel):
@@ -193,12 +197,27 @@ async def trigger_run(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"SSH key '{connection.key_name}' is missing on disk.",
             )
-        if connection.gateway is not None and (
-            gateway_key_path is None or not gateway_key_path.is_file()
+        if (
+            connection.gateway is not None
+            and connection.gateway.auth_method != "interactive"
+            and (gateway_key_path is None or not gateway_key_path.is_file())
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Gateway SSH key '{connection.gateway.key_name}' is missing on disk.",
+            )
+        # Validate interactive gateway credentials are provided.
+        if (
+            connection.gateway is not None
+            and connection.gateway.auth_method == "interactive"
+            and (not body.gateway_password or not body.gateway_otp)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "This connection uses an interactive gateway (password + 2FA). "
+                    "Provide 'gateway_password' and 'gateway_otp' in the request body."
+                ),
             )
 
     machine_id = resolve_machine_id(connection)
@@ -215,6 +234,8 @@ async def trigger_run(
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
+        gateway_password=body.gateway_password,
+        gateway_otp=body.gateway_otp,
     )
     if active is not None:
         # Machine is free — start immediately via the coordinator.
@@ -236,6 +257,8 @@ async def trigger_run(
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,
+            gateway_password=body.gateway_password,
+            gateway_otp=body.gateway_otp,
             cfg=cfg,
             skip_unit=body.skip_unit,
             skip_regression=body.skip_regression,

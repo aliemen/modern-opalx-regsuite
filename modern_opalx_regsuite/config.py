@@ -72,9 +72,19 @@ class GatewayEndpoint(BaseModel):
     host: str = Field(..., description="SSH hostname or IP of the jump host.")
     user: str = Field(..., description="SSH username on the jump host.")
     port: int = Field(22, description="SSH port on the jump host.")
-    key_name: str = Field(
-        ...,
-        description="Name of SSH key in this user's ssh-keys dir (without .pem suffix).",
+    key_name: Optional[str] = Field(
+        None,
+        description=(
+            "Name of SSH key in the user's ssh-keys dir (without .pem suffix). "
+            "Required when auth_method is 'key'; unused for 'interactive'."
+        ),
+    )
+    auth_method: Literal["key", "interactive"] = Field(
+        "key",
+        description=(
+            "Authentication method: 'key' (SSH key, default) or 'interactive' "
+            "(keyboard-interactive with password + 2FA, e.g. for hopx gateways)."
+        ),
     )
 
 
@@ -126,6 +136,14 @@ class Connection(BaseModel):
         description="How to activate the environment on the remote target.",
     )
 
+    keepalive_interval: int = Field(
+        30,
+        description=(
+            "SSH keepalive interval in seconds. Prevents silent connection "
+            "drops caused by NAT/firewall timeouts during long builds. 0 = disabled."
+        ),
+    )
+
 
 class ArchConfig(BaseModel):
     """Per-architecture build recipe.
@@ -153,6 +171,19 @@ class ArchConfig(BaseModel):
             "before starting the pipeline and runs every command as an srun step within "
             "that job. Leave empty to run all commands directly over SSH (no Slurm)."
         ),
+    )
+
+    command_timeout: int = Field(
+        0,
+        description=(
+            "Maximum seconds for any single remote command. Wraps commands with "
+            "shell-level timeout. Applies to non-srun commands; srun commands "
+            "should use --time in slurm_args instead. 0 = no limit."
+        ),
+    )
+    salloc_timeout: int = Field(
+        0,
+        description="Maximum seconds to wait for a Slurm allocation. 0 = no limit.",
     )
     env: EnvActivation = Field(
         default_factory=EnvActivation,
@@ -236,6 +267,13 @@ class SuiteConfig(BaseModel):
     keep_work_dirs: bool = Field(
         False,
         description="If true, retain per-test temporary work directories after a run.",
+    )
+    max_pipeline_duration: int = Field(
+        0,
+        description=(
+            "Maximum total seconds for the entire pipeline. The pipeline is "
+            "cancelled automatically if it exceeds this duration. 0 = no limit."
+        ),
     )
 
     # HTTPS git URLs for remote cloning (public repos).
@@ -427,6 +465,8 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     add_kv("opalx_executable_relpath", data.get("opalx_executable_relpath", "src/opalx"))
     add_kv("opalx_args", data.get("opalx_args", []))
     add_kv("keep_work_dirs", data.get("keep_work_dirs", False))
+    if data.get("max_pipeline_duration", 0) != 0:
+        add_kv("max_pipeline_duration", data["max_pipeline_duration"])
     if data.get("opalx_repo_url"):
         add_kv("opalx_repo_url", data["opalx_repo_url"])
     if data.get("regtests_repo_url"):
@@ -478,6 +518,10 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
         add_kv("mpi_ranks", ac.get("mpi_ranks", 1))
         if ac.get("slurm_args"):
             add_kv("slurm_args", ac["slurm_args"])
+        if ac.get("command_timeout", 0) != 0:
+            add_kv("command_timeout", ac["command_timeout"])
+        if ac.get("salloc_timeout", 0) != 0:
+            add_kv("salloc_timeout", ac["salloc_timeout"])
         # Nested env activation as a sibling sub-table.
         env = ac.get("env") or {}
         _emit_env(env, "arch_configs")

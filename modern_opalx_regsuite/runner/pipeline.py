@@ -101,6 +101,8 @@ def run_pipeline(
     gateway_key_path: Optional[Path] = None,
     repo_locks: Optional[dict[str, threading.Lock]] = None,
     triggered_by: str = "",
+    gateway_password: Optional[str] = None,
+    gateway_otp: Optional[str] = None,
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
 
@@ -162,7 +164,10 @@ def run_pipeline(
             )
         if not target_key_path.exists():
             raise FileNotFoundError(f"SSH key not found: {target_key_path}")
-        if connection.gateway is not None:
+        if (
+            connection.gateway is not None
+            and connection.gateway.auth_method != "interactive"
+        ):
             if gateway_key_path is None:
                 raise ValueError(
                     "run_pipeline: connection has a gateway but gateway_key_path is None"
@@ -181,6 +186,11 @@ def run_pipeline(
             gateway_key_path=gateway_key_path,
             env=connection.env,
             pipeline_log_path=paths.pipeline_log_path,
+            keepalive_interval=connection.keepalive_interval,
+            command_timeout=ac.command_timeout,
+            salloc_timeout=ac.salloc_timeout,
+            gateway_password=gateway_password,
+            gateway_otp=gateway_otp,
         )
         remote_base = connection.work_dir
         remote_build = f"{remote_base}/builds/{branch}/{arch}/build"
@@ -248,6 +258,7 @@ def run_pipeline(
                 f"{remote_base}/opalx-src",
                 branch,
                 log_path=paths.pipeline_log_path,
+                cancel_event=cancel_event,
             )
             _append_pipeline_line(
                 paths.pipeline_log_path,
@@ -258,6 +269,7 @@ def run_pipeline(
                 f"{remote_base}/regtests",
                 cfg.regtests_branch,
                 log_path=paths.pipeline_log_path,
+                cancel_event=cancel_event,
             )
             opalx_git_ok = remote_opalx_ok and remote_regtests_ok
             reg_git_ok = True
@@ -323,6 +335,7 @@ def run_pipeline(
                 cmake_cmd,
                 remote_cwd=remote_build,  # type: ignore[arg-type]
                 log_path=paths.logs_dir / "cmake.log",
+                cancel_event=cancel_event,
             )
         else:
             cmake_cmd = " ".join(["cmake", *effective_cmake_args, str(opalx_repo)])
@@ -346,6 +359,7 @@ def run_pipeline(
                 build_cmd,
                 remote_cwd=remote_build,  # type: ignore[arg-type]
                 log_path=paths.logs_dir / "build.log",
+                cancel_event=cancel_event,
             )
         else:
             build_rc, _ = _run_command(
@@ -377,6 +391,7 @@ def run_pipeline(
                     cfg.unit_test_command,
                     remote_cwd=remote_build,  # type: ignore[arg-type]
                     log_path=paths.unit_log_path,
+                    cancel_event=cancel_event,
                 )
                 output = paths.unit_log_path.read_text(encoding="utf-8", errors="replace")
             else:

@@ -94,10 +94,34 @@ class RunCoordinator:
                 gateway_key_path=active.gateway_key_path,
                 repo_locks=repo_locks,
                 triggered_by=active.triggered_by,
+                gateway_password=active.gateway_password,
+                gateway_otp=active.gateway_otp,
             )
 
         tailer_task = asyncio.create_task(self._log_tailer(active))
         final_status = "failed"
+
+        # Pipeline-level timeout watchdog: cancels the run after
+        # max_pipeline_duration seconds to prevent zombie runs.
+        timeout_handle = None
+        timeout_seconds = (
+            cfg.max_pipeline_duration if cfg.max_pipeline_duration > 0 else 0
+        )
+        if timeout_seconds:
+            def _pipeline_timeout() -> None:
+                active.cancel_event.set()
+                if active.log_path:
+                    try:
+                        active.log_path.parent.mkdir(parents=True, exist_ok=True)
+                        with active.log_path.open("a", encoding="utf-8") as f:
+                            f.write(
+                                f"\n[error] Pipeline timed out after "
+                                f"{timeout_seconds}s — cancelling\n"
+                            )
+                    except Exception:
+                        pass
+
+            timeout_handle = loop.call_later(timeout_seconds, _pipeline_timeout)
 
         try:
             meta = await loop.run_in_executor(self._executor, _sync)
@@ -111,6 +135,8 @@ class RunCoordinator:
                 except Exception:
                     pass
         finally:
+            if timeout_handle is not None:
+                timeout_handle.cancel()
             tailer_task.cancel()
             try:
                 await tailer_task
@@ -135,6 +161,8 @@ class RunCoordinator:
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,
+            gateway_password=queued.gateway_password,
+            gateway_otp=queued.gateway_otp,
         )
         if next_active is not None:
             next_active.cancel_event = queued.cancel_event

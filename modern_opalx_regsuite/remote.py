@@ -328,7 +328,7 @@ class RemoteExecutor:
         self._log(f"[{self._connection_name}] Connection to {self._host} established.")
         return conn
 
-    def _open_via_interactive_gateway(self) -> Connection:
+    def _open_via_interactive_gateway(self, _stale_retry: bool = False) -> Connection:
         """Open a connection through PSI's hop-ng interactive gateway.
 
         PSI's hop-ng does NOT support standard ProxyJump / direct-tcpip from
@@ -449,11 +449,26 @@ class RemoteExecutor:
                     pexpect.TIMEOUT,
                 ], timeout=30)
                 if idx != 0:
-                    raise RuntimeError(
-                        f"Gateway session on {self._gateway.host} did not "
-                        f"establish after disconnecting stale session: "
-                        f"{(child.before or '').strip()!r}"
+                    # hop-ng closed the connection after terminating the stale
+                    # session.  This is expected on some versions: the
+                    # forwarding slot is freed and the client must re-request
+                    # it with a fresh connection.  Clean up and retry once —
+                    # the stale session is now gone so the second attempt
+                    # should succeed without hitting the Y/N prompt again.
+                    child.close(force=True)
+                    self._gateway_process = None
+                    self._cleanup_gateway_files()
+                    if _stale_retry:
+                        raise RuntimeError(
+                            f"Gateway session on {self._gateway.host} did not "
+                            f"establish after reconnecting post-stale-disconnect: "
+                            f"{(child.before or '').strip()!r}"
+                        )
+                    self._log(
+                        f"[{self._connection_name}] hop-ng closed connection "
+                        "after terminating stale session — reconnecting..."
                     )
+                    return self._open_via_interactive_gateway(_stale_retry=True)
             elif idx != 0:
                 raise RuntimeError(
                     f"Gateway session on {self._gateway.host} did not "

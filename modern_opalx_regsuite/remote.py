@@ -26,15 +26,19 @@ the underlying SSH host, user, key, or work_dir.  Gateway credentials
 from __future__ import annotations
 
 import io
+import os
 import re
 import shlex
 import socket
+import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import paramiko
+import pexpect
 from fabric import Connection
 
 if TYPE_CHECKING:
@@ -133,6 +137,78 @@ class _TeeWriter(io.RawIOBase):
         return True
 
 
+# ── ssh -W socket wrapper ───────────────────────────────────────────────────
+
+
+class _StdioForward:
+    """Socket-like wrapper around an ``ssh -W`` subprocess's stdin/stdout.
+
+    ``paramiko.ProxyCommand`` has two bugs that make it unreliable with
+    ControlMaster pipes:
+
+    1. ``recv()`` loops until *exactly* ``size`` bytes are read, instead
+       of returning as soon as *any* data is available (the standard
+       ``socket.recv`` contract).  On a tunnel where chunks arrive
+       incrementally this causes unnecessary blocking.
+    2. When ``os.read`` returns 0 (EOF), the loop busy-spins until the
+       timeout fires instead of raising immediately.
+
+    This wrapper fixes both by returning partial reads immediately and
+    raising ``OSError`` on EOF.  It also flushes ``stdin`` after every
+    write.
+    """
+
+    def __init__(
+        self,
+        proc: "subprocess.Popen[bytes]",
+        initial_data: bytes = b"",
+    ) -> None:
+        self._proc = proc
+        self._buf = initial_data
+        self._timeout: float | None = None
+
+    # ── socket-like interface expected by Paramiko ───────────────────
+
+    def send(self, data: bytes) -> int:
+        self._proc.stdin.write(data)
+        self._proc.stdin.flush()
+        return len(data)
+
+    def recv(self, size: int) -> bytes:
+        # Return buffered bytes first (from the pre-flight read).
+        if self._buf:
+            chunk = self._buf[:size]
+            self._buf = self._buf[size:]
+            return chunk
+
+        from select import select as _sel
+        r, _, _ = _sel([self._proc.stdout], [], [], self._timeout)
+        if not r:
+            raise socket.timeout()
+        data = os.read(self._proc.stdout.fileno(), size)
+        if not data:
+            raise OSError("ssh -W tunnel closed")
+        return data
+
+    def close(self) -> None:
+        try:
+            self._proc.kill()
+        except Exception:
+            pass
+
+    def settimeout(self, timeout: float | None) -> None:
+        self._timeout = timeout
+
+    @property
+    def closed(self) -> bool:
+        return self._proc.returncode is not None
+
+    # Paramiko checks ._closed in a few places.
+    @property
+    def _closed(self) -> bool:
+        return self.closed
+
+
 # ── Remote executor ──────────────────────────────────────────────────────────
 
 
@@ -195,8 +271,14 @@ class RemoteExecutor:
 
         self._conn: Optional[Connection] = None
         self._gateway_conn: Optional[Connection] = None
-        self._gateway_transport: Optional[paramiko.Transport] = None
+        # pexpect child process that holds the primary ControlMaster session
+        # to the interactive gateway (hop-ng requires this to stay open).
+        self._gateway_process: Optional[pexpect.spawn] = None
+        self._control_path: Optional[str] = None
+        # ssh -W subprocess and its socket wrapper (used for the target tunnel).
+        self._tunnel_proc: Optional[subprocess.Popen] = None
         self._allocation_id: Optional[str] = None
+        self._slurm_cluster: Optional[str] = None
 
     # ── Connection management ────────────────────────────────────────────
 
@@ -245,76 +327,255 @@ class RemoteExecutor:
         return conn
 
     def _open_via_interactive_gateway(self) -> Connection:
-        """Open a connection through an interactive (password+2FA) gateway.
+        """Open a connection through PSI's hop-ng interactive gateway.
 
-        Uses Paramiko's ``Transport`` directly to authenticate to the gateway
-        via keyboard-interactive (password + TOTP/OTP challenge).  Once
-        authenticated, a ``direct-tcpip`` channel is opened through the gateway
-        to the target host and a Fabric ``Connection`` is wrapped around it.
+        PSI's hop-ng does NOT support standard ProxyJump / direct-tcpip from
+        a fresh connection.  It requires a persistent PRIMARY session (an
+        actual SSH shell session, not ``-N``) that registers a NAT forwarding
+        slot on the gateway.  Only while that session is open can additional
+        connections reach internal PSI hosts.
 
-        If the gateway transport is already alive (from a previous successful
-        call), it is reused — a new channel is opened without re-authenticating
-        and without needing a fresh OTP.
+        Architecture (ControlMaster):
+        1. pexpect spawns ``ssh -o ControlMaster=yes`` **without** ``-N``,
+           so a real session channel is opened and the hop-ng forced command
+           runs.
+        2. pexpect handles the two-round keyboard-interactive auth
+           (password → server failure-with-continue → OTP).
+        3. We wait for the gateway's final banner line ("no other commands
+           available!") which confirms the NAT forwarding slot is active.
+        4. The ControlMaster socket is now ready.
+        5. Paramiko uses ``ssh -o ControlMaster=auto -W target:port`` as a
+           ProxyCommand, piggybacking on the live ControlMaster session.
+           Because that session has an active shell channel, the gateway
+           accepts the direct-tcpip forwarding request.
+
+        On reconnect (target dropped, gateway still alive), step 5 is
+        repeated without a new OTP.
         """
-        if not self._is_gateway_alive():
+        if self._is_gateway_alive():
             self._log(
-                f"[{self._connection_name}] Connecting to gateway "
-                f"{self._gateway.host}:{self._gateway.port}"
+                f"[{self._connection_name}] Reusing existing gateway session"
             )
-            sock = socket.create_connection(
-                (self._gateway.host, self._gateway.port), timeout=30
-            )
-            gw_transport = paramiko.Transport(sock)
-            gw_transport.banner_timeout = 60
-            gw_transport.auth_timeout = 60
-            gw_transport.start_client(timeout=60)
+            return self._connect_through_control_socket()
 
-            if self._keepalive_interval > 0:
-                gw_transport.set_keepalive(self._keepalive_interval)
+        # ── Establish a new primary session via pexpect ──────────────────
+        self._control_path = tempfile.mktemp(
+            prefix=".opalx_ctl_", dir=tempfile.gettempdir()
+        )
 
-            def _auth_handler(title, instructions, prompts):
-                """Match keyboard-interactive prompts to password / OTP."""
-                responses = []
-                for prompt, _echo in prompts:
-                    p = prompt.lower()
-                    if "password" in p:
-                        responses.append(self._gateway_password or "")
-                    else:
-                        # Any other prompt (verification code, OTP, token…)
-                        responses.append(self._gateway_otp or "")
-                return responses
+        child = pexpect.spawn(
+            "ssh",
+            [
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "ControlMaster=yes",
+                "-o", f"ControlPath={self._control_path}",
+                "-o", "PreferredAuthentications=keyboard-interactive",
+                "-p", str(self._gateway.port),
+                f"{self._gateway.user}@{self._gateway.host}",
+            ],
+            timeout=60,
+            encoding="utf-8",
+        )
+        self._gateway_process = child
 
-            gw_transport.auth_interactive(self._gateway.user, _auth_handler)
-
-            if not gw_transport.is_authenticated():
-                gw_transport.close()
+        try:
+            # ── Round 1: password ─────────────────────────────────────────
+            idx = child.expect([
+                r"[Pp]assword\s*:",
+                r"[Pp]ermission\s+[Dd]enied",
+                pexpect.EOF,
+                pexpect.TIMEOUT,
+            ])
+            if idx != 0:
                 raise RuntimeError(
-                    f"Keyboard-interactive authentication to "
-                    f"{self._gateway.host} failed — check password and OTP."
+                    f"No password prompt from {self._gateway.host}; "
+                    f"output: {(child.before or '').strip()!r}"
+                )
+            child.sendline(self._gateway_password or "")
+
+            # ── Round 2: OTP ──────────────────────────────────────────────
+            # Server replies with MSG_USERAUTH_FAILURE + "can continue:
+            # keyboard-interactive", then immediately sends the OTP prompt.
+            idx = child.expect([
+                r"[Vv]erification\s+[Cc]ode",
+                r"[Mm]icrosoft\s+verification",
+                r"[Ee]nter\s+[Yy]our\s+Microsoft",
+                r"[Pp]ermission\s+[Dd]enied",
+                pexpect.EOF,
+                pexpect.TIMEOUT,
+            ])
+            if idx >= 3:
+                raise RuntimeError(
+                    f"Gateway auth failed after password: "
+                    f"{(child.before or '').strip()!r}"
+                )
+            child.sendline(self._gateway_otp or "")
+
+            # ── Wait for forwarding slot ───────────────────────────────────
+            # The forced command prints the welcome banner ending with
+            # "no other commands available!" — only after this line is the
+            # NAT forwarding slot guaranteed to be active.
+            #
+            # hop-ng may instead ask to disconnect a stale session from a
+            # different IP — answer "Y" and wait for the normal banner.
+            idx = child.expect([
+                r"no other commands available",           # 0 — normal success
+                r"\(Y\)es or \(N\)o",                    # 1 — stale-session prompt
+                r"[Pp]ermission\s+[Dd]enied",            # 2
+                pexpect.EOF,                              # 3
+                pexpect.TIMEOUT,                          # 4
+            ], timeout=30)
+            if idx == 1:
+                # Stale session from another IP — agree to disconnect it.
+                self._log(
+                    f"[{self._connection_name}] hop-ng asked to disconnect "
+                    "stale session — answering Y"
+                )
+                child.sendline("Y")
+                # Now wait for the normal banner after the old session is torn down.
+                idx = child.expect([
+                    r"no other commands available",
+                    pexpect.EOF,
+                    pexpect.TIMEOUT,
+                ], timeout=30)
+                if idx != 0:
+                    raise RuntimeError(
+                        f"Gateway session on {self._gateway.host} did not "
+                        f"establish after disconnecting stale session: "
+                        f"{(child.before or '').strip()!r}"
+                    )
+            elif idx != 0:
+                raise RuntimeError(
+                    f"Gateway session on {self._gateway.host} did not "
+                    f"establish: {(child.before or '').strip()!r}"
                 )
 
-            self._gateway_transport = gw_transport
-            self._log(
-                f"[{self._connection_name}] Gateway "
-                f"{self._gateway.host} authenticated"
+        except pexpect.TIMEOUT:
+            child.close(force=True)
+            self._gateway_process = None
+            self._cleanup_gateway_files()
+            raise RuntimeError(
+                f"Timed out waiting for gateway session on "
+                f"{self._gateway.host}"
+            )
+        except RuntimeError:
+            child.close(force=True)
+            self._gateway_process = None
+            self._cleanup_gateway_files()
+            raise
+
+        # Drain ALL remaining banner output (Username, NAT-IP, Sessionend,
+        # etc.) so the pexpect PTY buffer is clear and the SSH process is
+        # fully in its idle-wait state.
+        try:
+            child.expect(pexpect.TIMEOUT, timeout=3)
+        except pexpect.TIMEOUT:
+            pass
+
+        # ControlMaster socket should exist by now; wait up to 10 s.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if os.path.exists(self._control_path):
+                break
+            if not child.isalive():
+                self._gateway_process = None
+                self._cleanup_gateway_files()
+                raise RuntimeError(
+                    f"Gateway SSH process exited unexpectedly after session "
+                    f"was established"
+                )
+            time.sleep(0.2)
+        else:
+            child.close(force=True)
+            self._gateway_process = None
+            self._cleanup_gateway_files()
+            raise RuntimeError(
+                f"ControlMaster socket not created for {self._gateway.host}"
             )
 
-        # Open a direct-tcpip channel through the authenticated transport
-        try:
-            channel = self._gateway_transport.open_channel(
-                "direct-tcpip",
-                (self._host, self._port),
-                ("", 0),
-                timeout=30,
+        # Verify the ControlMaster is accepting multiplex requests.
+        ctl_check = subprocess.run(
+            [
+                "ssh",
+                "-o", f"ControlPath={self._control_path}",
+                "-O", "check",
+                f"{self._gateway.user}@{self._gateway.host}",
+            ],
+            capture_output=True, timeout=5,
+        )
+        if ctl_check.returncode != 0:
+            stderr = ctl_check.stderr.decode(errors="replace").strip()
+            self._log(
+                f"[{self._connection_name}] ControlMaster check failed: {stderr}"
             )
-        except paramiko.SSHException as exc:
+
+        self._log(
+            f"[{self._connection_name}] Gateway {self._gateway.host} "
+            "primary session established (ControlMaster ready)"
+        )
+        return self._connect_through_control_socket()
+
+    def _connect_through_control_socket(self) -> Connection:
+        """Connect to the target via ``ssh -W`` through the ControlMaster.
+
+        Uses ``mux_client_request_stdio_fwd`` (the ``-W`` multiplex
+        request), which opens a ``direct-tcpip`` forwarding channel — NOT a
+        session channel.  This is critical for PSI's hop-ng gateway which
+        allows only one session per connection.
+
+        A custom ``_StdioForward`` socket wrapper drives the subprocess
+        instead of ``paramiko.ProxyCommand``, which has buffering bugs that
+        cause timeouts on ControlMaster pipes.
+        """
+        self._kill_tunnel()
+
+        proc = subprocess.Popen(
+            [
+                "ssh",
+                "-o", "ControlMaster=auto",
+                "-o", f"ControlPath={self._control_path}",
+                "-o", "BatchMode=yes",
+                "-W", f"{self._host}:{self._port}",
+                f"{self._gateway.user}@{self._gateway.host}",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+        )
+        self._tunnel_proc = proc
+
+        # Verify the tunnel is alive by waiting for the target's SSH banner
+        # (e.g. "SSH-2.0-OpenSSH_8.0") to appear on stdout.
+        import select as _select
+        r, _, _ = _select.select([proc.stdout], [], [], 15)
+        if not r:
+            proc.kill()
+            stderr = proc.stderr.read().decode(errors="replace")
+            self._tunnel_proc = None
             raise RuntimeError(
-                f"Could not open forwarding channel through "
-                f"{self._gateway.host} to {self._host}:{self._port}: {exc}"
-            ) from exc
+                f"ssh -W tunnel to {self._host}:{self._port} produced "
+                f"no output in 15 s.  stderr: {stderr}"
+            )
+        # Peek at stdout to confirm data is flowing — don't consume it,
+        # Paramiko needs the full banner.  os.read is non-blocking here
+        # because select said it's ready.
+        first = os.read(proc.stdout.fileno(), 64)
+        if not first:
+            proc.kill()
+            stderr = proc.stderr.read().decode(errors="replace")
+            self._tunnel_proc = None
+            raise RuntimeError(
+                f"ssh -W tunnel to {self._host}:{self._port} closed "
+                f"immediately.  stderr: {stderr}"
+            )
+
+        # Build a socket wrapper that feeds the already-read bytes first,
+        # then continues reading from the subprocess stdout.
+        tunnel_sock = _StdioForward(proc, initial_data=first)
 
         ckw = _connect_kwargs(self._key_path)
-        ckw["sock"] = channel
+        ckw["sock"] = tunnel_sock
         conn = Connection(
             host=self._host,
             user=self._user,
@@ -325,12 +586,32 @@ class RemoteExecutor:
         self._apply_keepalive(conn)
         return conn
 
+    def _kill_tunnel(self) -> None:
+        """Terminate any running ssh -W tunnel subprocess."""
+        if self._tunnel_proc is not None:
+            try:
+                self._tunnel_proc.kill()
+                self._tunnel_proc.wait(timeout=3)
+            except Exception:
+                pass
+            self._tunnel_proc = None
+
+    def _cleanup_gateway_files(self) -> None:
+        """Remove the ControlMaster socket file."""
+        if self._control_path and os.path.exists(self._control_path):
+            try:
+                os.unlink(self._control_path)
+            except OSError:
+                pass
+        self._control_path = None
+
     def _is_gateway_alive(self) -> bool:
-        """Check if the gateway Paramiko transport is connected and authenticated."""
+        """Check if the pexpect ControlMaster session is still running."""
         return (
-            self._gateway_transport is not None
-            and self._gateway_transport.is_active()
-            and self._gateway_transport.is_authenticated()
+            self._gateway_process is not None
+            and self._gateway_process.isalive()
+            and self._control_path is not None
+            and os.path.exists(self._control_path)
         )
 
     def _apply_keepalive(self, conn: Connection) -> None:
@@ -347,10 +628,10 @@ class RemoteExecutor:
         keepalive).
 
         For interactive gateways: if the target connection drops but the
-        gateway transport is still alive, the target connection is
-        re-established via a new direct-tcpip channel without needing a
-        fresh OTP.  If the gateway transport itself has died, a
-        ``RuntimeError`` is raised.
+        ControlMaster session is still alive, the target connection is
+        re-established via a new local port forward without needing a fresh
+        OTP.  If the ControlMaster process has died, a ``RuntimeError`` is
+        raised.
         """
         if self._conn is not None:
             transport = self._conn.transport
@@ -371,7 +652,7 @@ class RemoteExecutor:
                         "Cannot reconnect — please re-trigger the run with "
                         "a fresh OTP."
                     )
-                # Gateway transport alive — open a new channel to the target.
+                # ControlMaster alive — reconnect via existing socket.
                 self._log(
                     f"[{self._connection_name}] Reconnecting through "
                     "existing gateway"
@@ -381,7 +662,7 @@ class RemoteExecutor:
                 except Exception:
                     pass
                 self._conn = None
-                # Fall through to _open_connection which reuses the transport.
+                # Fall through to _open_connection which reuses the socket.
             else:
                 self._close_connections()
 
@@ -389,7 +670,7 @@ class RemoteExecutor:
         return self._conn
 
     def _close_connections(self) -> None:
-        """Close SSH connections and gateway transport."""
+        """Close SSH connections, port forward, and the ControlMaster session."""
         if self._conn is not None:
             try:
                 self._conn.close()
@@ -402,12 +683,28 @@ class RemoteExecutor:
             except Exception:
                 pass
             self._gateway_conn = None
-        if self._gateway_transport is not None:
+        self._kill_tunnel()
+        if self._gateway_process is not None:
+            # Ask the ControlMaster to exit gracefully, then force-kill.
+            if self._control_path:
+                try:
+                    subprocess.run(
+                        [
+                            "ssh",
+                            "-o", f"ControlPath={self._control_path}",
+                            "-O", "exit",
+                            f"{self._gateway.user}@{self._gateway.host}",
+                        ],
+                        capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
             try:
-                self._gateway_transport.close()
+                self._gateway_process.close(force=True)
             except Exception:
                 pass
-            self._gateway_transport = None
+            self._gateway_process = None
+        self._cleanup_gateway_files()
 
     def close(self) -> None:
         """Cancel any active Slurm allocation, then close SSH connections."""
@@ -429,6 +726,16 @@ class RemoteExecutor:
         """
         args_str = " ".join(shlex.quote(a) for a in slurm_args)
         salloc_cmd = f"salloc --no-shell {args_str}"
+
+        # Extract --cluster=<name> so srun can target the same cluster.
+        self._slurm_cluster: Optional[str] = None
+        for arg in slurm_args:
+            if arg.startswith("--cluster="):
+                self._slurm_cluster = arg.split("=", 1)[1]
+            elif arg == "--cluster" or arg == "-M":
+                # Next arg is the cluster name — handled by the =form above
+                # in the config; flag this as a hint to check manually.
+                pass
 
         if self._salloc_timeout > 0:
             salloc_cmd = (
@@ -471,7 +778,13 @@ class RemoteExecutor:
         job_id = self._allocation_id
         self._allocation_id = None  # clear first so close() won't double-cancel
         try:
-            self.conn.run(f"scancel {shlex.quote(job_id)}", hide=True, warn=True)
+            cluster_flag = ""
+            if self._slurm_cluster:
+                cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
+            self.conn.run(
+                f"scancel{cluster_flag} {shlex.quote(job_id)}",
+                hide=True, warn=True,
+            )
         except Exception:
             self._log(
                 f"[{self._connection_name}] WARNING: could not cancel Slurm "
@@ -648,8 +961,12 @@ class RemoteExecutor:
             uenv_flags = ""
             if self._is_uenv() and self._env and self._env.prologue:
                 uenv_flags = " " + self._uenv_srun_flags()
+            cluster_flag = ""
+            if self._slurm_cluster:
+                cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
             wrapped = (
-                f"srun --jobid={shlex.quote(self._allocation_id)} --overlap{uenv_flags}"
+                f"srun --jobid={shlex.quote(self._allocation_id)}"
+                f" --overlap{cluster_flag}{uenv_flags}"
                 f" -- bash -c {shlex.quote(wrapped)}"
             )
 

@@ -278,6 +278,17 @@ def run_pipeline(
             opalx_git_ok = remote_opalx_ok and remote_regtests_ok
             reg_git_ok = True
             if opalx_git_ok:
+                # Capture actual commit hashes from the remote checkouts now
+                # that git fetch/checkout/pull have completed.  The local repos
+                # may be on different branches, so reading them (lines above)
+                # gives wrong hashes — overwrite with the real remote values.
+                meta.opalx_commit = remote.git_rev_parse_short(
+                    f"{remote_base}/opalx-src"
+                )
+                meta.tests_repo_commit = remote.git_rev_parse_short(
+                    f"{remote_base}/regtests"
+                )
+                _write_json(paths.meta_path, meta.model_dump())
                 _append_pipeline_line(
                     paths.pipeline_log_path,
                     f"[{connection_name}] OPALX and regression-tests ready.",

@@ -1118,6 +1118,24 @@ class RemoteExecutor:
                 self._log(f"[{self._connection_name}] WARNING: {repo_name} clone failed.")
             return rc == 0
 
+    def git_rev_parse_short(self, remote_path: str) -> Optional[str]:
+        """Return the short SHA of HEAD at *remote_path* on the remote.
+
+        Returns None if the command fails (e.g. path is not a git repo).
+        Does NOT apply env activation -- git is always available.
+        """
+        try:
+            result = self.conn.run(
+                f"git -C {shlex.quote(remote_path)} rev-parse --short HEAD",
+                hide=True,
+                warn=True,
+            )
+            if result.return_code == 0:
+                return result.stdout.strip() or None
+            return None
+        except Exception:
+            return None
+
     # ── File transfer ────────────────────────────────────────────────────
 
     def fetch_file(self, remote_path: str, local_path: Path) -> None:

@@ -27,6 +27,10 @@ LANE_STEP = 0.60        # Vertical distance between lane baselines
 LANE_BASE_Y = 0.12      # Distance from the axis (y=0) to the bottom of lane 0
 AXIS_Y = 0.0            # y-coordinate of the beam axis line
 
+# Drift background bands: fill matches ELEMENT_STYLES["drift"]; edge is slightly darker.
+_DRIFT_FILL = ELEMENT_STYLES["drift"]["color"]
+_DRIFT_BAND_EDGE = "#98A2AC"
+
 
 # ---------------------------------------------------------------------------
 # Lane assignment
@@ -107,8 +111,8 @@ def render_beamline(elements: list[BeamlineElement], output_path: Path) -> None:
             drift.length,
             band_height,
             boxstyle="square,pad=0",
-            facecolor="#F2F3F4",
-            edgecolor="#E5E7E9",
+            facecolor=_DRIFT_FILL,
+            edgecolor=_DRIFT_BAND_EDGE,
             linewidth=0.5,
             zorder=1,
             alpha=0.8,

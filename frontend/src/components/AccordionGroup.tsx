@@ -83,7 +83,7 @@ export function AccordionGroup({
                   ? selection.deselectCells(group.cells)
                   : selection.selectCells(group.cells)
               }
-              className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+              className="w-4 h-4 rounded border-border accent-accent dark:[color-scheme:dark] cursor-pointer"
             />
           </label>
         )}

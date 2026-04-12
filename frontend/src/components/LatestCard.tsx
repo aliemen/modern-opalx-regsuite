@@ -70,7 +70,7 @@ export function LatestCard({
             checked={selected}
             disabled={checkboxDisabled}
             onChange={onToggleSelect}
-            className={`w-4 h-4 rounded border-border accent-accent ${
+            className={`w-4 h-4 rounded border-border accent-accent dark:[color-scheme:dark] ${
               checkboxDisabled ? "cursor-not-allowed opacity-40" : "cursor-pointer"
             }`}
           />

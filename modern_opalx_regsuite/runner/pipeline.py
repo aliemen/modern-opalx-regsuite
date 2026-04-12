@@ -229,6 +229,10 @@ def run_pipeline(
                 raise RuntimeError(f"Slurm allocation failed: {exc}") from exc
 
         if is_remote and remote is not None:
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] Connection established.",
+            )
             remote.ensure_dir(remote_build)  # type: ignore[arg-type]
 
         # ── Phase: git ────────────────────────────────────────────────────────
@@ -273,6 +277,11 @@ def run_pipeline(
             )
             opalx_git_ok = remote_opalx_ok and remote_regtests_ok
             reg_git_ok = True
+            if opalx_git_ok:
+                _append_pipeline_line(
+                    paths.pipeline_log_path,
+                    f"[{connection_name}] OPALX and regression-tests ready.",
+                )
         else:
             # Local runs: full git update under per-repo locks so concurrent
             # pipelines serialise access to the shared working trees.
@@ -351,6 +360,17 @@ def run_pipeline(
                 cancel_event=cancel_event,
             )
 
+        if cmake_rc == 0:
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] CMake configuration done.",
+            )
+        else:
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] CMake configuration FAILED (rc={cmake_rc}).",
+            )
+
         # ── Phase: build ──────────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "build")
         _append_pipeline_line(paths.pipeline_log_path, f"Building: {build_cmd}")
@@ -372,6 +392,16 @@ def run_pipeline(
             )
 
         build_ok = cmake_rc == 0 and build_rc == 0
+        if build_ok:
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] Build complete.",
+            )
+        else:
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] Build FAILED (cmake_rc={cmake_rc}, build_rc={build_rc}).",
+            )
         if not build_ok:
             meta.status = "failed"
         if not (opalx_git_ok and reg_git_ok):
@@ -406,6 +436,11 @@ def run_pipeline(
             unit_report = _parse_unit_output(output)
             meta.unit_tests_total = unit_report.total
             meta.unit_tests_failed = unit_report.failed
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] Unit tests done: "
+                f"{unit_report.total - unit_report.failed}/{unit_report.total} passed.",
+            )
             if rc != 0 and meta.status == "running":
                 meta.status = "failed"
         elif skip_unit:

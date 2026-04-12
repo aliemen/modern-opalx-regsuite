@@ -300,6 +300,7 @@ class RemoteExecutor:
         )
         conn.open()
         self._apply_keepalive(conn)
+        self._log(f"[{self._connection_name}] Connection to {self._host} established.")
         return conn
 
     def _open_via_key_gateway(self) -> Connection:
@@ -324,6 +325,7 @@ class RemoteExecutor:
         conn.open()
         self._apply_keepalive(conn)
         self._apply_keepalive(self._gateway_conn)
+        self._log(f"[{self._connection_name}] Connection to {self._host} established.")
         return conn
 
     def _open_via_interactive_gateway(self) -> Connection:
@@ -356,7 +358,11 @@ class RemoteExecutor:
             self._log(
                 f"[{self._connection_name}] Reusing existing gateway session"
             )
-            return self._connect_through_control_socket()
+            conn = self._connect_through_control_socket()
+            self._log(
+                f"[{self._connection_name}] Connection to {self._host} established."
+            )
+            return conn
 
         # ── Establish a new primary session via pexpect ──────────────────
         self._control_path = tempfile.mktemp(
@@ -410,6 +416,10 @@ class RemoteExecutor:
                     f"{(child.before or '').strip()!r}"
                 )
             child.sendline(self._gateway_otp or "")
+            self._log(
+                f"[{self._connection_name}] Gateway credentials sent, "
+                "waiting for forwarding slot..."
+            )
 
             # ── Wait for forwarding slot ───────────────────────────────────
             # The forced command prints the welcome banner ending with
@@ -513,7 +523,11 @@ class RemoteExecutor:
             f"[{self._connection_name}] Gateway {self._gateway.host} "
             "primary session established (ControlMaster ready)"
         )
-        return self._connect_through_control_socket()
+        conn = self._connect_through_control_socket()
+        self._log(
+            f"[{self._connection_name}] Connection to {self._host} established."
+        )
+        return conn
 
     def _connect_through_control_socket(self) -> Connection:
         """Connect to the target via ``ssh -W`` through the ControlMaster.
@@ -763,7 +777,11 @@ class RemoteExecutor:
             )
         job_id = m.group(1)
         self._allocation_id = job_id
-        self._log(f"[{self._connection_name}] Slurm job {job_id} allocated")
+        cluster_info = f" on cluster {self._slurm_cluster}" if self._slurm_cluster else ""
+        self._log(
+            f"[{self._connection_name}] Interactive node allocated. "
+            f"Slurm job {job_id}{cluster_info}."
+        )
         return job_id
 
     def release_slurm_job(self) -> None:
@@ -1053,8 +1071,9 @@ class RemoteExecutor:
 
         Returns True on success.
         """
+        repo_name = Path(remote_path).name
         if self.path_exists(f"{remote_path}/.git"):
-            self._log(f"[{self._connection_name}] git update {branch}")
+            self._log(f"[{self._connection_name}] Updating {repo_name} (branch={branch})...")
             rc_fetch = self.run_command(
                 f"git fetch origin {shlex.quote(branch)}",
                 remote_cwd=remote_path,
@@ -1076,11 +1095,16 @@ class RemoteExecutor:
                 append_log=True,
                 cancel_event=cancel_event,
             )
-            return rc_fetch == 0 and rc_checkout == 0 and rc_pull == 0
+            ok = rc_fetch == 0 and rc_checkout == 0 and rc_pull == 0
+            if ok:
+                self._log(f"[{self._connection_name}] {repo_name} updated.")
+            else:
+                self._log(f"[{self._connection_name}] WARNING: {repo_name} update had errors.")
+            return ok
         else:
             parent = str(Path(remote_path).parent)
             self.ensure_dir(parent)
-            self._log(f"[{self._connection_name}] git clone {branch}")
+            self._log(f"[{self._connection_name}] Cloning {repo_name} (branch={branch})...")
             rc = self.run_command(
                 f"git clone --branch {shlex.quote(branch)} {shlex.quote(repo_url)} {shlex.quote(remote_path)}",
                 remote_cwd=parent,
@@ -1088,6 +1112,10 @@ class RemoteExecutor:
                 append_log=True,
                 cancel_event=cancel_event,
             )
+            if rc == 0:
+                self._log(f"[{self._connection_name}] {repo_name} cloned.")
+            else:
+                self._log(f"[{self._connection_name}] WARNING: {repo_name} clone failed.")
             return rc == 0
 
     # ── File transfer ────────────────────────────────────────────────────

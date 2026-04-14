@@ -418,8 +418,8 @@ def _run_regression_suite_remote(
 
         local_script = src_test_dir / f"{test_name}.local"
         rt_file = src_test_dir / f"{test_name}.rt"
-        reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
         local_stat = work_test_dir / f"{test_name}.stat"
+        local_reference_stat = work_test_dir / "reference" / f"{test_name}.stat"
         test_log_local = work_test_dir / f"{test_name}-RT.log"
         test_log_run = paths.logs_dir / f"{test_name}-RT.log"
 
@@ -468,6 +468,16 @@ def _run_regression_suite_remote(
                 f"[regression] WARNING: could not fetch {test_name}.stat: {exc}",
             )
 
+        remote_reference = f"{remote_test_src}/reference/{test_name}.stat"
+        try:
+            remote.fetch_file(remote_reference, local_reference_stat)
+        except Exception as exc:
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] WARNING: could not fetch reference for {test_name}: {exc}; falling back to local reference.",
+            )
+            local_reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
+
         # Try to fetch the element positions file for beamline visualization
         remote_positions = f"{remote_test_work}/data/{test_name}_ElementPositions.txt"
         local_positions = work_test_dir / "data" / f"{test_name}_ElementPositions.txt"
@@ -485,7 +495,7 @@ def _run_regression_suite_remote(
             rc=rc,
             rt_file=rt_file,
             generated_stat=local_stat,
-            reference_stat=reference_stat,
+            reference_stat=local_reference_stat,
             plots_dir=paths.plots_dir,
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,

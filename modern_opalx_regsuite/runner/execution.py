@@ -167,6 +167,7 @@ def _run_command(
     env: Optional[dict[str, str]] = None,
     append_log: bool = False,
     cancel_event: Optional[threading.Event] = None,
+    timeout_seconds: Optional[int] = None,
 ) -> Tuple[int, str]:  # returncode, output
     cmd_list = shlex.split(cmd)
     proc = subprocess.Popen(
@@ -186,6 +187,15 @@ def _run_command(
             cancel_event.wait()
             proc.kill()
         threading.Thread(target=_watchdog, daemon=True).start()
+
+    # Per-test timeout: kill the subprocess after timeout_seconds.
+    if timeout_seconds is not None:
+        def _timeout_watchdog() -> None:
+            import time as _time
+            _time.sleep(timeout_seconds)
+            if proc.poll() is None:
+                proc.kill()
+        threading.Thread(target=_timeout_watchdog, daemon=True).start()
 
     lines: list[str] = []
     log_mode = "a" if append_log else "w"

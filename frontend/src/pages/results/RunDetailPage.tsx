@@ -33,10 +33,11 @@ function duration(start: string, end: string | null) {
 function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
   const [open, setOpen] = useState(false); // default closed for better overview
 
-  const passedCount = sim.metrics.filter((m) => m.state === "passed").length;
-  const failedCount = sim.metrics.filter((m) => m.state === "failed").length;
-  const brokenCount = sim.metrics.filter((m) => m.state === "broken").length;
-  const totalCount = sim.metrics.length;
+  const passedCount  = sim.metrics.filter((m) => m.state === "passed").length;
+  const failedCount  = sim.metrics.filter((m) => m.state === "failed").length;
+  const brokenCount  = sim.metrics.filter((m) => m.state === "broken").length;
+  const crashedCount = sim.metrics.filter((m) => m.state === "crashed").length;
+  const totalCount   = sim.metrics.length;
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -53,6 +54,9 @@ function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string 
           <span className="text-muted">/{totalCount}</span>
           {failedCount > 0 && (
             <span className="text-failed ml-1">{failedCount} failed</span>
+          )}
+          {crashedCount > 0 && (
+            <span className="text-crashed ml-1">{crashedCount} crashed</span>
           )}
           {brokenCount > 0 && (
             <span className="text-broken ml-1">{brokenCount} broken</span>
@@ -83,6 +87,21 @@ function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string 
 
       {open && (
         <div className="border-t border-border px-4 py-4 space-y-4">
+          {/* Crash info */}
+          {sim.crash_signal && (
+            <details className="text-xs" open>
+              <summary className="text-crashed cursor-pointer font-medium select-none">
+                Crashed: {sim.crash_signal}
+                {sim.exit_code != null && <span className="text-muted ml-2">(exit {sim.exit_code})</span>}
+              </summary>
+              {sim.crash_summary && (
+                <pre className="mt-2 p-2 bg-surface rounded border border-crashed/30 text-muted overflow-x-auto whitespace-pre-wrap text-[11px] leading-relaxed">
+                  {sim.crash_summary}
+                </pre>
+              )}
+            </details>
+          )}
+
           {/* Metrics table */}
           <div className="overflow-x-auto">
             <table className="w-full text-xs">

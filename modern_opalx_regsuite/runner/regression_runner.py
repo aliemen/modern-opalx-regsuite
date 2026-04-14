@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import signal as _signal
 import time
 import threading
 from pathlib import Path
@@ -42,6 +43,33 @@ def _find_opalx_executable(build_dir: Path, relpath: str) -> Optional[Path]:
     if which:
         return Path(which)
     return None
+
+
+def _classify_crash(rc: int, log_path: Path) -> tuple[Optional[str], Optional[str]]:
+    """Return (signal_name, crash_summary) when *rc* indicates a signal kill.
+
+    On POSIX, Python's subprocess sets returncode to ``-N`` when the child was
+    killed by signal N.  We extract the signal name and, if present, the MPI
+    signal-fault block from the log file.
+    """
+    if rc >= 0:
+        return None, None
+    try:
+        sig_name = _signal.Signals(abs(rc)).name   # e.g. "SIGSEGV"
+    except ValueError:
+        sig_name = f"SIG{abs(rc)}"
+    crash_summary: Optional[str] = None
+    if log_path.exists():
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+            start = text.find("*** Process received signal ***")
+            end   = text.find("*** End of error message ***")
+            if start != -1:
+                end_idx = (end + len("*** End of error message ***")) if end != -1 else start + 2000
+                crash_summary = text[start:end_idx].strip()
+        except OSError:
+            pass
+    return sig_name, crash_summary
 
 
 def _wrap_command_with_mpirun_srun_shim(cmd: str) -> str:
@@ -79,8 +107,11 @@ def _build_simulation(
     pipeline_log_path: Path,
     test_start: float,
     input_file: Optional[Path] = None,
+    log_path: Optional[Path] = None,
 ) -> RegressionSimulation:
     """Shared post-processing: parse .rt, read stats, compute deltas, plot, assemble result."""
+    crash_signal, crash_summary = _classify_crash(rc, log_path or generated_stat.parent / f"{test_name}-RT.log")
+
     description, checks = _parse_rt_file(rt_file)
     sim_metrics: list[RegressionMetric] = []
     any_stat_plots = False
@@ -102,6 +133,8 @@ def _build_simulation(
             state = "broken"
             if delta is not None:
                 state = "passed" if delta < eps else "failed"
+            elif rc < 0:
+                state = "crashed"
             elif rc != 0:
                 state = "failed"
 
@@ -154,7 +187,14 @@ def _build_simulation(
     else:
         # Legacy: no .rt file — presence of stat file is the only check.
         has_stat = generated_stat.exists()
-        state = "passed" if rc == 0 and has_stat else ("failed" if rc != 0 else "broken")
+        if rc == 0 and has_stat:
+            state = "passed"
+        elif rc < 0:
+            state = "crashed"
+        elif rc != 0:
+            state = "failed"
+        else:
+            state = "broken"
         sim_metrics.append(
             RegressionMetric(
                 metric="run",
@@ -171,6 +211,8 @@ def _build_simulation(
     sim_state = "passed"
     if any(m.state == "failed" for m in sim_metrics):
         sim_state = "failed"
+    elif any(m.state == "crashed" for m in sim_metrics):
+        sim_state = "crashed"
     elif any(m.state == "broken" for m in sim_metrics):
         sim_state = "broken"
 
@@ -208,6 +250,9 @@ def _build_simulation(
         metrics=sim_metrics,
         duration_seconds=time.monotonic() - test_start,
         beamline_plot=beamline_plot,
+        exit_code=rc,
+        crash_signal=crash_signal,
+        crash_summary=crash_summary,
     )
 
 
@@ -291,6 +336,7 @@ def _run_regression_suite(
             log_path=test_log_local,
             pipeline_log_path=pipeline_log_path,
             env=env,
+            timeout_seconds=cfg.per_test_timeout_seconds,
         )
         if test_log_local.exists():
             shutil.copy2(test_log_local, test_log_run)
@@ -310,17 +356,26 @@ def _run_regression_suite(
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
             input_file=in_file,
+            log_path=test_log_local,
         )
         report.simulations.append(sim)
+        end_extra = f" signal={sim.crash_signal}" if sim.crash_signal else ""
         _append_pipeline_line(
             pipeline_log_path,
-            f"[regression] END {test_name} state={sim.state} metrics={len(sim.metrics)}",
+            f"[regression] END {test_name} state={sim.state} metrics={len(sim.metrics)}{end_extra}",
         )
         reg_lines.append(f"{test_name}: {sim.state} ({len(sim.metrics)} checks)")
 
     if not cfg.keep_work_dirs and paths.work_dir.exists():
-        shutil.rmtree(paths.work_dir)
-        _append_pipeline_line(pipeline_log_path, "[regression] Removed temporary work directory.")
+        has_nonfatal = report.crashed > 0 or report.failed > 0 or report.broken > 0
+        if has_nonfatal:
+            _append_pipeline_line(
+                pipeline_log_path,
+                "[regression] Kept work directory for post-mortem (some tests crashed/failed/broken).",
+            )
+        else:
+            shutil.rmtree(paths.work_dir)
+            _append_pipeline_line(pipeline_log_path, "[regression] Removed temporary work directory.")
 
     paths.reg_log_path.write_text("\n".join(reg_lines) + "\n", encoding="utf-8")
     return report
@@ -500,11 +555,13 @@ def _run_regression_suite_remote(
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
             input_file=in_file,
+            log_path=test_log_local,
         )
         report.simulations.append(sim)
+        end_extra = f" signal={sim.crash_signal}" if sim.crash_signal else ""
         _append_pipeline_line(
             pipeline_log_path,
-            f"[regression] END {test_name} state={sim.state} metrics={len(sim.metrics)}",
+            f"[regression] END {test_name} state={sim.state} metrics={len(sim.metrics)}{end_extra}",
         )
         reg_lines.append(f"{test_name}: {sim.state} ({len(sim.metrics)} checks)")
 

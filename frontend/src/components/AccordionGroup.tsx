@@ -14,6 +14,7 @@ const SUMMARY_COLORS: Record<string, string> = {
   passed: "text-passed",
   failed: "text-failed",
   broken: "text-broken",
+  crashed: "text-crashed",
   running: "text-accent",
   cancelled: "text-cancelled",
 };

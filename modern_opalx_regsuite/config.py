@@ -268,6 +268,13 @@ class SuiteConfig(BaseModel):
         False,
         description="If true, retain per-test temporary work directories after a run.",
     )
+    per_test_timeout_seconds: Optional[int] = Field(
+        None,
+        description=(
+            "Kill a local regression test process after this many seconds. "
+            "Killed tests are reported as 'crashed' (SIGKILL). None = no per-test limit."
+        ),
+    )
     max_pipeline_duration: int = Field(
         0,
         description=(

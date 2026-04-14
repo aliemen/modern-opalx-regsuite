@@ -51,6 +51,9 @@ export interface RegressionSimulation {
   metrics: RegressionMetric[];
   duration_seconds: number | null;
   beamline_plot: string | null;
+  exit_code: number | null;
+  crash_signal: string | null;
+  crash_summary: string | null;
 }
 
 export interface RegressionTestsReport {

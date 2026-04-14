@@ -17,6 +17,7 @@ export default {
         passed:    "#22c55e",
         failed:    "#ef4444",
         broken:    "#f59e0b",
+        crashed:   "#f97316",
         cancelled: "#6b7280",
       },
     },

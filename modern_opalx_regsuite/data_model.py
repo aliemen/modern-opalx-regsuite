@@ -46,6 +46,9 @@ class RegressionSimulation(BaseModel):
     metrics: List[RegressionMetric] = Field(default_factory=list)
     duration_seconds: Optional[float] = None
     beamline_plot: Optional[str] = None  # relative path, e.g. "plots/AWAGun-1_beamline.svg"
+    exit_code: Optional[int] = None
+    crash_signal: Optional[str] = None   # e.g. "SIGSEGV" when killed by a signal
+    crash_summary: Optional[str] = None  # MPI signal block extracted from the log
 
 
 class UnitTestsReport(BaseModel):
@@ -88,6 +91,10 @@ class RegressionTestsReport(BaseModel):
     @property
     def broken(self) -> int:
         return sum(1 for m in self.all_metrics if m.state.lower() == "broken")
+
+    @property
+    def crashed(self) -> int:
+        return sum(1 for m in self.all_metrics if m.state.lower() == "crashed")
 
 
 class RunMeta(BaseModel):

@@ -24,6 +24,7 @@ from .execution import RunPaths, _append_pipeline_line, _run_command
 from .parsing.regression import (
     _compute_delta,
     _discover_regression_tests,
+    _discover_regression_tests_remote,
     _extract_local_run_command,
     _parse_rt_file,
     _read_stat_data,
@@ -402,13 +403,23 @@ def _run_regression_suite_remote(
     ``regression-tests.log`` under data_root) uses the connection name only;
     never the underlying SSH host or remote work_dir.
     """
-    tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
-    tests = _discover_regression_tests(tests_root)
-    report = RegressionTestsReport(simulations=[])
-
+    # Test discovery, metadata (.rt/.in), and reference stats all come from
+    # the REMOTE regtests checkout — never the local working tree.  The local
+    # tree is only used by the frontend for branch enumeration and may be on
+    # an arbitrary commit; reading from it would silently miss tests added
+    # on the branch the user picked.
     remote_opalx_exe = f"{remote_build}/{cfg.opalx_executable_relpath}"
     remote_opalx_dir = str(Path(remote_opalx_exe).parent)
     remote_tests_root = f"{remote_base}/regtests/{cfg.regtests_subdir}"
+
+    tests = _discover_regression_tests_remote(remote, remote_tests_root)
+    report = RegressionTestsReport(simulations=[])
+
+    # Scratch area for fetched metadata (rt/in/reference) so _build_simulation
+    # can parse them locally.  Lives under work_dir so `keep_work_dirs`
+    # preserves it for debugging and the normal cleanup sweep removes it.
+    meta_root = paths.work_dir / "_remote_meta"
+    meta_root.mkdir(parents=True, exist_ok=True)
 
     reg_lines: list[str] = [
         f"Running {len(tests)} regression tests remotely via [{connection.name}]"
@@ -456,7 +467,6 @@ def _run_regression_suite_remote(
             )
             break
 
-        src_test_dir = tests_root / test_name
         work_test_dir = paths.work_dir / test_name
         if work_test_dir.exists():
             shutil.rmtree(work_test_dir)
@@ -471,8 +481,31 @@ def _run_regression_suite_remote(
             append_log=True,
         )
 
-        local_script = src_test_dir / f"{test_name}.local"
-        rt_file = src_test_dir / f"{test_name}.rt"
+        # Fetch metadata files from the remote checkout.  These drive command
+        # selection (.local presence), check definitions (.rt), and element
+        # type resolution (.in).  None of them should ever be read from the
+        # local regtests working tree.
+        meta_dir = meta_root / test_name
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        has_local_script = remote.path_exists(f"{remote_test_src}/{test_name}.local")
+
+        rt_file = meta_dir / f"{test_name}.rt"
+        try:
+            remote.fetch_file(f"{remote_test_src}/{test_name}.rt", rt_file)
+        except Exception:
+            # .rt is optional (legacy tests without checks still run).
+            pass
+
+        in_file_local = meta_dir / f"{test_name}.in"
+        try:
+            remote.fetch_file(f"{remote_test_src}/{test_name}.in", in_file_local)
+        except Exception as exc:
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] WARNING: could not fetch {test_name}.in: {exc}",
+            )
+
         local_stat = work_test_dir / f"{test_name}.stat"
         local_reference_stat = work_test_dir / "reference" / f"{test_name}.stat"
         test_log_local = work_test_dir / f"{test_name}-RT.log"
@@ -480,7 +513,7 @@ def _run_regression_suite_remote(
 
         env = {"OPALX_EXE_PATH": remote_opalx_dir}
 
-        if local_script.is_file():
+        if has_local_script:
             extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
             cmd = f"bash {shlex.quote(test_name + '.local')}"
             if extra_args:
@@ -524,14 +557,17 @@ def _run_regression_suite_remote(
             )
 
         remote_reference = f"{remote_test_src}/reference/{test_name}.stat"
+        local_reference_stat.parent.mkdir(parents=True, exist_ok=True)
         try:
             remote.fetch_file(remote_reference, local_reference_stat)
         except Exception as exc:
+            # No local fallback: the stale-local copy is what we're
+            # explicitly trying to avoid.  _build_simulation will mark the
+            # metrics as ``broken`` when the reference is missing.
             _append_pipeline_line(
                 pipeline_log_path,
-                f"[regression] WARNING: could not fetch reference for {test_name}: {exc}; falling back to local reference.",
+                f"[regression] WARNING: could not fetch reference for {test_name}: {exc}",
             )
-            local_reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
 
         # Try to fetch the element positions file for beamline visualization
         remote_positions = f"{remote_test_work}/data/{test_name}_ElementPositions.txt"
@@ -542,9 +578,8 @@ def _run_regression_suite_remote(
         except Exception:
             pass  # Not critical — beamline SVG will simply be skipped if absent
 
-        # Use the source-side .in file for element type resolution
-        src_in_file = src_test_dir / f"{test_name}.in"
-        in_file = src_in_file if src_in_file.exists() else None
+        # Use the remote-fetched .in file for element type resolution.
+        in_file = in_file_local if in_file_local.exists() else None
         sim = _build_simulation(
             test_name=test_name,
             rc=rc,

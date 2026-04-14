@@ -1195,6 +1195,27 @@ class RemoteExecutor:
         )
         return result.return_code == 0
 
+    def list_dir(self, remote_path: str) -> list[str]:
+        """Return the immediate children of *remote_path* on the remote.
+
+        Names are returned without a trailing slash, sorted, and hidden
+        entries (starting with ``.``) are omitted — matching what local
+        regtests discovery already ignores. Returns an empty list if the
+        directory does not exist or cannot be read.
+        """
+        result = self.conn.run(
+            f"ls -1 {shlex.quote(remote_path)}", hide=True, warn=True
+        )
+        if result.return_code != 0:
+            return []
+        entries = [
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip() and not line.strip().startswith(".")
+        ]
+        entries.sort()
+        return entries
+
     def cleanup(self, remote_path: str) -> None:
         """Remove *remote_path* on the remote.  Logs warning but does not raise."""
         self._log(f"[{self._connection_name}] cleanup {remote_path}")

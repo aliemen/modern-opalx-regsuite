@@ -55,6 +55,68 @@ def _discover_regression_tests(tests_root: Path) -> list[str]:
     return tests
 
 
+def _discover_regression_tests_remote(
+    remote,  # RemoteExecutor; typed loosely to avoid a circular import
+    remote_tests_root: str,
+) -> list[str]:
+    """Enumerate regression tests directly from the remote regtests checkout.
+
+    Mirrors the rules in :func:`_discover_regression_tests` but runs every
+    filesystem query over SSH so remote runs never consult the API server's
+    local regtests working tree. Two ``find`` invocations are combined in a
+    single SSH round-trip: one to list candidate test directories, one to
+    list the marker files that qualify or disqualify them.
+    """
+    import shlex as _shlex
+
+    root = remote_tests_root.rstrip("/")
+    quoted_root = _shlex.quote(root)
+    # First find: candidate directories (one level deep).
+    # Second find: marker files that live 1-2 levels under each candidate.
+    # ``|| true`` keeps the shell pipeline succeeding even if root is empty.
+    cmd = (
+        f"( find {quoted_root} -mindepth 1 -maxdepth 1 -type d -print "
+        f"; find {quoted_root} -mindepth 2 -maxdepth 3 -type f "
+        f"\\( -name disabled -o -name '*.in' "
+        f"-o -path '*/reference/*.stat' \\) -print ) || true"
+    )
+    result = remote.conn.run(cmd, hide=True, warn=True)
+    if result.return_code != 0:
+        return []
+
+    dirs: set[str] = set()
+    disabled: set[str] = set()
+    has_in: set[str] = set()
+    has_ref: set[str] = set()
+    root_prefix = root + "/"
+
+    for raw in result.stdout.splitlines():
+        path = raw.strip()
+        if not path or not path.startswith(root_prefix):
+            continue
+        rel = path[len(root_prefix) :]
+        if "/" not in rel:
+            # immediate child of root — a candidate test directory
+            if not rel.startswith("."):
+                dirs.add(rel)
+            continue
+        head, _, tail = rel.partition("/")
+        if head.startswith("."):
+            continue
+        if tail == "disabled":
+            disabled.add(head)
+        elif tail == f"{head}.in":
+            has_in.add(head)
+        elif tail == f"reference/{head}.stat":
+            has_ref.add(head)
+
+    tests = sorted(
+        name for name in dirs
+        if name not in disabled and name in has_in and name in has_ref
+    )
+    return tests
+
+
 def _parse_rt_file(rt_path: Path) -> tuple[Optional[str], list[tuple[str, str, float]]]:
     if not rt_path.is_file():
         return None, []

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Clock, History, User as UserIcon } from "lucide-react";
+import { Clock, Globe2, History, User as UserIcon } from "lucide-react";
 import { getAllRuns, type RunIndexEntry } from "../api/results";
 import { getUsersLeaderboard } from "../api/stats";
 import { StatusBadge } from "../components/StatusBadge";
@@ -28,6 +28,7 @@ export function ActivityPage() {
 
   const [pageSize, setPageSize] = useState(25);
   const [offset, setOffset] = useState(0);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Reset paging whenever the user filter changes so we don't end up
   // looking at offset 200 of a freshly-narrowed result set.
@@ -51,6 +52,14 @@ export function ActivityPage() {
 
   const runs = data?.runs ?? [];
   const total = data?.total ?? 0;
+
+  function copyPublicLink(run: RunIndexEntry) {
+    const url = `${window.location.origin}/public/runs/${run.branch}/${run.arch}/${run.run_id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(run.run_id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  }
 
   function handleUserChange(value: string) {
     const next = new URLSearchParams(searchParams);
@@ -121,6 +130,7 @@ export function ActivityPage() {
                   <th className="px-4 py-3 font-medium">Duration</th>
                   <th className="px-4 py-3 font-medium">Unit</th>
                   <th className="px-4 py-3 font-medium">Regression</th>
+                  <th className="px-4 py-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -169,6 +179,21 @@ export function ActivityPage() {
                         <span className="text-broken ml-1">
                           ({run.regression_broken} broken)
                         </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {run.public && (
+                        <button
+                          type="button"
+                          title={copiedId === run.run_id ? "Copied!" : "Copy public link"}
+                          onClick={() => copyPublicLink(run)}
+                          className="flex items-center gap-1 text-xs text-accent hover:brightness-125 transition-all"
+                        >
+                          <Globe2 size={13} />
+                          {copiedId === run.run_id && (
+                            <span className="text-passed">Copied!</span>
+                          )}
+                        </button>
                       )}
                     </td>
                   </tr>

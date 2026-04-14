@@ -14,6 +14,7 @@ import { ArchivePage } from "./pages/ArchivePage";
 import { RunListPage } from "./pages/results/RunListPage";
 import { RunDetailPage } from "./pages/results/RunDetailPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SchedulePage } from "./pages/SchedulePage";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1 } },
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/archive" element={<ArchivePage />} />
             <Route path="/trigger" element={<TriggerPage />} />
+            <Route path="/schedule" element={<SchedulePage />} />
             <Route path="/live/:runId?" element={<LiveRunPage />} />
             <Route path="/results/:branch/:arch" element={<RunListPage />} />
             <Route path="/results/:branch/:arch/:runId" element={<RunDetailPage />} />

@@ -1,33 +1,22 @@
 """Endpoints to trigger, query, cancel, and queue pipeline runs."""
 from __future__ import annotations
 
-import asyncio
-import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..config import SuiteConfig
-from ..data_model import run_dir
-from ..user_store import get_connection, resolve_connection_key_paths
-from .coordinator import get_coordinator
+from ..user_store import get_connection
 from .deps import get_config, require_auth
+from .runs_core import start_run
 from .state import (
-    ActiveRun,
-    QueuedRun,
-    acquire_run_slot,
     cancel_active_run,
     cancel_queued_run,
-    enqueue_run,
     get_active_run,
-    get_active_run_by_id,
     get_all_active_runs,
     get_queue_snapshot,
-    resolve_machine_id,
-    subscribe_sse,
 )
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -169,47 +158,23 @@ async def trigger_run(
     cfg: SuiteConfig = Depends(get_config),
 ):
     run_id = _run_id_from_time()
-    data_root = cfg.resolved_data_root
-    log_path = data_root / "runs" / body.branch / body.arch / run_id / "logs" / "pipeline.log"
 
-    # Override regtests_branch if provided.
-    if body.regtests_branch:
-        cfg = cfg.model_copy(update={"regtests_branch": body.regtests_branch})
-
-    # Resolve the connection (None for local) from the *calling user's* store.
-    connection = None
-    target_key_path: Optional[Path] = None
-    gateway_key_path: Optional[Path] = None
+    # HTTP-specific pre-validation: interactive 2FA gateways must receive
+    # credentials in the request body. start_run() doesn't know about the
+    # request body so we enforce this here before calling it.
     if body.connection_name and body.connection_name.lower() != "local":
-        connection = get_connection(cfg, username, body.connection_name)
-        if connection is None:
+        conn = get_connection(cfg, username, body.connection_name)
+        if conn is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Connection '{body.connection_name}' not found for user '{username}'.",
-            )
-        target_key_path, gateway_key_path = resolve_connection_key_paths(
-            cfg, username, connection
-        )
-        # Re-check that the key files exist (covers the race window between
-        # connection test and trigger).
-        if not target_key_path.is_file():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"SSH key '{connection.key_name}' is missing on disk.",
+                detail=(
+                    f"Connection '{body.connection_name}' not found for user "
+                    f"'{username}'."
+                ),
             )
         if (
-            connection.gateway is not None
-            and connection.gateway.auth_method != "interactive"
-            and (gateway_key_path is None or not gateway_key_path.is_file())
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Gateway SSH key '{connection.gateway.key_name}' is missing on disk.",
-            )
-        # Validate interactive gateway credentials are provided.
-        if (
-            connection.gateway is not None
-            and connection.gateway.auth_method == "interactive"
+            conn.gateway is not None
+            and conn.gateway.auth_method == "interactive"
             and (not body.gateway_password or not body.gateway_otp)
         ):
             raise HTTPException(
@@ -220,73 +185,55 @@ async def trigger_run(
                 ),
             )
 
-    machine_id = resolve_machine_id(connection)
-    connection_name = connection.name if connection is not None else "local"
-
-    active = await acquire_run_slot(
+    result = await start_run(
+        cfg,
         run_id=run_id,
+        triggered_by=username,
+        owner_for_connection=username,
         branch=body.branch,
         arch=body.arch,
-        machine_id=machine_id,
-        connection_name=connection_name,
-        log_path=log_path,
-        triggered_by=username,
-        connection=connection,
-        target_key_path=target_key_path,
-        gateway_key_path=gateway_key_path,
+        regtests_branch=body.regtests_branch,
+        skip_unit=body.skip_unit,
+        skip_regression=body.skip_regression,
+        connection_name=body.connection_name,
         gateway_password=body.gateway_password,
         gateway_otp=body.gateway_otp,
     )
-    if active is not None:
-        # Machine is free — start immediately via the coordinator.
-        coordinator = get_coordinator()
-        asyncio.create_task(
-            coordinator.run_pipeline_async(cfg, active, body.skip_unit, body.skip_regression)
-        )
-        return TriggerResponse(run_id=run_id)
-    else:
-        # Interactive gateways cannot be queued — OTPs are single-use and
-        # will expire before the queued run starts.
-        if (
-            connection is not None
-            and connection.gateway is not None
-            and connection.gateway.auth_method == "interactive"
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This machine is currently busy and the connection uses an "
-                    "interactive gateway with single-use 2FA credentials. "
-                    "Queuing is not possible — the OTP would expire before the "
-                    "run starts. Please try again when the machine is free."
-                ),
-            )
-        # Machine is busy — enqueue.
-        queued = QueuedRun(
-            queue_id=str(uuid.uuid4()),
-            run_id=run_id,
-            branch=body.branch,
-            arch=body.arch,
-            machine_id=machine_id,
-            connection_name=connection_name,
-            triggered_by=username,
-            connection=connection,
-            target_key_path=target_key_path,
-            gateway_key_path=gateway_key_path,
-            gateway_password=body.gateway_password,
-            gateway_otp=body.gateway_otp,
-            cfg=cfg,
-            skip_unit=body.skip_unit,
-            skip_regression=body.skip_regression,
-            log_path=log_path,
-        )
-        position = await enqueue_run(queued)
+
+    if result.outcome == "started":
+        return TriggerResponse(run_id=result.run_id)
+    if result.outcome == "queued":
         return TriggerResponse(
-            run_id=run_id,
+            run_id=result.run_id,
             queued=True,
-            queue_id=queued.queue_id,
-            position=position,
+            queue_id=result.queue_id,
+            position=result.position,
         )
+    if result.outcome == "missing_connection":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.detail or "Connection not found.",
+        )
+    if result.outcome == "missing_key":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=result.detail or "Required SSH key is missing on disk.",
+        )
+    if result.outcome == "busy_interactive":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This machine is currently busy and the connection uses an "
+                "interactive gateway with single-use 2FA credentials. "
+                "Queuing is not possible - the OTP would expire before the "
+                "run starts. Please try again when the machine is free."
+            ),
+        )
+    # Should be unreachable.
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Unknown start_run outcome: {result.outcome}",
+    )
 
 
 @router.post("/current/cancel")

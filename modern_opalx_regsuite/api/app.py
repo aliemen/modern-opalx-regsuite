@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,12 +13,14 @@ from fastapi.staticfiles import StaticFiles
 
 from ..config import load_config
 from ..data_model import runs_index_path
+from ..scheduler.task import scheduler_loop
 from .archive import router as archive_router
 from .auth import REFRESH_COOKIE_NAME, TokenResponse
 from .tokens import create_access_token, verify_refresh_token
 from .branches import router as branches_router
 from .results import router as results_router
 from .runs import router as runs_router
+from .schedules import router as schedules_router
 from .coordinator import shutdown_coordinator
 from .state import clear_all_state, get_active_run
 from .stream import router as stream_router
@@ -25,7 +28,11 @@ from .stream import router as stream_router
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """On startup, heal any stale 'running' runs left by a previous crash."""
+    """On startup, heal any stale 'running' runs left by a previous crash,
+    and launch the weekly-schedule background task."""
+    scheduler_task: asyncio.Task | None = None
+    scheduler_stop = asyncio.Event()
+    cfg = None
     try:
         cfg = load_config()
         data_root = cfg.resolved_data_root
@@ -33,9 +40,22 @@ async def _lifespan(app: FastAPI):
     except Exception:
         pass  # Config might not be initialised yet; non-fatal.
     clear_all_state()
-    yield
-    # Shutdown the pipeline thread pool on exit.
-    shutdown_coordinator()
+    if cfg is not None:
+        scheduler_task = asyncio.create_task(
+            scheduler_loop(cfg, scheduler_stop),
+            name="opalx-scheduler",
+        )
+    try:
+        yield
+    finally:
+        # Stop the scheduler loop cleanly, then shut down the pipeline thread pool.
+        scheduler_stop.set()
+        if scheduler_task is not None:
+            try:
+                await asyncio.wait_for(scheduler_task, timeout=5.0)
+            except (asyncio.TimeoutError, Exception):
+                scheduler_task.cancel()
+        shutdown_coordinator()
 
 
 def _heal_stale_runs(data_root: Path) -> None:
@@ -115,6 +135,7 @@ def create_app() -> FastAPI:
 
     # Register API routers.
     app.include_router(runs_router)
+    app.include_router(schedules_router)
     app.include_router(stream_router)
     app.include_router(results_router)
     app.include_router(archive_router)

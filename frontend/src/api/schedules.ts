@@ -38,6 +38,7 @@ export interface Schedule {
   connection_name: string;
   skip_unit: boolean;
   skip_regression: boolean;
+  public: boolean;
   owner: string;
   created_at: string;
   modified_at: string;
@@ -57,6 +58,7 @@ export interface ScheduleWriteBody {
   connection_name: string;
   skip_unit: boolean;
   skip_regression: boolean;
+  public: boolean;
 }
 
 export async function listSchedules(): Promise<Schedule[]> {

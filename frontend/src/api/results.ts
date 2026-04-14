@@ -19,6 +19,7 @@ export interface RunIndexEntry {
   regression_failed: number;
   regression_broken: number;
   archived: boolean;
+  public: boolean;
 }
 
 export interface UnitTestCase {
@@ -78,6 +79,7 @@ export interface RunMeta {
   regression_failed: number;
   regression_broken: number;
   archived: boolean;
+  public: boolean;
 }
 
 export interface RunDetail {
@@ -156,6 +158,19 @@ export async function deleteRun(
   runId: string
 ): Promise<void> {
   await api.delete(`/api/results/branches/${branch}/archs/${arch}/runs/${runId}`);
+}
+
+export async function setRunVisibility(
+  branch: string,
+  arch: string,
+  runId: string,
+  isPublic: boolean
+): Promise<RunIndexEntry> {
+  const res = await api.patch<RunIndexEntry>(
+    `/api/results/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs/${encodeURIComponent(runId)}/visibility`,
+    { public: isPublic }
+  );
+  return res.data;
 }
 
 // ── Bulk archive / unarchive / hard-delete ────────────────────────────────

@@ -71,6 +71,7 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
             regression_failed=meta.regression_failed,
             regression_broken=meta.regression_broken,
             archived=meta.archived,
+            public=meta.public,
         )
         entries.append(entry)
         entries.sort(key=lambda e: e.started_at, reverse=True)
@@ -101,6 +102,7 @@ def run_pipeline(
     gateway_key_path: Optional[Path] = None,
     repo_locks: Optional[dict[str, threading.Lock]] = None,
     triggered_by: str = "",
+    public: bool = False,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -141,6 +143,7 @@ def run_pipeline(
         status="running",
         connection_name=connection_name,
         triggered_by=triggered_by or None,
+        public=public,
     )
     _write_json(paths.meta_path, meta.model_dump())
 

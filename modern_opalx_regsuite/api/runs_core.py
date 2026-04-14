@@ -56,6 +56,7 @@ async def start_run(
     skip_unit: bool,
     skip_regression: bool,
     connection_name: Optional[str],
+    public: bool = False,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> StartRunResult:
@@ -146,6 +147,7 @@ async def start_run(
         connection_name=resolved_conn_name,
         log_path=log_path,
         triggered_by=triggered_by,
+        public=public,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -189,6 +191,7 @@ async def start_run(
         machine_id=machine_id,
         connection_name=resolved_conn_name,
         triggered_by=triggered_by,
+        public=public,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,

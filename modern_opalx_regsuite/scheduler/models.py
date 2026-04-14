@@ -58,6 +58,10 @@ class Schedule(BaseModel):
     connection_name: str = "local"  # "local" or the owner's named connection
     skip_unit: bool = False
     skip_regression: bool = False
+    # When True, runs produced by this schedule are stamped public=True in
+    # their RunMeta / RunIndexEntry and appear on the unauthenticated
+    # /api/public/* surface.
+    public: bool = False
 
     # Ownership / audit
     owner: str  # username that created the schedule
@@ -85,6 +89,7 @@ class ScheduleCreateRequest(BaseModel):
     connection_name: str = "local"
     skip_unit: bool = False
     skip_regression: bool = False
+    public: bool = False
 
 
 class ScheduleUpdateRequest(BaseModel):
@@ -101,3 +106,4 @@ class ScheduleUpdateRequest(BaseModel):
     connection_name: str = "local"
     skip_unit: bool = False
     skip_regression: bool = False
+    public: bool = False

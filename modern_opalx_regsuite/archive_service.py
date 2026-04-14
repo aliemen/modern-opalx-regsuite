@@ -166,6 +166,19 @@ def filter_entries_by_view(entries: list[dict], view: ViewMode) -> list[dict]:
     return [e for e in entries if bool(e.get("archived", False)) is want_archived]
 
 
+def filter_public_entries(entries: list[dict]) -> list[dict]:
+    """Keep only entries that are ``public=True`` and not ``archived``.
+
+    Used by the unauthenticated public API surface to guarantee both the
+    visibility filter and the soft-delete filter are applied consistently.
+    """
+    return [
+        e
+        for e in entries
+        if bool(e.get("public", False)) and not bool(e.get("archived", False))
+    ]
+
+
 def filter_entries_by_user(entries: list[dict], triggered_by: str) -> list[dict]:
     """Keep only entries whose ``triggered_by`` matches *triggered_by*.
 
@@ -249,6 +262,92 @@ def _set_archived_in_index_file(
         if run_id_filter is not None:
             not_found = sorted(run_id_filter - seen_ids)
     return changed, skipped, not_found
+
+
+def _patch_run_meta_public(
+    data_root: Path, branch: str, arch: str, run_id: str, public: bool
+) -> bool:
+    """Flip ``public`` on a run's ``run-meta.json``. Returns True on success."""
+    rdir = run_dir(data_root, branch, arch, run_id)
+    meta_path = rdir / "run-meta.json"
+    if not meta_path.is_file():
+        return False
+    with meta_path.open("r", encoding="utf-8") as f:
+        try:
+            raw = json.load(f)
+        except json.JSONDecodeError:
+            return False
+    try:
+        meta = RunMeta.model_validate(raw)
+    except Exception:
+        return False
+    if meta.public == public:
+        return True
+    meta.public = public
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(meta.model_dump(), f, indent=2, default=str)
+    return True
+
+
+def _set_public_in_index_file(
+    index_path: Path,
+    public: bool,
+    *,
+    run_id_filter: Optional[set[str]] = None,
+) -> tuple[list[str], list[str]]:
+    """Flip ``public`` on entries in *index_path* under an exclusive lock.
+
+    Mirrors :func:`_set_archived_in_index_file` but for the ``public`` key.
+    No ``protect_run_ids`` check because publishing or unpublishing does not
+    interact with the run-slot / machine-busy state.
+
+    Returns ``(changed_run_ids, not_found_run_ids)``.
+    """
+    changed: list[str] = []
+    not_found: list[str] = []
+    with locked_index(index_path):
+        entries = _read_index(index_path)
+        seen_ids: set[str] = set()
+        for entry in entries:
+            rid = entry.get("run_id")
+            if not isinstance(rid, str):
+                continue
+            seen_ids.add(rid)
+            if run_id_filter is not None and rid not in run_id_filter:
+                continue
+            current = bool(entry.get("public", False))
+            if current == public:
+                continue
+            entry["public"] = public
+            changed.append(rid)
+        if changed:
+            _write_index(index_path, entries)
+        if run_id_filter is not None:
+            not_found = sorted(run_id_filter - seen_ids)
+    return changed, not_found
+
+
+def _set_public_for_index(
+    data_root: Path,
+    branch: str,
+    arch: str,
+    public: bool,
+    *,
+    run_id_filter: Optional[set[str]],
+) -> tuple[int, list[str]]:
+    """Update one branch+arch index file plus each affected run-meta.json.
+
+    Returns ``(changed_count, not_found_run_ids)``.
+    """
+    index_path = runs_index_path(data_root, branch, arch)
+    changed_ids, not_found_ids = _set_public_in_index_file(
+        index_path,
+        public,
+        run_id_filter=run_id_filter,
+    )
+    for rid in changed_ids:
+        _patch_run_meta_public(data_root, branch, arch, rid, public)
+    return len(changed_ids), not_found_ids
 
 
 def _set_archived_for_index(
@@ -381,6 +480,49 @@ def set_archived_for_runs(
         skipped_active=skipped,
         not_found=not_found,
     )
+
+
+def set_public_for_runs(
+    data_root: Path,
+    branch: str,
+    arch: str,
+    run_ids: Iterable[str],
+    public: bool,
+) -> ArchiveResult:
+    """Publish or unpublish an explicit list of run ids in one branch+arch.
+
+    Mirrors :func:`set_archived_for_runs` but flips the ``public`` flag. No
+    ``protect_run_ids`` check — publishing never conflicts with run-slot
+    ownership. Allowed on the protected branch.
+    """
+    requested = set(run_ids)
+    if not requested:
+        return ArchiveResult()
+    changed, not_found = _set_public_for_index(
+        data_root,
+        branch,
+        arch,
+        public,
+        run_id_filter=requested,
+    )
+    return ArchiveResult(changed=changed, not_found=not_found)
+
+
+def set_public_for_branch_arch(
+    data_root: Path,
+    branch: str,
+    arch: str,
+    public: bool,
+) -> ArchiveResult:
+    """Publish or unpublish every run for *branch* + *arch* (used by the CLI)."""
+    changed, _ = _set_public_for_index(
+        data_root,
+        branch,
+        arch,
+        public,
+        run_id_filter=None,
+    )
+    return ArchiveResult(changed=changed)
 
 
 def hard_delete_runs(

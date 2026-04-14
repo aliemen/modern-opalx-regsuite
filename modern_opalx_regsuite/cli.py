@@ -346,6 +346,106 @@ def archive_cmd(
         )
 
 
+@app.command("patch-visibility")
+def patch_visibility(
+    branch: str = typer.Option(
+        ...,
+        "--branch",
+        "-b",
+        help="Branch to patch.",
+    ),
+    arch: Optional[str] = typer.Option(
+        None,
+        "--arch",
+        "-a",
+        help="Restrict to a single architecture. Omit to apply to every arch of the branch.",
+    ),
+    run_id: Optional[list[str]] = typer.Option(
+        None,
+        "--run-id",
+        help="Restrict to specific run id(s). Repeat to pass multiple. Requires --arch.",
+    ),
+    public: bool = typer.Option(
+        False,
+        "--public",
+        help="Mark runs as public (visible on /api/public/*).",
+    ),
+    private: bool = typer.Option(
+        False,
+        "--private",
+        help="Mark runs as private (the default for new runs).",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml.",
+    ),
+) -> None:
+    """Bulk publish or unpublish historical runs.
+
+    Patches the ``public`` flag in both ``run-meta.json`` and the
+    corresponding ``runs-index/<branch>/<arch>.json`` entry, under the same
+    ``fcntl.flock`` used by the pipeline completion writer — safe to run
+    against a live server.
+
+    Examples
+    --------
+    # Publish every run of master/cpu-serial.
+    $ opalx-regsuite patch-visibility --branch master --arch cpu-serial --public
+
+    # Unpublish a single run.
+    $ opalx-regsuite patch-visibility -b master -a cpu-serial \\
+        --run-id 20260305-131642 --private
+
+    # Publish the whole branch (all archs).
+    $ opalx-regsuite patch-visibility --branch feature/demo --public
+    """
+    if public == private:
+        typer.echo(
+            "Error: specify exactly one of --public or --private.", err=True
+        )
+        raise typer.Exit(code=2)
+    if run_id and not arch:
+        typer.echo("Error: --run-id requires --arch.", err=True)
+        raise typer.Exit(code=2)
+
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+    want_public = public
+    action = "publish" if want_public else "unpublish"
+
+    if run_id:
+        result = archive_service.set_public_for_runs(
+            data_root, branch, arch, run_id, public=want_public
+        )
+    elif arch:
+        result = archive_service.set_public_for_branch_arch(
+            data_root, branch, arch, public=want_public
+        )
+    else:
+        # Walk every arch the branch has ever produced.
+        total = 0
+        for a in archive_service._list_archs_for_branch(data_root, branch):
+            r = archive_service.set_public_for_branch_arch(
+                data_root, branch, a, public=want_public
+            )
+            total += r.changed
+        typer.echo(
+            f"{action.title()}ed {total} run(s) across all archs of branch={branch}."
+        )
+        return
+
+    typer.echo(
+        f"{action.title()}ed {result.changed} run(s) "
+        f"(branch={branch}"
+        + (f", arch={arch}" if arch else "")
+        + ")."
+    )
+    if result.not_found:
+        typer.echo("Not found in index: " + ", ".join(sorted(result.not_found)))
+
+
 @app.command()
 def serve(
     host: str = typer.Option(None, "--host", help="Bind host (overrides config)."),

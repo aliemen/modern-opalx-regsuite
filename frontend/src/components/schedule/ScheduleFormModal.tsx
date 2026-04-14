@@ -33,6 +33,7 @@ function defaultBody(): ScheduleWriteBody {
     connection_name: LOCAL_CONNECTION,
     skip_unit: false,
     skip_regression: false,
+    public: false,
   };
 }
 
@@ -47,6 +48,7 @@ function scheduleToBody(schedule: Schedule): ScheduleWriteBody {
     connection_name: schedule.connection_name,
     skip_unit: schedule.skip_unit,
     skip_regression: schedule.skip_regression,
+    public: schedule.public,
   };
 }
 
@@ -297,6 +299,20 @@ export function ScheduleFormModal({
               Skip regression tests
             </label>
           </div>
+
+          <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.public}
+              onChange={(e) => updateField("public", e.target.checked)}
+              className="accent-accent"
+            />
+            Publish runs automatically
+          </label>
+          <p className="text-muted text-xs -mt-2 ml-6">
+            Runs produced by this schedule will be visible on the public
+            landing page.
+          </p>
 
           <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
             <input

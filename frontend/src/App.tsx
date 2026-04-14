@@ -6,6 +6,7 @@ import { getAccessToken, setAccessToken } from "./api/client";
 import { tryRefresh } from "./api/auth";
 import { NavBar } from "./components/NavBar";
 import { LoginPage } from "./pages/LoginPage";
+import { PublicRunDetailPage } from "./pages/PublicRunDetailPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { TriggerPage } from "./pages/TriggerPage";
 import { LiveRunPage } from "./pages/LiveRunPage";
@@ -58,6 +59,10 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/public/runs/:branch/:arch/:runId"
+            element={<PublicRunDetailPage />}
+          />
           <Route element={<AuthGuard />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/activity" element={<ActivityPage />} />

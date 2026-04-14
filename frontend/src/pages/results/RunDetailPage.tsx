@@ -1,21 +1,21 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Trash2 } from "lucide-react";
-import { archiveRun, deleteRun, getRunDetail, type RegressionSimulation } from "../../api/results";
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
+import { archiveRun, deleteRun, getRunDetail, setRunVisibility, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 
-function fmtNum(n: number | null | undefined, digits = 4) {
+export function fmtNum(n: number | null | undefined, digits = 4) {
   if (n === null || n === undefined) return "—";
   return n.toExponential(digits);
 }
 
-function fmtDate(d: string | null) {
+export function fmtDate(d: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleString();
 }
 
-function fmtDuration(seconds: number | null | undefined): string {
+export function fmtDuration(seconds: number | null | undefined): string {
   if (seconds == null) return "—";
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const m = Math.floor(seconds / 60);
@@ -23,14 +23,14 @@ function fmtDuration(seconds: number | null | undefined): string {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
-function duration(start: string, end: string | null) {
+export function duration(start: string, end: string | null) {
   if (!end) return "—";
   const s = Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000);
   const m = Math.floor(s / 60);
   return `${m}m ${(s % 60).toString().padStart(2, "0")}s`;
 }
 
-function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
+export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
   const [open, setOpen] = useState(false); // default closed for better overview
 
   const passedCount  = sim.metrics.filter((m) => m.state === "passed").length;
@@ -173,10 +173,10 @@ function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string 
   );
 }
 
-const OPALX_COMMIT_BASE = "https://github.com/OPALX-project/OPALX/commit";
-const REGTESTS_COMMIT_BASE = "https://github.com/OPALX-project/regression-tests-x/commit";
+export const OPALX_COMMIT_BASE = "https://github.com/OPALX-project/OPALX/commit";
+export const REGTESTS_COMMIT_BASE = "https://github.com/OPALX-project/regression-tests-x/commit";
 
-function CommitLink({ hash, base }: { hash: string | null; base: string }) {
+export function CommitLink({ hash, base }: { hash: string | null; base: string }) {
   if (!hash) return <span className="text-muted">—</span>;
   const short = hash.slice(0, 10);
   return (
@@ -221,6 +221,30 @@ export function RunDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["run-detail", branch, arch, runId] });
       queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
+    },
+  });
+
+  const [publishNotice, setPublishNotice] = useState<string | null>(null);
+  const publishMutation = useMutation({
+    mutationFn: (isPublic: boolean) =>
+      setRunVisibility(branch!, arch!, runId!, isPublic),
+    onSuccess: (_entry, isPublic) => {
+      queryClient.invalidateQueries({ queryKey: ["run-detail", branch, arch, runId] });
+      queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
+      queryClient.invalidateQueries({ queryKey: ["public", "all-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["public", "activity"] });
+      if (isPublic) {
+        const publicUrl = `${window.location.origin}/public/runs/${encodeURIComponent(branch!)}/${encodeURIComponent(arch!)}/${encodeURIComponent(runId!)}`;
+        try {
+          navigator.clipboard.writeText(publicUrl);
+          setPublishNotice("Published \u2014 public link copied to clipboard.");
+        } catch {
+          setPublishNotice(`Published \u2014 public link: ${publicUrl}`);
+        }
+      } else {
+        setPublishNotice("Unpublished. This run is no longer visible on the public page.");
+      }
+      setTimeout(() => setPublishNotice(null), 5000);
     },
   });
 
@@ -282,6 +306,19 @@ export function RunDetailPage() {
         ) : (
           <div className="flex items-center gap-3">
             <button
+              onClick={() => publishMutation.mutate(!meta.public)}
+              disabled={publishMutation.isPending}
+              className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors disabled:opacity-50"
+              title={meta.public ? "Make this run private" : "Publish this run"}
+            >
+              {meta.public ? <Lock size={14} /> : <Globe2 size={14} />}
+              {publishMutation.isPending
+                ? "Saving\u2026"
+                : meta.public
+                ? "Unpublish"
+                : "Publish"}
+            </button>
+            <button
               onClick={() => setConfirmArchive(true)}
               className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
               title={meta.archived ? "Unarchive run" : "Archive run"}
@@ -299,6 +336,12 @@ export function RunDetailPage() {
         )}
       </div>
 
+      {publishNotice && (
+        <div className="bg-accent/10 border border-accent/40 text-accent text-sm rounded-lg px-4 py-2">
+          {publishNotice}
+        </div>
+      )}
+
       {/* Meta card */}
       <div className="bg-surface border border-border rounded-xl p-5 grid sm:grid-cols-2 gap-4 text-sm">
         <div className="space-y-1">
@@ -307,7 +350,20 @@ export function RunDetailPage() {
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Status</p>
-          <StatusBadge status={meta.status} size="md" />
+          <div className="flex items-center gap-2">
+            <StatusBadge status={meta.status} size="md" />
+            {meta.public ? (
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-accent/40 text-accent bg-accent/10">
+                <Globe2 size={10} />
+                Public
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-border text-muted">
+                <Lock size={10} />
+                Private
+              </span>
+            )}
+          </div>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Branch / Arch</p>

@@ -13,6 +13,7 @@ from ..archive_service import (
     filter_entries_by_user,
     filter_entries_by_view,
     list_visible_branches,
+    set_public_for_runs,
 )
 from ..config import SuiteConfig
 from ..data_model import (
@@ -41,6 +42,10 @@ class RunDetail(BaseModel):
 class PaginatedRuns(BaseModel):
     runs: list[RunIndexEntry]
     total: int
+
+
+class VisibilityBody(BaseModel):
+    public: bool
 
 
 @router.get("/branches")
@@ -160,6 +165,57 @@ def get_run(
         meta=RunMeta.model_validate(meta_data),
         unit=UnitTestsReport.model_validate(unit_data) if unit_data else UnitTestsReport(),
         regression=RegressionTestsReport.model_validate(reg_data) if reg_data else RegressionTestsReport(),
+    )
+
+
+@router.patch(
+    "/branches/{branch}/archs/{arch}/runs/{run_id}/visibility",
+    response_model=RunIndexEntry,
+)
+def set_run_visibility(
+    branch: str,
+    arch: str,
+    run_id: str,
+    body: VisibilityBody,
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> RunIndexEntry:
+    """Publish or unpublish a single run.
+
+    Flips both the ``run-meta.json`` and the ``runs-index/<branch>/<arch>.json``
+    entry under the same ``fcntl.flock`` used by archive mutations and the
+    pipeline completion writer. Any authenticated user may toggle visibility
+    of any run (same policy as archive/delete).
+    """
+    # Guard: make sure the run actually exists on disk before mutating state,
+    # so a typo returns 404 instead of silently succeeding with 0 changes.
+    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
+    if not rdir.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found."
+        )
+
+    result = set_public_for_runs(
+        cfg.resolved_data_root, branch, arch, [run_id], body.public
+    )
+    if result.not_found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Run '{run_id}' is missing from the runs index.",
+        )
+
+    # Return the updated index entry so the frontend can update its cache
+    # without a second round trip.
+    idx_path = runs_index_path(cfg.resolved_data_root, branch, arch)
+    if idx_path.is_file():
+        with idx_path.open("r", encoding="utf-8") as f:
+            entries = json.load(f)
+        for e in entries:
+            if e.get("run_id") == run_id:
+                return RunIndexEntry.model_validate(e)
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Run '{run_id}' disappeared from the index after update.",
     )
 
 

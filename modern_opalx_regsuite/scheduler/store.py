@@ -88,6 +88,7 @@ async def create_schedule(
         connection_name=body.connection_name,
         skip_unit=body.skip_unit,
         skip_regression=body.skip_regression,
+        public=body.public,
         owner=owner,
         created_at=now,
         modified_at=now,
@@ -122,6 +123,7 @@ async def update_schedule(
                         "connection_name": body.connection_name,
                         "skip_unit": body.skip_unit,
                         "skip_regression": body.skip_regression,
+                        "public": body.public,
                         "modified_at": now,
                     }
                 )

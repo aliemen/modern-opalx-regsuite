@@ -18,6 +18,7 @@ from .archive import router as archive_router
 from .auth import REFRESH_COOKIE_NAME, TokenResponse
 from .tokens import create_access_token, verify_refresh_token
 from .branches import router as branches_router
+from .public import router as public_router
 from .results import router as results_router
 from .runs import router as runs_router
 from .schedules import router as schedules_router
@@ -140,6 +141,9 @@ def create_app() -> FastAPI:
     app.include_router(results_router)
     app.include_router(archive_router)
     app.include_router(branches_router)
+    # Public unauthenticated surface — explicitly mounted without any auth
+    # dependency. See api/public.py for the security invariants.
+    app.include_router(public_router)
 
     from .stats import router as stats_router
     app.include_router(stats_router)

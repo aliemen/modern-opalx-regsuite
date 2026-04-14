@@ -141,6 +141,12 @@ class RunMeta(BaseModel):
     # in-place by the archive service; never moves files on disk.
     archived: bool = False
 
+    # Visibility flag. False = private (default); True = visible on the
+    # unauthenticated /api/public/* surface. Flipped via the publish button
+    # on the run detail page, or stamped at run creation when a schedule has
+    # public=True.
+    public: bool = False
+
     @property
     def duration_seconds(self) -> Optional[float]:
         if self.finished_at is None:
@@ -168,6 +174,7 @@ class RunIndexEntry(BaseModel):
     regression_failed: int = 0
     regression_broken: int = 0
     archived: bool = False
+    public: bool = False
 
 
 class BranchIndex(BaseModel):

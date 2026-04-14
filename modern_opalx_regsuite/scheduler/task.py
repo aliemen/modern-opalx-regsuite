@@ -101,6 +101,7 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
             skip_unit=schedule.skip_unit,
             skip_regression=schedule.skip_regression,
             connection_name=schedule.connection_name,
+            public=schedule.public,
         )
     except Exception as exc:  # noqa: BLE001 — never let one schedule kill the loop
         log.exception("Schedule %s (%s): start_run raised", schedule.id, schedule.name)

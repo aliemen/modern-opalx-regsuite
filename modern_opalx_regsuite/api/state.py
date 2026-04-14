@@ -40,6 +40,9 @@ class ActiveRun:
     machine_id: str
     connection_name: str  # "local" or the user-chosen connection label
     triggered_by: str = ""  # username that triggered the run
+    # Visibility flag carried from start_run → pipeline. Scheduler fills this
+    # from the schedule's public option; HTTP trigger leaves it False.
+    public: bool = False
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -64,6 +67,7 @@ class QueuedRun:
     machine_id: str
     connection_name: str
     triggered_by: str = ""  # username that triggered the run
+    public: bool = False
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -129,6 +133,7 @@ async def acquire_run_slot(
     connection_name: str,
     log_path: Optional[Path],
     triggered_by: str = "",
+    public: bool = False,
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -152,6 +157,7 @@ async def acquire_run_slot(
             machine_id=machine_id,
             connection_name=connection_name,
             triggered_by=triggered_by,
+            public=public,
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

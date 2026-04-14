@@ -94,6 +94,7 @@ class RunCoordinator:
                 gateway_key_path=active.gateway_key_path,
                 repo_locks=repo_locks,
                 triggered_by=active.triggered_by,
+                public=active.public,
                 gateway_password=active.gateway_password,
                 gateway_otp=active.gateway_otp,
             )
@@ -158,6 +159,7 @@ class RunCoordinator:
             connection_name=queued.connection_name,
             log_path=queued.log_path,
             triggered_by=queued.triggered_by,
+            public=queued.public,
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,

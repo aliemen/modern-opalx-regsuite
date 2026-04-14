@@ -33,17 +33,31 @@ function toChartData(days: ActivityDay[]): ChartPoint[] {
   }));
 }
 
+interface ActivitySparklineProps {
+  /** Query key used by react-query; override to avoid colliding caches. */
+  queryKey?: unknown[];
+  /** Fetcher returning `{ days: ActivityDay[] }`; defaults to the authenticated
+   *  developer endpoint. The public panel passes `getPublicActivity`. */
+  fetcher?: () => Promise<{ days: ActivityDay[] }>;
+  /** Header title. Default "Activity (14d)". */
+  title?: string;
+}
+
 /**
  * "Activity (14d)" — daily run-count breakdown over the last 14 days
  * across all branches and archs. Shows volume + health at a glance,
  * complementing the per-master-arch trend chart with a CI-wide view.
  */
-export function ActivitySparkline() {
+export function ActivitySparkline({
+  queryKey = ["dashboard-stats", "activity"],
+  fetcher = () => getActivity(14, "active"),
+  title = "Activity (14d)",
+}: ActivitySparklineProps = {}) {
   const colors = useThemeColors();
 
   const { data } = useQuery({
-    queryKey: ["dashboard-stats", "activity"],
-    queryFn: () => getActivity(14, "active"),
+    queryKey,
+    queryFn: fetcher,
     refetchInterval: 60_000,
   });
 
@@ -56,7 +70,7 @@ export function ActivitySparkline() {
     <div className="bg-surface border border-border rounded-xl p-5">
       <h2 className="text-fg font-medium text-sm mb-4 flex items-center gap-2">
         <Activity size={14} className="text-muted" />
-        Activity (14d)
+        {title}
       </h2>
       {!hasAnyRuns ? (
         <p className="text-muted text-xs py-2">

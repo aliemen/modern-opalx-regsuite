@@ -17,9 +17,10 @@ gateways are rejected (the scheduler cannot handle single-use OTPs).
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from ..config import SuiteConfig
 from ..scheduler.models import (
@@ -34,6 +35,7 @@ from ..scheduler.store import (
     list_schedules,
     update_schedule,
 )
+from ..scheduler.task import scheduler_is_running, scheduler_last_tick
 from ..scheduler.validation import (
     ScheduleValidationError,
     resolve_scheduled_connection,
@@ -41,6 +43,27 @@ from ..scheduler.validation import (
 from .deps import get_config, require_auth
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
+
+
+class SchedulerStatus(BaseModel):
+    running: bool
+    last_tick_at: Optional[str] = None
+
+
+@router.get("/status", response_model=SchedulerStatus)
+async def get_scheduler_status(
+    _user: Annotated[str, Depends(require_auth)],
+) -> SchedulerStatus:
+    """Return whether the background scheduler task is alive and when it last ticked.
+
+    ``running: false`` means the scheduler was never started (likely a config
+    load failure on server startup — check server logs for details).
+    """
+    last = scheduler_last_tick()
+    return SchedulerStatus(
+        running=scheduler_is_running(),
+        last_tick_at=last.isoformat() if last is not None else None,
+    )
 
 
 def _validate_connection_for_owner(

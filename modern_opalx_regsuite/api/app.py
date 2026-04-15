@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -26,6 +27,8 @@ from .coordinator import shutdown_coordinator
 from .state import clear_all_state, get_active_run
 from .stream import router as stream_router
 
+log = logging.getLogger("opalx.app")
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -39,13 +42,18 @@ async def _lifespan(app: FastAPI):
         data_root = cfg.resolved_data_root
         _heal_stale_runs(data_root)
     except Exception:
-        pass  # Config might not be initialised yet; non-fatal.
+        log.error(
+            "Failed to load config on startup — scheduled triggers will NOT run. "
+            "Check that config.toml exists and is valid.",
+            exc_info=True,
+        )
     clear_all_state()
     if cfg is not None:
         scheduler_task = asyncio.create_task(
             scheduler_loop(cfg, scheduler_stop),
             name="opalx-scheduler",
         )
+        log.info("Scheduler task started.")
     try:
         yield
     finally:

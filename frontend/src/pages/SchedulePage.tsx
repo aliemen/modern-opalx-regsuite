@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, CalendarClock } from "lucide-react";
+import { Plus, CalendarClock, AlertTriangle } from "lucide-react";
 import { getCurrentUser } from "../api/user";
 import type { Schedule, ScheduleWriteBody } from "../api/schedules";
+import { getSchedulerStatus } from "../api/schedules";
 import { useScheduleMutations, useSchedulesQuery } from "../hooks/useSchedules";
 import { ScheduleCard } from "../components/schedule/ScheduleCard";
 import { ScheduleFormModal } from "../components/schedule/ScheduleFormModal";
@@ -13,6 +14,11 @@ export function SchedulePage() {
   const { data: me } = useQuery({
     queryKey: ["auth-me"],
     queryFn: getCurrentUser,
+  });
+  const { data: schedulerStatus } = useQuery({
+    queryKey: ["scheduler-status"],
+    queryFn: getSchedulerStatus,
+    refetchInterval: 60_000,
   });
   const { createMut, updateMut, toggleMut, deleteMut } = useScheduleMutations();
 
@@ -70,6 +76,17 @@ export function SchedulePage() {
           New schedule
         </button>
       </div>
+
+      {schedulerStatus && !schedulerStatus.running && (
+        <div className="flex items-start gap-3 bg-surface border border-yellow-500/40 text-yellow-400 rounded-xl px-4 py-3 mb-4 text-sm">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            <strong>Scheduler is not running.</strong> Schedules will not fire
+            until the server is restarted with a valid config. Check the server
+            logs for a config load error.
+          </span>
+        </div>
+      )}
 
       {isLoading && (
         <p className="text-muted text-sm">Loading schedules...</p>

@@ -28,6 +28,20 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("opalx.scheduler")
 
+# Simple in-process health flag: True while the scheduler loop is alive.
+# Exposed via GET /api/schedules/status so operators can tell whether the
+# scheduler task was ever started (e.g. to diagnose a config-load failure).
+_scheduler_running: bool = False
+_last_tick_at: datetime | None = None
+
+
+def scheduler_is_running() -> bool:
+    return _scheduler_running
+
+
+def scheduler_last_tick() -> datetime | None:
+    return _last_tick_at
+
 
 def _now_local() -> datetime:
     """Return the current wall-clock time in server-local time (naive)."""
@@ -134,6 +148,8 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
 
 async def _tick(cfg: SuiteConfig, now: datetime) -> None:
     """Run one scheduler iteration: find all matching schedules and fire them."""
+    global _last_tick_at
+    _last_tick_at = now
     try:
         schedules = await list_schedules(cfg)
     except Exception:
@@ -162,6 +178,8 @@ async def _tick(cfg: SuiteConfig, now: datetime) -> None:
 
 async def scheduler_loop(cfg: SuiteConfig, stop: asyncio.Event) -> None:
     """Main scheduler loop. Aligns its wake-ups to wall-clock minute boundaries."""
+    global _scheduler_running
+    _scheduler_running = True
     log.info("Scheduler loop starting")
     # Run one tick right away so a freshly enabled schedule fires at its next
     # minute boundary without a 60s delay on startup.
@@ -184,4 +202,5 @@ async def scheduler_loop(cfg: SuiteConfig, stop: asyncio.Event) -> None:
             await _tick(cfg, _now_local())
         except Exception:
             log.exception("Scheduler: tick failed")
+    _scheduler_running = False
     log.info("Scheduler loop stopped")

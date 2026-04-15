@@ -92,3 +92,13 @@ export async function toggleSchedule(id: string): Promise<Schedule> {
 export async function deleteSchedule(id: string): Promise<void> {
   await api.delete(`/api/schedules/${encodeURIComponent(id)}`);
 }
+
+export interface SchedulerStatus {
+  running: boolean;
+  last_tick_at: string | null;
+}
+
+export async function getSchedulerStatus(): Promise<SchedulerStatus> {
+  const res = await api.get<SchedulerStatus>("/api/schedules/status");
+  return res.data;
+}

@@ -30,11 +30,16 @@ def _git_update_repo(repo_path: Path, branch: str, pipeline_log_path: Path) -> b
         )
         return rc == 0
 
-    ok = True
-    ok = run_git(f"fetch origin {branch}") and ok
-    ok = run_git(f"checkout {branch}") and ok
-    ok = run_git(f"pull --ff-only origin {branch}") and ok
-    return ok
+    # Fetch all remote tracking refs first; using "git fetch origin" (no branch
+    # arg) guarantees origin/{branch} is updated via the configured refspec,
+    # which is required for the reset --hard step below.
+    if not run_git("fetch origin"):
+        return False
+    if not run_git(f"checkout {branch}"):
+        return False
+    # Hard-reset to the remote tracking ref instead of ff-only pull so the
+    # local branch always matches origin exactly, even if it diverged.
+    return run_git(f"reset --hard origin/{branch}")
 
 
 def _git_head_short(repo_path: Path) -> Optional[str]:

@@ -1089,13 +1089,23 @@ class RemoteExecutor:
         repo_name = Path(remote_path).name
         if self.path_exists(f"{remote_path}/.git"):
             self._log(f"[{self._connection_name}] Updating {repo_name} (branch={branch})...")
+            # Fetch all remote tracking refs so origin/{branch} is guaranteed
+            # up to date. Using "git fetch origin" (no branch arg) ensures the
+            # configured refspec maps refs/heads/* → refs/remotes/origin/* for
+            # all branches, which is required for the reset --hard step below.
             rc_fetch = self.run_command(
-                f"git fetch origin {shlex.quote(branch)}",
+                "git fetch origin",
                 remote_cwd=remote_path,
                 log_path=log_path,
                 append_log=True,
                 cancel_event=cancel_event,
             )
+            if rc_fetch != 0:
+                self._log(
+                    f"[{self._connection_name}] WARNING: {repo_name} fetch failed"
+                    " — aborting update to avoid building stale code."
+                )
+                return False
             rc_checkout = self.run_command(
                 f"git checkout {shlex.quote(branch)}",
                 remote_cwd=remote_path,
@@ -1103,19 +1113,27 @@ class RemoteExecutor:
                 append_log=True,
                 cancel_event=cancel_event,
             )
-            rc_pull = self.run_command(
-                f"git pull --ff-only origin {shlex.quote(branch)}",
+            if rc_checkout != 0:
+                self._log(
+                    f"[{self._connection_name}] WARNING: {repo_name} checkout of"
+                    f" {branch} failed."
+                )
+                return False
+            # Hard-reset to the remote tracking ref instead of ff-only pull.
+            # This is deterministic even if the local branch has diverged (e.g.
+            # after a manual commit on the remote during debugging).
+            rc_reset = self.run_command(
+                f"git reset --hard origin/{shlex.quote(branch)}",
                 remote_cwd=remote_path,
                 log_path=log_path,
                 append_log=True,
                 cancel_event=cancel_event,
             )
-            ok = rc_fetch == 0 and rc_checkout == 0 and rc_pull == 0
-            if ok:
+            if rc_reset == 0:
                 self._log(f"[{self._connection_name}] {repo_name} updated.")
             else:
-                self._log(f"[{self._connection_name}] WARNING: {repo_name} update had errors.")
-            return ok
+                self._log(f"[{self._connection_name}] WARNING: {repo_name} reset failed.")
+            return rc_reset == 0
         else:
             parent = str(Path(remote_path).parent)
             self.ensure_dir(parent)

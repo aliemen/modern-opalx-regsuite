@@ -341,6 +341,21 @@ def run_pipeline(
         if cancel_event is not None and cancel_event.is_set():
             return _cancel_run(meta, paths, data_root)
 
+        # Gate: abort before cmake/build if git failed so we never build stale
+        # code (especially important on remote runs where a Slurm allocation
+        # would otherwise be consumed pointlessly).
+        if not (opalx_git_ok and reg_git_ok):
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                "Git phase failed — aborting pipeline before cmake/build.",
+            )
+            meta.status = "failed"
+            meta.finished_at = datetime.now(timezone.utc)
+            _phase(paths.pipeline_log_path, "done status=failed")
+            _write_json(paths.meta_path, meta.model_dump())
+            _update_indexes(data_root, meta)
+            return meta
+
         # ── Phase: cmake ──────────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "cmake")
         if is_remote and remote is not None:
@@ -417,8 +432,6 @@ def run_pipeline(
                 f"[{connection_name}] Build FAILED (cmake_rc={cmake_rc}, build_rc={build_rc}).",
             )
         if not build_ok:
-            meta.status = "failed"
-        if not (opalx_git_ok and reg_git_ok):
             meta.status = "failed"
 
         if cancel_event is not None and cancel_event.is_set():

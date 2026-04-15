@@ -6,13 +6,15 @@ import { useArchiveMutations } from "../hooks/useArchiveMutations";
 import { AccordionList } from "../components/AccordionList";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Group } from "../lib/grouping";
+import { GroupingControl } from "../components/GroupingControl";
+import type { Group, GroupBy } from "../lib/grouping";
 
 export function ArchivePage() {
   const { cells, branches, isLoading } = useLatestRuns("archived");
   const selection = useRunSelection();
   const mutations = useArchiveMutations();
 
+  const [groupBy, setGroupBy] = useState<GroupBy>("branch");
   const [pendingBranchUnarchive, setPendingBranchUnarchive] = useState<
     string | null
   >(null);
@@ -33,6 +35,8 @@ export function ArchivePage() {
       onClick: () => setPendingBranchUnarchive(group.label),
     };
   }
+
+  const ARCHIVE_GROUP_OPTIONS: GroupBy[] = ["branch", "regtest-branch"];
 
   async function confirmBranchUnarchive() {
     const branch = pendingBranchUnarchive;
@@ -97,9 +101,14 @@ export function ArchivePage() {
             onHardDelete={() => setPendingBulkHardDelete(true)}
             busy={busy}
           />
+          <GroupingControl
+            value={groupBy}
+            onChange={setGroupBy}
+            allowedValues={ARCHIVE_GROUP_OPTIONS}
+          />
           <AccordionList
             cells={cells}
-            groupBy="branch"
+            groupBy={groupBy}
             storageNamespace="opalx-archive-open"
             selection={selection}
             groupAction={groupAction}

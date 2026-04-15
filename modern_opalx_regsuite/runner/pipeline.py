@@ -64,6 +64,7 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
             status=meta.status,
             connection_name=meta.connection_name,
             triggered_by=meta.triggered_by,
+            regtest_branch=meta.regtest_branch,
             unit_tests_total=meta.unit_tests_total,
             unit_tests_failed=meta.unit_tests_failed,
             regression_total=meta.regression_total,
@@ -145,6 +146,7 @@ def run_pipeline(
         triggered_by=triggered_by or None,
         public=public,
     )
+    meta.regtest_branch = cfg.regtests_branch
     _write_json(paths.meta_path, meta.model_dump())
 
     # Resolve arch-specific overrides.

@@ -4,6 +4,8 @@ import type { GroupBy } from "../lib/grouping";
 interface GroupingControlProps {
   value: GroupBy;
   onChange: (value: GroupBy) => void;
+  /** Restrict which options are shown. Defaults to all four options. */
+  allowedValues?: GroupBy[];
 }
 
 const OPTIONS: {
@@ -14,6 +16,7 @@ const OPTIONS: {
   { value: "branch", label: "Branch", icon: GitBranch },
   { value: "arch", label: "Architecture", icon: Cpu },
   { value: "date", label: "Last run", icon: Calendar },
+  { value: "regtest-branch", label: "Reg Branch", icon: GitBranch },
 ];
 
 /**
@@ -21,7 +24,10 @@ const OPTIONS: {
  * grouping axis. Stateless — the parent owns the value and persistence
  * (URL query param + localStorage fallback).
  */
-export function GroupingControl({ value, onChange }: GroupingControlProps) {
+export function GroupingControl({ value, onChange, allowedValues }: GroupingControlProps) {
+  const visibleOptions = allowedValues
+    ? OPTIONS.filter((o) => allowedValues.includes(o.value))
+    : OPTIONS;
   return (
     <div className="flex items-center gap-3 mb-4">
       <span className="flex items-center gap-1.5 text-muted text-xs">
@@ -29,7 +35,7 @@ export function GroupingControl({ value, onChange }: GroupingControlProps) {
         Group by
       </span>
       <div className="inline-flex border border-border rounded-lg overflow-hidden bg-surface">
-        {OPTIONS.map((opt) => {
+        {visibleOptions.map((opt) => {
           const Icon = opt.icon;
           const active = value === opt.value;
           return (

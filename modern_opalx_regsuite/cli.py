@@ -771,6 +771,183 @@ def backfill_users(
     )
 
 
+@app.command("backfill-regtest-branches")
+def backfill_regtest_branches(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Only report what would change; do not modify any files.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing regtest_branch values (default: skip runs that already have one).",
+    ),
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml (defaults to ./config.toml or $OPALX_REGSUITE_CONFIG).",
+    ),
+) -> None:
+    """Back-fill the ``regtest_branch`` field for historical runs.
+
+    Scans every ``runs/<branch>/<arch>/<run_id>/run-meta.json``. For runs
+    that are missing ``regtest_branch`` (or, with ``--force``, all runs), it
+    uses ``git branch -a --contains <tests_repo_commit>`` against the local
+    regression-tests repo to infer the branch name, then writes it to both
+    ``run-meta.json`` and the matching ``runs-index`` entry.
+
+    Preference order when multiple branches contain the commit:
+      1. "master" or "main"
+      2. Alphabetically first remote-tracking branch (``remotes/origin/<name>``)
+      3. Alphabetically first local branch
+
+    Runs whose ``tests_repo_commit`` is absent or unknown to the local repo are
+    skipped and reported.
+    """
+    import subprocess
+
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+    runs_root = data_root / "runs"
+    regtests_repo = cfg.resolved_regtests_repo_root
+
+    if not runs_root.is_dir():
+        typer.echo(f"No runs directory found at {runs_root}")
+        raise typer.Exit(0)
+
+    if not (regtests_repo / ".git").is_dir():
+        typer.echo(
+            f"Regression-tests repo not found or not a git repo: {regtests_repo}",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    def _resolve_branch(commit: str) -> Optional[str]:
+        """Return the best branch name that contains *commit*, or None."""
+        proc = subprocess.run(
+            ["git", "branch", "-a", "--contains", commit],
+            cwd=str(regtests_repo),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+
+        raw_lines = [ln.strip().lstrip("* ") for ln in proc.stdout.splitlines()]
+        # Strip the "remotes/origin/" prefix to get bare branch names.
+        names: list[str] = []
+        for line in raw_lines:
+            if line.startswith("remotes/origin/"):
+                names.append(line[len("remotes/origin/"):])
+            elif line and not line.startswith("remotes/"):
+                names.append(line)
+
+        if not names:
+            return None
+
+        # Prefer master / main, then alphabetical.
+        for preferred in ("master", "main"):
+            if preferred in names:
+                return preferred
+        return sorted(names)[0]
+
+    backfilled: dict[tuple[str, str], list[tuple[str, str]]] = {}  # (branch, arch) → [(run_id, resolved)]
+    inspected = 0
+    skipped_no_commit = 0
+    skipped_not_found = 0
+
+    for meta_path in sorted(runs_root.glob("*/*/*/run-meta.json")):
+        inspected += 1
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            typer.echo(f"  skip  {meta_path}: {exc}", err=True)
+            continue
+
+        if data.get("regtest_branch") and not force:
+            continue  # already backfilled
+
+        commit = data.get("tests_repo_commit")
+        if not commit:
+            skipped_no_commit += 1
+            continue
+
+        resolved = _resolve_branch(commit)
+        if resolved is None:
+            skipped_not_found += 1
+            typer.echo(f"  warn  commit {commit} not found in {regtests_repo}")
+            continue
+
+        branch = data.get("branch")
+        arch = data.get("arch")
+        run_id = data.get("run_id")
+        if not (isinstance(branch, str) and isinstance(arch, str) and isinstance(run_id, str)):
+            typer.echo(f"  skip  {meta_path}: missing branch/arch/run_id", err=True)
+            continue
+
+        data["regtest_branch"] = resolved
+        if not dry_run:
+            with meta_path.open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, default=str)
+
+        backfilled.setdefault((branch, arch), []).append((run_id, resolved))
+
+    total_backfilled = sum(len(ids) for ids in backfilled.values())
+    typer.echo(
+        f"Inspected {inspected} run(s); "
+        f"{total_backfilled} run(s) backfilled, "
+        f"{skipped_no_commit} skipped (no commit hash), "
+        f"{skipped_not_found} skipped (commit unknown to repo)."
+    )
+
+    if total_backfilled == 0:
+        return
+
+    # Patch matching entries in each affected index file.
+    patched_index_entries = 0
+    for (branch, arch), run_pairs in sorted(backfilled.items()):
+        idx_path = runs_index_path(data_root, branch, arch)
+        if not idx_path.is_file():
+            typer.echo(f"  warn  no index for {branch}/{arch}; skipping index patch.")
+            continue
+        try:
+            with idx_path.open("r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            typer.echo(f"  warn  cannot read {idx_path}: {exc}")
+            continue
+        if not isinstance(entries, list):
+            continue
+
+        run_id_to_branch = dict(run_pairs)
+        local_patched = 0
+        for entry in entries:
+            rid = entry.get("run_id")
+            if isinstance(rid, str) and rid in run_id_to_branch:
+                if entry.get("regtest_branch") and not force:
+                    continue
+                entry["regtest_branch"] = run_id_to_branch[rid]
+                local_patched += 1
+
+        if local_patched and not dry_run:
+            with idx_path.open("w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2, default=str)
+
+        if local_patched:
+            patched_index_entries += local_patched
+            typer.echo(f"  {branch}/{arch}: patched {local_patched} index entry(ies).")
+
+    typer.echo(
+        f"\n{'[dry-run] would patch' if dry_run else 'Patched'} "
+        f"{total_backfilled} run-meta.json file(s) and "
+        f"{patched_index_entries} index entry(ies)."
+    )
+
+
 if __name__ == "__main__":
     app()
 

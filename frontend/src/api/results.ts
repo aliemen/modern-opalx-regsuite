@@ -12,6 +12,7 @@ export interface RunIndexEntry {
   finished_at: string | null;
   status: string;
   triggered_by: string | null;
+  regtest_branch: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
   regression_total: number;
@@ -70,6 +71,7 @@ export interface RunMeta {
   status: string;
   opalx_commit: string | null;
   tests_repo_commit: string | null;
+  regtest_branch: string | null;
   connection_name: string | null;
   triggered_by: string | null;
   unit_tests_total: number;

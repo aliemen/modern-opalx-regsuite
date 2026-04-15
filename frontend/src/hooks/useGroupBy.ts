@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { GroupBy } from "../lib/grouping";
 
-const VALID: GroupBy[] = ["branch", "arch", "date"];
+const VALID: GroupBy[] = ["branch", "arch", "date", "regtest-branch"];
 const STORAGE_KEY = "opalx-dashboard-group";
 
 function isValid(s: string | null): s is GroupBy {

@@ -120,6 +120,7 @@ class RunMeta(BaseModel):
 
     opalx_commit: Optional[str] = None
     tests_repo_commit: Optional[str] = None
+    regtest_branch: Optional[str] = None
 
     # The user-chosen connection name (e.g. "daint", "local"). Safe for public
     # sharing as long as the user did not embed identifying info in the name.
@@ -167,6 +168,7 @@ class RunIndexEntry(BaseModel):
     status: str
     connection_name: Optional[str] = None
     triggered_by: Optional[str] = None
+    regtest_branch: Optional[str] = None
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
     regression_total: int = 0

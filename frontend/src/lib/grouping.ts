@@ -9,7 +9,7 @@
  */
 import type { LatestRunCell } from "../hooks/useLatestRuns";
 
-export type GroupBy = "branch" | "arch" | "date";
+export type GroupBy = "branch" | "arch" | "date" | "regtest-branch";
 
 export interface Group {
   /** Stable key for accordion open/close state and React keys. */
@@ -45,6 +45,9 @@ export function groupRuns(
   }
   if (groupBy === "arch") {
     return groupByArch(cells);
+  }
+  if (groupBy === "regtest-branch") {
+    return groupByRegtestBranch(cells);
   }
   return groupByDate(cells, now);
 }
@@ -87,6 +90,37 @@ function groupByArch(cells: LatestRunCell[]): Group[] {
       if (a.branch === "master") return -1;
       if (b.branch === "master") return 1;
       return a.branch.localeCompare(b.branch);
+    }),
+  }));
+}
+
+// ── Reg Branch ──────────────────────────────────────────────────────────────
+
+const UNKNOWN_REGTEST_BRANCH = "(unknown)";
+
+function groupByRegtestBranch(cells: LatestRunCell[]): Group[] {
+  const map = new Map<string, LatestRunCell[]>();
+  for (const cell of cells) {
+    const key = cell.run?.regtest_branch ?? UNKNOWN_REGTEST_BRANCH;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(cell);
+  }
+  // Sort: master first, then alphabetical, unknown last.
+  const branches = Array.from(map.keys()).sort((a, b) => {
+    if (a === UNKNOWN_REGTEST_BRANCH) return 1;
+    if (b === UNKNOWN_REGTEST_BRANCH) return -1;
+    if (a === "master") return -1;
+    if (b === "master") return 1;
+    return a.localeCompare(b);
+  });
+  return branches.map((branch) => ({
+    key: `regtest-branch:${branch}`,
+    label: branch,
+    kind: "regtest-branch",
+    cells: (map.get(branch) ?? []).sort((a, b) => {
+      const ta = a.run?.started_at ? Date.parse(a.run.started_at) : 0;
+      const tb = b.run?.started_at ? Date.parse(b.run.started_at) : 0;
+      return tb - ta;
     }),
   }));
 }

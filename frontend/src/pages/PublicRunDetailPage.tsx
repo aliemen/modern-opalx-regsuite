@@ -159,12 +159,12 @@ export function PublicRunDetailPage() {
                 {meta.regression_passed}/{meta.regression_total} passed
                 {meta.regression_failed > 0 && (
                   <span className="text-failed ml-1">
-                    \u00b7 {meta.regression_failed} failed
+                    · {meta.regression_failed} failed
                   </span>
                 )}
                 {meta.regression_broken > 0 && (
                   <span className="text-broken ml-1">
-                    \u00b7 {meta.regression_broken} broken
+                    · {meta.regression_broken} broken
                   </span>
                 )}
               </span>

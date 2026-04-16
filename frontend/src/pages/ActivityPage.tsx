@@ -142,8 +142,8 @@ export function ActivityPage() {
                       i % 2 === 0 ? "" : "bg-surface/30"
                     }`}
                   >
-                    <td className="px-4 py-3 font-mono text-xs truncate max-w-[9rem]">{run.branch}</td>
-                    <td className="px-4 py-3 font-mono text-xs truncate max-w-[9rem]">
+                    <td className="px-4 py-3 font-mono text-xs">{run.branch}</td>
+                    <td className="px-4 py-3 font-mono text-xs">
                       {run.regtest_branch ?? "—"}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted">

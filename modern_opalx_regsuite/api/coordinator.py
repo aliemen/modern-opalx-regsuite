@@ -71,6 +71,7 @@ class RunCoordinator:
         active: ActiveRun,
         skip_unit: bool,
         skip_regression: bool,
+        clean_build: bool = False,
     ) -> None:
         """Execute the pipeline in the dedicated thread pool.
 
@@ -88,6 +89,7 @@ class RunCoordinator:
                 run_id=active.run_id,
                 skip_unit=skip_unit,
                 skip_regression=skip_regression,
+                clean_build=clean_build,
                 cancel_event=active.cancel_event,
                 connection=active.connection,
                 target_key_path=active.target_key_path,
@@ -174,6 +176,7 @@ class RunCoordinator:
                     next_active,
                     queued.skip_unit,
                     queued.skip_regression,
+                    queued.clean_build,
                 )
             )
 

@@ -18,6 +18,11 @@ export interface TriggerRequest {
   skip_unit?: boolean;
   skip_regression?: boolean;
   /**
+   * Wipe the per-branch/arch build directory before cmake. Forces a full
+   * reconfigure + recompile; leaves source checkouts and run data intact.
+   */
+  clean_build?: boolean;
+  /**
    * Name of the per-user Connection to run on. Use `null` or `"local"` for
    * local execution. Connections are managed in Settings.
    */

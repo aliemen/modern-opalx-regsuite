@@ -57,6 +57,7 @@ async def start_run(
     skip_regression: bool,
     connection_name: Optional[str],
     public: bool = False,
+    clean_build: bool = False,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> StartRunResult:
@@ -158,7 +159,7 @@ async def start_run(
         coordinator = get_coordinator()
         asyncio.create_task(
             coordinator.run_pipeline_async(
-                effective_cfg, active, skip_unit, skip_regression
+                effective_cfg, active, skip_unit, skip_regression, clean_build
             )
         )
         return StartRunResult(
@@ -200,6 +201,7 @@ async def start_run(
         cfg=effective_cfg,
         skip_unit=skip_unit,
         skip_regression=skip_regression,
+        clean_build=clean_build,
         log_path=log_path,
     )
     position = await enqueue_run(queued)

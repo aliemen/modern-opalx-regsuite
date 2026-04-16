@@ -1203,6 +1203,12 @@ class RemoteExecutor:
             f"mkdir -p {shlex.quote(remote_path)}", hide=True, warn=True
         )
 
+    def remove_dir(self, remote_path: str) -> None:
+        """Recursively remove *remote_path* on the remote. No-op if absent."""
+        self.conn.run(
+            f"rm -rf {shlex.quote(remote_path)}", hide=True, warn=True
+        )
+
     def path_exists(self, remote_path: str) -> bool:
         """Check whether *remote_path* exists on the remote.
 

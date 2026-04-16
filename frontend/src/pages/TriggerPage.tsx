@@ -20,6 +20,7 @@ export function TriggerPage() {
   const [connectionName, setConnectionName] = useState<string>(LOCAL_CONNECTION);
   const [skipUnit, setSkipUnit] = useState(false);
   const [skipRegression, setSkipRegression] = useState(false);
+  const [cleanBuild, setCleanBuild] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [queuedInfo, setQueuedInfo] = useState<{ runId: string; position: number } | null>(null);
 
@@ -81,6 +82,7 @@ export function TriggerPage() {
         regtests_branch: regtestsBranch,
         skip_unit: skipUnit,
         skip_regression: skipRegression,
+        clean_build: cleanBuild,
         connection_name: connectionName,
       };
       if (needsInteractiveCredentials) {
@@ -256,7 +258,7 @@ export function TriggerPage() {
         )}
 
         {/* Options */}
-        <div className="flex gap-6">
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
           <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
             <input
               type="checkbox"
@@ -274,6 +276,18 @@ export function TriggerPage() {
               className="accent-accent"
             />
             Skip regression tests
+          </label>
+          <label
+            className="flex items-center gap-2 text-sm text-muted cursor-pointer"
+            title="Delete the build directory before cmake + make. Forces a full reconfigure and recompile."
+          >
+            <input
+              type="checkbox"
+              checked={cleanBuild}
+              onChange={(e) => setCleanBuild(e.target.checked)}
+              className="accent-accent"
+            />
+            Clean build
           </label>
         </div>
 

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Clock } from "lucide-react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Clock } from "lucide-react";
 import { getRuns, type RunIndexEntry } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Pagination } from "../../components/Pagination";
+import { Breadcrumb } from "../../components/Breadcrumb";
 
 function fmtDate(d: string | null) {
   if (!d) return "\u2014";
@@ -20,6 +21,7 @@ function duration(start: string, end: string | null) {
 
 export function RunListPage() {
   const { branch, arch } = useParams<{ branch: string; arch: string }>();
+  const [searchParams] = useSearchParams();
   const [pageSize, setPageSize] = useState(25);
   const [offset, setOffset] = useState(0);
 
@@ -32,19 +34,24 @@ export function RunListPage() {
 
   const runs = data?.runs ?? [];
   const total = data?.total ?? 0;
+  const qs = searchParams.toString();
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <Link
-        to="/"
-        className="flex items-center gap-1.5 text-muted hover:text-fg text-sm mb-4 transition-colors"
-      >
-        <ArrowLeft size={14} /> Dashboard
-      </Link>
+      <Breadcrumb
+        crumbs={[
+          {
+            label: `${branch} \u00b7 ${arch}`,
+            title: `OPALX branch ${branch} on ${arch}`,
+          },
+        ]}
+      />
       <h1 className="text-fg text-xl font-semibold mb-1">
         {branch} / {arch}
       </h1>
-      <p className="text-muted text-sm mb-6">{total} runs</p>
+      <p className="text-muted text-sm mb-6">
+        {total} run{total !== 1 ? "s" : ""} across all regtest branches
+      </p>
 
       {isLoading && !data ? (
         <div className="text-muted text-sm">Loading...</div>
@@ -58,6 +65,7 @@ export function RunListPage() {
                 <tr>
                   <th className="px-4 py-3 font-medium">Run ID</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Regtests</th>
                   <th className="px-4 py-3 font-medium">
                     <Clock size={12} className="inline mr-1" />
                     Started
@@ -76,7 +84,7 @@ export function RunListPage() {
                   >
                     <td className="px-4 py-3">
                       <Link
-                        to={`/results/${branch}/${arch}/${run.run_id}`}
+                        to={`/results/${branch}/${arch}/${run.run_id}${qs ? `?${qs}` : ""}`}
                         className="text-accent hover:underline font-mono text-xs"
                       >
                         {run.run_id}
@@ -84,6 +92,9 @@ export function RunListPage() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={run.status} />
+                    </td>
+                    <td className="px-4 py-3 text-muted font-mono text-xs">
+                      {run.regtest_branch ?? "\u2014"}
                     </td>
                     <td className="px-4 py-3 text-muted text-xs">{fmtDate(run.started_at)}</td>
                     <td className="px-4 py-3 text-muted font-mono text-xs">{run.triggered_by ?? "—"}</td>

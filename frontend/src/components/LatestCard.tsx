@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { Clock, Cpu, FlaskConical, GitBranch } from "lucide-react";
+import { Clock, Cpu, FlaskConical, GitBranch, TestTube2 } from "lucide-react";
 import type { RunIndexEntry } from "../api/results";
+import type { GroupBy } from "../lib/grouping";
 import { StatusBadge } from "./StatusBadge";
 
 function fmtDate(d: string | null) {
@@ -22,6 +23,10 @@ interface LatestCardProps {
   checkboxDisabledReason?: string;
   /** Called when the checkbox is toggled. */
   onToggleSelect?: () => void;
+  /** Dashboard grouping axis in effect when this card was rendered. Propagated
+   *  as ``?group=`` on the drill-down href so RunListPage/RunDetailPage
+   *  breadcrumbs can send the user back to the same view. */
+  fromGroup?: GroupBy;
 }
 
 /**
@@ -44,10 +49,12 @@ export function LatestCard({
   checkboxDisabled = false,
   checkboxDisabledReason,
   onToggleSelect,
+  fromGroup,
 }: LatestCardProps) {
+  const qs = fromGroup ? `?group=${encodeURIComponent(fromGroup)}` : "";
   const href = run
-    ? `/results/${branch}/${arch}/${run.run_id}`
-    : `/results/${branch}/${arch}`;
+    ? `/results/${branch}/${arch}/${run.run_id}${qs}`
+    : `/results/${branch}/${arch}${qs}`;
 
   return (
     <div
@@ -85,6 +92,17 @@ export function LatestCard({
                 {branch}
               </span>
             </p>
+            {run && (
+              <p
+                className="text-muted text-xs flex items-center gap-1.5 truncate"
+                title={`regtests branch: ${run.regtest_branch ?? "unknown"}`}
+              >
+                <TestTube2 size={11} className="shrink-0" />
+                <span className="truncate">
+                  regtests: {run.regtest_branch ?? "\u2014"}
+                </span>
+              </p>
+            )}
             <p className="text-muted text-xs flex items-center gap-1.5 truncate">
               <Cpu size={11} className="shrink-0" />
               <span className="truncate" title={arch}>

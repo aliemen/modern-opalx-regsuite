@@ -118,9 +118,14 @@ function groupByRegtestBranch(cells: LatestRunCell[]): Group[] {
     label: branch,
     kind: "regtest-branch",
     cells: (map.get(branch) ?? []).sort((a, b) => {
-      const ta = a.run?.started_at ? Date.parse(a.run.started_at) : 0;
-      const tb = b.run?.started_at ? Date.parse(b.run.started_at) : 0;
-      return tb - ta;
+      // Mirror the OPALX-branch view: sort by arch (alphabetical), then by
+      // OPALX branch (master first, then alphabetical). Keeps the mental model
+      // consistent when switching grouping axes.
+      const archCmp = a.arch.localeCompare(b.arch);
+      if (archCmp !== 0) return archCmp;
+      if (a.branch === "master") return -1;
+      if (b.branch === "master") return 1;
+      return a.branch.localeCompare(b.branch);
     }),
   }));
 }

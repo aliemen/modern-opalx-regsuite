@@ -120,6 +120,17 @@ def _load_index(data_root: Path, branch: str, arch: str, view: ViewMode) -> list
     return filter_entries_by_view(entries, view)
 
 
+def _master_regtest_only(entries: list[dict]) -> list[dict]:
+    """Keep only entries whose regtest_branch is literally ``"master"``.
+
+    Runs created before the ``regtest_branch`` field was tracked have
+    ``regtest_branch=None`` and are dropped. Run
+    ``python -m modern_opalx_regsuite.cli backfill-regtest-branches`` to
+    populate missing values from the tests-repo commit.
+    """
+    return [e for e in entries if e.get("regtest_branch") == "master"]
+
+
 def _list_master_archs(data_root: Path) -> list[str]:
     branches_path = branches_index_path(data_root)
     if not branches_path.is_file():
@@ -197,11 +208,19 @@ def latest_master(
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
 ) -> LatestMasterMatrix:
-    """Latest master run per architecture (one row per arch)."""
+    """Latest master/master run per architecture (one row per arch).
+
+    Only runs with ``branch="master"`` AND ``regtest_branch="master"`` are
+    considered. Pre-regtest-branch-tracking runs (``regtest_branch=None``)
+    are excluded; backfill them via the ``backfill-regtest-branches`` CLI
+    if you want them to reappear here.
+    """
     data_root = cfg.resolved_data_root
     cells: list[LatestMasterCell] = []
     for arch in _list_master_archs(data_root):
-        entries = _load_index(data_root, "master", arch, view)
+        entries = _master_regtest_only(
+            _load_index(data_root, "master", arch, view)
+        )
         if not entries:
             cells.append(LatestMasterCell(arch=arch))
             continue
@@ -234,13 +253,18 @@ def newly_broken(
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
 ) -> NewlyBrokenReport:
-    """Per arch, list regression sims failing in the latest master run that
-    were passing in the previous master run.
+    """Per arch, list regression sims failing in the latest master/master run
+    that were passing in the previous master/master run.
+
+    Only considers runs with ``branch="master"`` AND ``regtest_branch="master"``.
+    Pre-regtest-branch-tracking runs (``regtest_branch=None``) are excluded.
     """
     data_root = cfg.resolved_data_root
     out: list[NewlyBrokenEntry] = []
     for arch in _list_master_archs(data_root):
-        entries = _load_index(data_root, "master", arch, view)
+        entries = _master_regtest_only(
+            _load_index(data_root, "master", arch, view)
+        )
         # Need two completed runs to compute a diff. "Completed" = status in
         # passed/failed (not running, not cancelled, not unknown).
         completed = [
@@ -286,11 +310,18 @@ def suite_duration(
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
 ) -> SuiteDurationReport:
-    """Master suite duration: latest vs average of the previous 10 completed runs."""
+    """Master/master suite duration: latest vs average of the previous 10
+    completed runs.
+
+    Only considers runs with ``branch="master"`` AND ``regtest_branch="master"``.
+    Pre-regtest-branch-tracking runs (``regtest_branch=None``) are excluded.
+    """
     data_root = cfg.resolved_data_root
     out: list[SuiteDurationCell] = []
     for arch in _list_master_archs(data_root):
-        entries = _load_index(data_root, "master", arch, view)
+        entries = _master_regtest_only(
+            _load_index(data_root, "master", arch, view)
+        )
         completed = [
             e for e in entries if e.get("status") in ("passed", "failed")
         ]

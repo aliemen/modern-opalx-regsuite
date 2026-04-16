@@ -4,10 +4,11 @@ import {
   ChevronRight,
   Cpu,
   GitBranch,
+  TestTube2,
 } from "lucide-react";
 import type { LatestRunCell } from "../hooks/useLatestRuns";
 import type { SelectionHandle } from "../hooks/useRunSelection";
-import type { Group } from "../lib/grouping";
+import type { Group, GroupBy } from "../lib/grouping";
 import { LatestCard } from "./LatestCard";
 
 const SUMMARY_COLORS: Record<string, string> = {
@@ -31,6 +32,8 @@ function summaryCounts(cells: LatestRunCell[]): Record<string, number> {
 function GroupIcon({ kind }: { kind: Group["kind"] }) {
   if (kind === "branch") return <GitBranch size={14} className="text-muted shrink-0" />;
   if (kind === "arch") return <Cpu size={14} className="text-muted shrink-0" />;
+  if (kind === "regtest-branch")
+    return <TestTube2 size={14} className="text-muted shrink-0" />;
   return <Calendar size={14} className="text-muted shrink-0" />;
 }
 
@@ -46,6 +49,9 @@ interface AccordionGroupProps {
     /** Tailwind classes overriding the default neutral button style. */
     className?: string;
   };
+  /** Passed down to each child card so drill-down links can carry the
+   *  dashboard grouping axis as a query param. */
+  fromGroup?: GroupBy;
 }
 
 /** One accordion section: header + grid of LatestCard when open. */
@@ -55,6 +61,7 @@ export function AccordionGroup({
   onToggle,
   selection,
   headerAction,
+  fromGroup,
 }: AccordionGroupProps) {
   const counts = summaryCounts(group.cells);
   const allSelected = selection ? selection.areAllSelected(group.cells) : false;
@@ -161,6 +168,7 @@ export function AccordionGroup({
                       ? () => selection.toggleCell(cell.branch, cell.arch)
                       : undefined
                   }
+                  fromGroup={fromGroup}
                 />
               );
             })}

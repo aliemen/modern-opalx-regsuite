@@ -167,6 +167,7 @@ export function DashboardPage() {
               storageNamespace="opalx-dashboard-open"
               selection={selection}
               groupAction={groupAction}
+              fromGroup={groupBy}
             />
           </div>
 

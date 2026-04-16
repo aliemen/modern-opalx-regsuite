@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Archive, ChevronDown, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
 import { archiveRun, deleteRun, getRunDetail, setRunVisibility, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
+import { Breadcrumb } from "../../components/Breadcrumb";
 
 export function fmtNum(n: number | null | undefined, digits = 4) {
   if (n === null || n === undefined) return "—";
@@ -197,6 +198,7 @@ export function RunDetailPage() {
     arch: string;
     runId: string;
   }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -258,17 +260,27 @@ export function RunDetailPage() {
 
   const { meta, unit, regression } = data;
   const runPath = `runs/${branch}/${arch}/${runId}`;
+  const qs = searchParams.toString();
+  const listHref = `/results/${branch}/${arch}${qs ? `?${qs}` : ""}`;
+  const regtestLabel = meta.regtest_branch ?? "\u2014";
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <Link
-          to={`/results/${branch}/${arch}`}
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
-        >
-          <ArrowLeft size={14} /> {branch} / {arch}
-        </Link>
-
+      <Breadcrumb
+        crumbs={[
+          {
+            label: `${branch} \u00b7 ${arch}`,
+            to: listHref,
+            title: `All runs on ${branch} / ${arch}`,
+          },
+          {
+            label: `opalx=${branch} / regtests=${regtestLabel} / ${arch}`,
+            title: `This run's branch combination`,
+          },
+          { label: runId ?? "", title: "Run ID" },
+        ]}
+      />
+      <div className="flex items-center justify-end">
         {confirmArchive ? (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">{meta.archived ? "Unarchive" : "Archive"} this run?</span>

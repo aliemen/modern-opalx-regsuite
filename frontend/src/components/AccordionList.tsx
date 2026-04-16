@@ -17,6 +17,9 @@ interface AccordionListProps {
   groupAction?: (group: Group) =>
     | { label: string; onClick: () => void; className?: string }
     | undefined;
+  /** If provided, drill-down links from each card append ``?group=<this>``
+   *  so the downstream pages can build breadcrumbs back to the same view. */
+  fromGroup?: GroupBy;
 }
 
 function loadOpenGroups(key: string): Set<string> {
@@ -54,6 +57,7 @@ export function AccordionList({
   storageNamespace,
   selection,
   groupAction,
+  fromGroup,
 }: AccordionListProps) {
   const storageKey = `${storageNamespace}:${groupBy}`;
 
@@ -113,6 +117,7 @@ export function AccordionList({
           onToggle={() => toggle(group.key)}
           selection={selection}
           headerAction={groupAction?.(group)}
+          fromGroup={fromGroup}
         />
       ))}
     </div>

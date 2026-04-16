@@ -30,6 +30,9 @@ class TriggerRequest(BaseModel):
     regtests_branch: Optional[str] = None
     skip_unit: bool = False
     skip_regression: bool = False
+    # Wipe the per-branch/arch build directory before cmake. Forces a full
+    # reconfigure + recompile; leaves source checkouts and run data intact.
+    clean_build: bool = False
     # None or "local" → local execution. Otherwise → load the calling user's
     # named connection from <users_root>/<username>/connections.json.
     connection_name: Optional[str] = None
@@ -195,6 +198,7 @@ async def trigger_run(
         regtests_branch=body.regtests_branch,
         skip_unit=body.skip_unit,
         skip_regression=body.skip_regression,
+        clean_build=body.clean_build,
         connection_name=body.connection_name,
         gateway_password=body.gateway_password,
         gateway_otp=body.gateway_otp,

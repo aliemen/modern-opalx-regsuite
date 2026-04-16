@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,6 +98,7 @@ def run_pipeline(
     run_id: Optional[str] = None,
     skip_unit: bool = False,
     skip_regression: bool = False,
+    clean_build: bool = False,
     cancel_event: Optional[threading.Event] = None,
     connection: Optional[Connection] = None,
     target_key_path: Optional[Path] = None,
@@ -357,6 +359,25 @@ def run_pipeline(
             _write_json(paths.meta_path, meta.model_dump())
             _update_indexes(data_root, meta)
             return meta
+
+        # ── Clean build (optional) ───────────────────────────────────────────
+        # User-requested full reconfigure: wipe the per-branch/arch build dir
+        # before cmake. Source checkouts and run data are untouched.
+        if clean_build:
+            if is_remote and remote is not None:
+                _append_pipeline_line(
+                    paths.pipeline_log_path,
+                    f"[{connection_name}] Clean build: wiping {remote_build}",
+                )
+                remote.remove_dir(remote_build)  # type: ignore[arg-type]
+                remote.ensure_dir(remote_build)  # type: ignore[arg-type]
+            else:
+                _append_pipeline_line(
+                    paths.pipeline_log_path,
+                    f"Clean build: wiping {build_dir}",
+                )
+                shutil.rmtree(build_dir, ignore_errors=True)
+                build_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Phase: cmake ──────────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "cmake")

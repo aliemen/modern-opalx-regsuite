@@ -78,6 +78,7 @@ class QueuedRun:
     cfg: object = None  # SuiteConfig snapshot
     skip_unit: bool = False
     skip_regression: bool = False
+    clean_build: bool = False
     log_path: Optional[Path] = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
 

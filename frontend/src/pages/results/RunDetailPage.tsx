@@ -366,8 +366,12 @@ export function RunDetailPage() {
           </div>
         </div>
         <div className="space-y-1">
-          <p className="text-muted text-xs">Branch / Arch</p>
+          <p className="text-muted text-xs">OPALX Branch / Arch</p>
           <p className="text-fg">{meta.branch} / {meta.arch}</p>
+        </div>
+        <div className="space-y-1">
+          <p className="text-muted text-xs">Tests Branch</p>
+          <p className="text-fg font-mono text-sm">{meta.regtest_branch ?? "—"}</p>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Duration</p>

@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Clock, Globe2, History, User as UserIcon } from "lucide-react";
 import { getAllRuns, type RunIndexEntry } from "../api/results";
 import { getUsersLeaderboard } from "../api/stats";
-import { StatusBadge } from "../components/StatusBadge";
 import { Pagination } from "../components/Pagination";
 
 function fmtDate(d: string | null) {
@@ -26,6 +25,7 @@ export function ActivityPage() {
   const userParam = searchParams.get("user");
   const triggeredBy = userParam && userParam !== "" ? userParam : null;
 
+  const navigate = useNavigate();
   const [pageSize, setPageSize] = useState(25);
   const [offset, setOffset] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -119,10 +119,10 @@ export function ActivityPage() {
             <table className="w-full text-sm">
               <thead className="bg-surface text-muted text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Run ID</th>
                   <th className="px-4 py-3 font-medium">Branch</th>
                   <th className="px-4 py-3 font-medium">Arch</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Tests Branch</th>
+                  <th className="px-4 py-3 font-medium">User</th>
                   <th className="px-4 py-3 font-medium">
                     <Clock size={12} className="inline mr-1" />
                     Started
@@ -137,22 +137,28 @@ export function ActivityPage() {
                 {runs.map((run: RunIndexEntry, i: number) => (
                   <tr
                     key={`${run.branch}-${run.arch}-${run.run_id}`}
-                    className={`border-t border-border hover:bg-surface/50 transition-colors ${
+                    onClick={() => navigate(`/results/${run.branch}/${run.arch}/${run.run_id}`)}
+                    className={`border-t border-border hover:bg-surface/50 transition-colors cursor-pointer ${
                       i % 2 === 0 ? "" : "bg-surface/20"
                     }`}
                   >
-                    <td className="px-4 py-3">
-                      <Link
-                        to={`/results/${run.branch}/${run.arch}/${run.run_id}`}
-                        className="text-accent hover:underline font-mono text-xs"
-                      >
-                        {run.run_id}
-                      </Link>
-                    </td>
                     <td className="px-4 py-3 text-xs">{run.branch}</td>
                     <td className="px-4 py-3 text-xs">{run.arch}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={run.status} />
+                    <td className="px-4 py-3 font-mono text-xs text-muted">
+                      {run.regtest_branch ?? "—"}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {run.triggered_by ? (
+                        <Link
+                          to={`/activity?user=${encodeURIComponent(run.triggered_by)}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-accent hover:underline"
+                        >
+                          {run.triggered_by}
+                        </Link>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted text-xs">
                       {fmtDate(run.started_at)}
@@ -186,7 +192,7 @@ export function ActivityPage() {
                         <button
                           type="button"
                           title={copiedId === run.run_id ? "Copied!" : "Copy public link"}
-                          onClick={() => copyPublicLink(run)}
+                          onClick={(e) => { e.stopPropagation(); copyPublicLink(run); }}
                           className="flex items-center gap-1 text-xs text-accent hover:brightness-125 transition-all"
                         >
                           <Globe2 size={13} />

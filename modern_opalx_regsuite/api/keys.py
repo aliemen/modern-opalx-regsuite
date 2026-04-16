@@ -17,14 +17,20 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from ..api_keys import ApiKeyScope
 from ..config import SuiteConfig
 from ..user_store import (
     connections_referencing_key,
     user_keys_dir,
 )
-from .deps import get_config, require_user_paths
+from .deps import get_config, require_user_paths_scoped
 
 router = APIRouter(prefix="/api/settings/ssh-keys", tags=["settings"])
+
+# Scoped dependencies -- SSH-key routes accept either a JWT (from the web UI)
+# or an API key carrying the matching scope (for scripted access).
+_read_paths = require_user_paths_scoped(ApiKeyScope.SSH_KEYS_READ)
+_write_paths = require_user_paths_scoped(ApiKeyScope.SSH_KEYS_WRITE)
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -85,7 +91,7 @@ def _write_key_atomic(key_path: Path, content: bytes) -> None:
 async def upload_ssh_key(
     name: Annotated[str, Form(...)],
     key_file: Annotated[UploadFile, File(...)],
-    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    user_paths: Annotated[tuple[str, Path], Depends(_write_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
     cert_file: Annotated[UploadFile | None, File()] = None,
 ) -> SshKeyInfo:
@@ -125,7 +131,7 @@ async def upload_ssh_key(
 async def upload_ssh_key_cert(
     name: str,
     cert_file: Annotated[UploadFile, File(...)],
-    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    user_paths: Annotated[tuple[str, Path], Depends(_write_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> None:
     """Upload or replace the certificate for an existing SSH key.
@@ -156,7 +162,7 @@ async def upload_ssh_key_cert(
 async def replace_ssh_key(
     name: str,
     key_file: Annotated[UploadFile, File(...)],
-    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    user_paths: Annotated[tuple[str, Path], Depends(_write_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
     cert_file: Annotated[UploadFile | None, File()] = None,
 ) -> SshKeyInfo:
@@ -204,7 +210,7 @@ async def replace_ssh_key(
 
 @router.get("", response_model=list[SshKeyInfo])
 def list_ssh_keys(
-    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    user_paths: Annotated[tuple[str, Path], Depends(_read_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> list[SshKeyInfo]:
     username, _ = user_paths
@@ -224,7 +230,7 @@ def list_ssh_keys(
 @router.delete("/{name}", status_code=204)
 def delete_ssh_key(
     name: str,
-    user_paths: Annotated[tuple[str, Path], Depends(require_user_paths)],
+    user_paths: Annotated[tuple[str, Path], Depends(_write_paths)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> None:
     _validate_name(name)

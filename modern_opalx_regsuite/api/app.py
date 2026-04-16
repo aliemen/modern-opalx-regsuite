@@ -47,6 +47,13 @@ async def _lifespan(app: FastAPI):
             "Check that config.toml exists and is valid.",
             exc_info=True,
         )
+    if cfg is not None:
+        try:
+            from ..api_keys import index as api_keys_index
+            n = api_keys_index.rebuild(cfg)
+            log.info("api-keys: loaded %d key(s) into index.", n)
+        except Exception:
+            log.error("api-keys: failed to build index on startup.", exc_info=True)
     clear_all_state()
     if cfg is not None:
         scheduler_task = asyncio.create_task(
@@ -170,6 +177,11 @@ def create_app() -> FastAPI:
     # Per-user named SSH connections router.
     from .connections import router as connections_router
     app.include_router(connections_router)
+
+    # API-key management router (per-user). JWT-only; the keys themselves are
+    # scoped to the SSH-keys endpoints above.
+    from .api_keys import router as api_keys_router
+    app.include_router(api_keys_router)
 
     # Inline /api/auth/refresh-cookie endpoint (needs raw Request to read cookies).
     @app.post("/api/auth/refresh-cookie", response_model=TokenResponse)

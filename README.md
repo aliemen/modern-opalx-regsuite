@@ -13,6 +13,7 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 - **ProxyJump support**: Connections can hop through a bastion host — perfect for HPC sites like CSCS Daint via `ela.cscs.ch`.
 - **Two env activation styles**: `module load` (lmod) or free-form `prologue` commands like `uenv start prgenv-gnu/24.7:v3 --view=default`.
 - **Sensitive-data isolation**: `data_root` (which may be shared publicly) contains only test/run data + the user-chosen connection name. Identity-bearing state (SSH keys, hostnames, usernames, work dirs) lives under `~/.config/opalx-regsuite/`.
+- **API keys for automation**: Long-lived, scope-limited bearer tokens (managed in Settings -> API keys) let you automate SSH-key rotation from a laptop via the [deploy/opalx-keys.sh](deploy/opalx-keys.sh) bash client - no browser session needed.
 - **File-based data model**: JSON + logs + SVG plots on disk, no database. Results live in a separate git repo (`opalx-regsuite-test-data`).
 - **Single-command server**: `opalx-regsuite serve` starts the full stack.
 - **CLI still works**: All CLI commands (`run`, `user-add`, `migrate-keys`, `gen-data-site`, `del-test`, …) remain available.
@@ -283,6 +284,51 @@ generic-looking `work_dir` for your connections.
 
 ---
 
+### API keys and scripted key rotation
+
+Rotating an SSH key from a laptop normally means opening the web UI, clicking
+**Settings -> SSH Keys -> Replace**, picking the new file, and confirming. If
+you do that daily (e.g. CSCS Daint issues a fresh key every morning), the
+suite also exposes a scripted path:
+
+1. Open the web UI, go to **Settings -> API keys**, click **New API key**.
+   Name it after the laptop or workflow it will live on (`macbook`,
+   `ci-runner`). Pick an expiry. Copy the token shown once; the server only
+   keeps a hash.
+2. On the laptop, store the token (chmod 600) in a credentials file:
+
+   ```bash
+   mkdir -p ~/.config/opalx-regsuite
+   cat > ~/.config/opalx-regsuite/credentials <<'EOF'
+   OPALX_API_URL="https://opalx.example.com"
+   OPALX_API_TOKEN="opalx_<prefix>_<secret>"
+   EOF
+   chmod 600 ~/.config/opalx-regsuite/credentials
+   ```
+
+3. Drop `deploy/opalx-keys.sh` somewhere on `$PATH`:
+
+   ```bash
+   opalx-keys list
+   opalx-keys upload  cscs-key ./new-cscs-key --cert ./new-cscs-key-cert.pub
+   opalx-keys replace cscs-key ./new-cscs-key --cert ./new-cscs-key-cert.pub
+   opalx-keys delete  cscs-key
+   ```
+
+   `replace` keeps the key's server-side name, so every connection that
+   references it picks up the new credentials on the next run. Ideal for
+   short-lived keys.
+
+API keys are **scoped to the SSH-key endpoints only** - a leaked token
+cannot read run data, modify connections, or mint more tokens. The only way
+to get broader access is a browser session (JWT). Rotate or revoke a key
+any time in **Settings -> API keys** (the refresh icon and trash icon).
+
+See [deploy/opalx-keys.README.md](deploy/opalx-keys.README.md) for the full
+manual (keyboard-macro examples, exit codes, troubleshooting).
+
+---
+
 ### Environment Variables
 
 | Variable | Purpose |
@@ -321,6 +367,7 @@ data_root/                                 # publicly shareable: only test/run d
   users/<username>/                         # one directory per regsuite user
     profile.json
     connections.json                        # named SSH connections
+    api-keys.json                           # scoped API keys (sha256 hashes, mode 0600)
     ssh-keys/<name>.pem                     # private SSH keys (mode 0600)
 ```
 
@@ -366,4 +413,4 @@ run queue state is held in process memory. This is enforced by the CLI's `serve`
 | `/live/:runId?` | Live log streaming for a specific run (or the most recent active run) |
 | `/results/:branch/:arch` | Run history table |
 | `/results/:branch/:arch/:run_id` | Detailed results with plots, metrics, and machine info |
-| `/settings` | SSH key management + named SSH connections (per-user) |
+| `/settings` | SSH key management + named SSH connections + API keys for scripted access (per-user) |

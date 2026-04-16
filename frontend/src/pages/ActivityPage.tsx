@@ -119,9 +119,9 @@ export function ActivityPage() {
             <table className="w-full text-sm">
               <thead className="bg-surface text-muted text-left">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Branch</th>
-                  <th className="px-4 py-3 font-medium">Arch</th>
-                  <th className="px-4 py-3 font-medium">Tests Branch</th>
+                  <th className="px-4 py-3 font-medium w-36">OPALX Branch</th>
+                  <th className="px-4 py-3 font-medium w-36">Tests Branch</th>
+                  <th className="px-4 py-3 font-medium">Arch / Exec. On</th>
                   <th className="px-4 py-3 font-medium">User</th>
                   <th className="px-4 py-3 font-medium">
                     <Clock size={12} className="inline mr-1" />
@@ -138,14 +138,18 @@ export function ActivityPage() {
                   <tr
                     key={`${run.branch}-${run.arch}-${run.run_id}`}
                     onClick={() => navigate(`/results/${run.branch}/${run.arch}/${run.run_id}`)}
-                    className={`border-t border-border hover:bg-surface/50 transition-colors cursor-pointer ${
-                      i % 2 === 0 ? "" : "bg-surface/20"
+                    className={`border-t border-border hover:bg-accent/10 transition-colors cursor-pointer ${
+                      i % 2 === 0 ? "" : "bg-surface/30"
                     }`}
                   >
-                    <td className="px-4 py-3 text-xs">{run.branch}</td>
-                    <td className="px-4 py-3 text-xs">{run.arch}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted">
+                    <td className="px-4 py-3 font-mono text-xs truncate max-w-[9rem]">{run.branch}</td>
+                    <td className="px-4 py-3 font-mono text-xs truncate max-w-[9rem]">
                       {run.regtest_branch ?? "—"}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted">
+                      {run.arch}{run.connection_name && run.connection_name !== "local"
+                        ? ` / ${run.connection_name}`
+                        : ""}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {run.triggered_by ? (

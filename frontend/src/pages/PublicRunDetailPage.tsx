@@ -87,10 +87,8 @@ export function PublicRunDetailPage() {
             <StatusBadge status={meta.status} size="md" />
           </div>
           <div className="space-y-1">
-            <p className="text-muted text-xs">OPALX Branch / Arch</p>
-            <p className="text-fg">
-              {meta.branch} / {meta.arch}
-            </p>
+            <p className="text-muted text-xs">OPALX Branch</p>
+            <p className="text-fg">{meta.branch}</p>
           </div>
           <div className="space-y-1">
             <p className="text-muted text-xs">Tests Branch</p>
@@ -103,11 +101,11 @@ export function PublicRunDetailPage() {
             </p>
           </div>
           <div className="space-y-1">
-            <p className="text-muted text-xs">Executed On</p>
+            <p className="text-muted text-xs">Arch / Executed On</p>
             <p className="text-fg font-mono text-sm">
-              {meta.connection_name && meta.connection_name !== "local"
+              {meta.arch} / {meta.connection_name && meta.connection_name !== "local"
                 ? meta.connection_name
-                : "Local"}
+                : "local"}
             </p>
           </div>
           <div className="space-y-1">

@@ -366,8 +366,8 @@ export function RunDetailPage() {
           </div>
         </div>
         <div className="space-y-1">
-          <p className="text-muted text-xs">OPALX Branch / Arch</p>
-          <p className="text-fg">{meta.branch} / {meta.arch}</p>
+          <p className="text-muted text-xs">OPALX Branch</p>
+          <p className="text-fg">{meta.branch}</p>
         </div>
         <div className="space-y-1">
           <p className="text-muted text-xs">Tests Branch</p>
@@ -378,11 +378,11 @@ export function RunDetailPage() {
           <p className="text-fg">{duration(meta.started_at, meta.finished_at)}</p>
         </div>
         <div className="space-y-1">
-          <p className="text-muted text-xs">Executed On</p>
+          <p className="text-muted text-xs">Arch / Executed On</p>
           <p className="text-fg font-mono text-sm">
-            {meta.connection_name && meta.connection_name !== "local"
+            {meta.arch} / {meta.connection_name && meta.connection_name !== "local"
               ? meta.connection_name
-              : "Local"}
+              : "local"}
           </p>
         </div>
         <div className="space-y-1">

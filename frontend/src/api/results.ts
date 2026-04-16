@@ -13,6 +13,7 @@ export interface RunIndexEntry {
   status: string;
   triggered_by: string | null;
   regtest_branch: string | null;
+  connection_name: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
   regression_total: number;

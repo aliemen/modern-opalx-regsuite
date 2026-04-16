@@ -274,8 +274,8 @@ export function RunDetailPage() {
             title: `All runs on ${branch} / ${arch}`,
           },
           {
-            label: `opalx=${branch} / regtests=${regtestLabel} / ${arch}`,
-            title: `This run's branch combination`,
+            label: `regtests=${regtestLabel}`,
+            title: `Regression-tests branch for this run`,
           },
           { label: runId ?? "", title: "Run ID" },
         ]}

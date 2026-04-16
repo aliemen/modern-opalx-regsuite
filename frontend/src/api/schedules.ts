@@ -38,6 +38,7 @@ export interface Schedule {
   connection_name: string;
   skip_unit: boolean;
   skip_regression: boolean;
+  clean_build: boolean;
   public: boolean;
   owner: string;
   created_at: string;
@@ -58,6 +59,7 @@ export interface ScheduleWriteBody {
   connection_name: string;
   skip_unit: boolean;
   skip_regression: boolean;
+  clean_build: boolean;
   public: boolean;
 }
 
@@ -96,6 +98,8 @@ export async function deleteSchedule(id: string): Promise<void> {
 export interface SchedulerStatus {
   running: boolean;
   last_tick_at: string | null;
+  server_now: string;
+  server_tz_name: string;
 }
 
 export async function getSchedulerStatus(): Promise<SchedulerStatus> {

@@ -166,7 +166,9 @@ export function ScheduleCard({
         </div>
       </div>
 
-      {(schedule.skip_unit || schedule.skip_regression) && (
+      {(schedule.skip_unit ||
+        schedule.skip_regression ||
+        schedule.clean_build) && (
         <div className="flex gap-2 text-[11px] text-muted">
           {schedule.skip_unit && (
             <span className="px-1.5 py-0.5 border border-border rounded">
@@ -176,6 +178,14 @@ export function ScheduleCard({
           {schedule.skip_regression && (
             <span className="px-1.5 py-0.5 border border-border rounded">
               skip regression
+            </span>
+          )}
+          {schedule.clean_build && (
+            <span
+              className="px-1.5 py-0.5 border border-border rounded"
+              title="Wipes the build directory before cmake on every fire"
+            >
+              clean build
             </span>
           )}
         </div>

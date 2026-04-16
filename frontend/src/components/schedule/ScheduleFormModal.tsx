@@ -33,6 +33,7 @@ function defaultBody(): ScheduleWriteBody {
     connection_name: LOCAL_CONNECTION,
     skip_unit: false,
     skip_regression: false,
+    clean_build: false,
     public: false,
   };
 }
@@ -48,6 +49,7 @@ function scheduleToBody(schedule: Schedule): ScheduleWriteBody {
     connection_name: schedule.connection_name,
     skip_unit: schedule.skip_unit,
     skip_regression: schedule.skip_regression,
+    clean_build: schedule.clean_build,
     public: schedule.public,
   };
 }
@@ -279,7 +281,7 @@ export function ScheduleFormModal({
             </p>
           </div>
 
-          <div className="flex gap-6">
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
             <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
               <input
                 type="checkbox"
@@ -297,6 +299,18 @@ export function ScheduleFormModal({
                 className="accent-accent"
               />
               Skip regression tests
+            </label>
+            <label
+              className="flex items-center gap-2 text-sm text-muted cursor-pointer"
+              title="Delete the build directory before cmake + make on every fire. Forces a full reconfigure and recompile."
+            >
+              <input
+                type="checkbox"
+                checked={form.clean_build}
+                onChange={(e) => updateField("clean_build", e.target.checked)}
+                className="accent-accent"
+              />
+              Clean build
             </label>
           </div>
 

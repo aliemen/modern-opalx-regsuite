@@ -15,16 +15,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 
 from ..config import SuiteConfig
 from ..user_store import get_connection
 from .matcher import matches, same_minute, seconds_to_next_minute
 from .models import Schedule
 from .store import list_schedules, update_schedule_runtime_state
-
-if TYPE_CHECKING:
-    pass
 
 log = logging.getLogger("opalx.scheduler")
 
@@ -103,6 +99,16 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
             return
 
     run_id = _run_id_from_time(now)
+    log.info(
+        "Schedule %s (%s): firing now=%s branch=%s arch=%s connection=%s clean_build=%s",
+        schedule.id,
+        schedule.name,
+        now.isoformat(timespec="seconds"),
+        schedule.branch,
+        schedule.arch,
+        schedule.connection_name,
+        schedule.clean_build,
+    )
     try:
         result = await start_run(
             cfg,
@@ -114,6 +120,7 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
             regtests_branch=schedule.regtests_branch,
             skip_unit=schedule.skip_unit,
             skip_regression=schedule.skip_regression,
+            clean_build=schedule.clean_build,
             connection_name=schedule.connection_name,
             public=schedule.public,
         )
@@ -155,9 +162,14 @@ async def _tick(cfg: SuiteConfig, now: datetime) -> None:
     except Exception:
         log.exception("Scheduler tick: failed to load schedules")
         return
-    for s in schedules:
-        if not s.enabled:
-            continue
+    enabled = [s for s in schedules if s.enabled]
+    log.debug(
+        "Scheduler tick at %s: %d schedule(s) loaded, %d enabled",
+        now.isoformat(timespec="seconds"),
+        len(schedules),
+        len(enabled),
+    )
+    for s in enabled:
         if not matches(s.spec, now):
             continue
         # Idempotency: if we already fired for this minute (e.g. loop woke
@@ -180,27 +192,37 @@ async def scheduler_loop(cfg: SuiteConfig, stop: asyncio.Event) -> None:
     """Main scheduler loop. Aligns its wake-ups to wall-clock minute boundaries."""
     global _scheduler_running
     _scheduler_running = True
-    log.info("Scheduler loop starting")
-    # Run one tick right away so a freshly enabled schedule fires at its next
-    # minute boundary without a 60s delay on startup.
+    tz_name = datetime.now().astimezone().tzname() or "local"
+    log.info(
+        "Scheduler loop starting (server time=%s tz=%s)",
+        _now_local().isoformat(timespec="seconds"),
+        tz_name,
+    )
     try:
-        await _tick(cfg, _now_local())
-    except Exception:
-        log.exception("Scheduler: initial tick failed")
-
-    while not stop.is_set():
-        delay = seconds_to_next_minute(_now_local())
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=delay)
-            # stop was set during the wait — exit cleanly
-            break
-        except asyncio.TimeoutError:
-            pass
-        if stop.is_set():
-            break
+        # Run one tick right away so a freshly enabled schedule fires at its
+        # next minute boundary without a 60s delay on startup.
         try:
             await _tick(cfg, _now_local())
         except Exception:
-            log.exception("Scheduler: tick failed")
-    _scheduler_running = False
-    log.info("Scheduler loop stopped")
+            log.exception("Scheduler: initial tick failed")
+
+        while not stop.is_set():
+            delay = seconds_to_next_minute(_now_local())
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=delay)
+                # stop was set during the wait — exit cleanly
+                break
+            except asyncio.TimeoutError:
+                pass
+            if stop.is_set():
+                break
+            try:
+                await _tick(cfg, _now_local())
+            except Exception:
+                log.exception("Scheduler: tick failed")
+    finally:
+        # Always flip to False on exit, including cancellation or unexpected
+        # exceptions — otherwise /api/schedules/status would wrongly report
+        # the scheduler as "running" after the task has died.
+        _scheduler_running = False
+        log.info("Scheduler loop stopped")

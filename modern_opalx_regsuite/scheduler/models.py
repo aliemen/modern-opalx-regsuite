@@ -58,6 +58,10 @@ class Schedule(BaseModel):
     connection_name: str = "local"  # "local" or the owner's named connection
     skip_unit: bool = False
     skip_regression: bool = False
+    # Wipe the per-branch/arch build directory before cmake on every fire.
+    # Forces a full reconfigure + recompile; source checkouts and run data
+    # are untouched. Default False so existing schedules keep fast builds.
+    clean_build: bool = False
     # When True, runs produced by this schedule are stamped public=True in
     # their RunMeta / RunIndexEntry and appear on the unauthenticated
     # /api/public/* surface.
@@ -89,6 +93,7 @@ class ScheduleCreateRequest(BaseModel):
     connection_name: str = "local"
     skip_unit: bool = False
     skip_regression: bool = False
+    clean_build: bool = False
     public: bool = False
 
 
@@ -106,4 +111,5 @@ class ScheduleUpdateRequest(BaseModel):
     connection_name: str = "local"
     skip_unit: bool = False
     skip_regression: bool = False
+    clean_build: bool = False
     public: bool = False

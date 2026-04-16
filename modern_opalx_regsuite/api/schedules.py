@@ -17,6 +17,7 @@ gateways are rejected (the scheduler cannot handle single-use OTPs).
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -48,6 +49,12 @@ router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 class SchedulerStatus(BaseModel):
     running: bool
     last_tick_at: Optional[str] = None
+    # Server-local "now" and timezone label — returned so the UI can show the
+    # operator what the scheduler actually sees, which is the #1 reason for
+    # "my schedule didn't fire" (user set a browser-local time and the server
+    # is in UTC).
+    server_now: str
+    server_tz_name: str
 
 
 @router.get("/status", response_model=SchedulerStatus)
@@ -60,9 +67,12 @@ async def get_scheduler_status(
     load failure on server startup — check server logs for details).
     """
     last = scheduler_last_tick()
+    now_local = datetime.now().astimezone()
     return SchedulerStatus(
         running=scheduler_is_running(),
         last_tick_at=last.isoformat() if last is not None else None,
+        server_now=now_local.isoformat(timespec="seconds"),
+        server_tz_name=now_local.tzname() or "local",
     )
 
 
@@ -174,6 +184,8 @@ async def toggle_schedule_endpoint(
         connection_name=existing.connection_name,
         skip_unit=existing.skip_unit,
         skip_regression=existing.skip_regression,
+        clean_build=existing.clean_build,
+        public=existing.public,
     )
     # Re-validate the connection on enable in case it has since gained 2FA.
     if body.enabled:

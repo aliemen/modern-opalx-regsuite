@@ -88,6 +88,33 @@ export function SchedulePage() {
         </div>
       )}
 
+      {schedulerStatus && schedulerStatus.running && (
+        <div className="text-xs text-muted mb-4 border border-border rounded-md px-3 py-2 bg-surface">
+          <span className="text-fg">Server time:</span>{" "}
+          {new Date(schedulerStatus.server_now).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}{" "}
+          {schedulerStatus.server_tz_name}
+          {schedulerStatus.last_tick_at && (
+            <>
+              {" "}
+              <span className="text-muted/70">·</span>{" "}
+              <span className="text-fg">Last tick:</span>{" "}
+              {new Date(schedulerStatus.last_tick_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </>
+          )}
+          <span className="ml-2">
+            — schedules fire in <span className="text-fg">server time</span>,
+            not your browser time.
+          </span>
+        </div>
+      )}
+
       {isLoading && (
         <p className="text-muted text-sm">Loading schedules...</p>
       )}

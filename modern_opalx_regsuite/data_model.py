@@ -38,12 +38,26 @@ class RegressionMetric(BaseModel):
     plot: Optional[str] = None  # relative path, e.g. "plots/foo.svg"
 
 
+class RegressionContainer(BaseModel):
+    """One beam container's slice of a regression simulation.
+
+    Single-beam runs produce exactly one container with ``id=None`` wrapping
+    the single {test}.stat file. Multi-beam runs produce N containers with
+    ids "c0", "c1", ... matching OPALX's {test}_c0.stat, {test}_c1.stat, ...
+    """
+
+    id: Optional[str] = None
+    state: str = "passed"
+    metrics: List[RegressionMetric] = Field(default_factory=list)
+    revision: Optional[str] = None
+
+
 class RegressionSimulation(BaseModel):
     name: str
     description: Optional[str] = None
     state: Optional[str] = None
     log_file: Optional[str] = None
-    metrics: List[RegressionMetric] = Field(default_factory=list)
+    containers: List[RegressionContainer] = Field(default_factory=list)
     duration_seconds: Optional[float] = None
     beamline_plot: Optional[str] = None  # relative path, e.g. "plots/AWAGun-1_beamline.svg"
     exit_code: Optional[int] = None
@@ -73,8 +87,9 @@ class RegressionTestsReport(BaseModel):
     @property
     def all_metrics(self) -> Iterable[RegressionMetric]:
         for sim in self.simulations:
-            for m in sim.metrics:
-                yield m
+            for c in sim.containers:
+                for m in c.metrics:
+                    yield m
 
     @property
     def total(self) -> int:

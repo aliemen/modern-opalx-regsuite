@@ -166,10 +166,15 @@ def _failing_sim_names(report: RegressionTestsReport) -> set[str]:
         if sim_state in {"failed", "broken"}:
             out.add(sim.name)
             continue
-        for metric in sim.metrics:
-            metric_state = (metric.state or "").lower()
-            if metric_state in {"failed", "broken"}:
-                out.add(sim.name)
+        found = False
+        for container in sim.containers:
+            for metric in container.metrics:
+                metric_state = (metric.state or "").lower()
+                if metric_state in {"failed", "broken"}:
+                    out.add(sim.name)
+                    found = True
+                    break
+            if found:
                 break
     return out
 

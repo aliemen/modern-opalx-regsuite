@@ -41,6 +41,14 @@ async def _lifespan(app: FastAPI):
         cfg = load_config()
         data_root = cfg.resolved_data_root
         _heal_stale_runs(data_root)
+        try:
+            from ..runner.migrations import migrate_all_regression_json
+            migrate_all_regression_json(data_root)
+        except Exception:
+            log.error(
+                "regression-tests.json migration failed on startup.",
+                exc_info=True,
+            )
     except Exception:
         log.error(
             "Failed to load config on startup — scheduled triggers will NOT run. "

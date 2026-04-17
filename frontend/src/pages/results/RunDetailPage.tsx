@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Archive, ChevronDown, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
 import { archiveRun, deleteRun, getRunDetail, setRunVisibility, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Breadcrumb } from "../../components/Breadcrumb";
@@ -33,12 +33,24 @@ export function duration(start: string, end: string | null) {
 
 export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
   const [open, setOpen] = useState(false); // default closed for better overview
+  const [cIdx, setCIdx] = useState(0);
 
-  const passedCount  = sim.metrics.filter((m) => m.state === "passed").length;
-  const failedCount  = sim.metrics.filter((m) => m.state === "failed").length;
-  const brokenCount  = sim.metrics.filter((m) => m.state === "broken").length;
-  const crashedCount = sim.metrics.filter((m) => m.state === "crashed").length;
-  const totalCount   = sim.metrics.length;
+  const containers = sim.containers ?? [];
+  const allMetrics = containers.flatMap((c) => c.metrics);
+
+  const passedCount  = allMetrics.filter((m) => m.state === "passed").length;
+  const failedCount  = allMetrics.filter((m) => m.state === "failed").length;
+  const brokenCount  = allMetrics.filter((m) => m.state === "broken").length;
+  const crashedCount = allMetrics.filter((m) => m.state === "crashed").length;
+  const totalCount   = allMetrics.length;
+
+  // Only treat as multi-beam when there is more than one container AND at
+  // least one has a non-null id. Single-beam runs after migration have
+  // exactly one container with id=null; those must render exactly like
+  // they did before this refactor.
+  const isMulti = containers.length > 1 && containers.some((c) => c.id !== null);
+  const safeIdx = Math.min(cIdx, Math.max(0, containers.length - 1));
+  const active = containers[safeIdx];
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -103,41 +115,7 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
             </details>
           )}
 
-          {/* Metrics table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-muted text-left">
-                <tr>
-                  <th className="pb-2 font-medium">Metric</th>
-                  <th className="pb-2 font-medium">Mode</th>
-                  <th className="pb-2 font-medium">ε</th>
-                  <th className="pb-2 font-medium">δ</th>
-                  <th className="pb-2 font-medium">Reference</th>
-                  <th className="pb-2 font-medium">Current</th>
-                  <th className="pb-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sim.metrics.map((m) => (
-                  <tr key={m.metric} className="border-t border-border/50">
-                    <td className="py-1.5 font-mono text-fg">{m.metric}</td>
-                    <td className="py-1.5 text-muted">{m.mode}</td>
-                    <td className="py-1.5 text-muted font-mono">{fmtNum(m.eps)}</td>
-                    <td className={`py-1.5 font-mono ${m.delta !== null && m.eps !== null && m.delta < m.eps ? "text-passed" : "text-failed"}`}>
-                      {fmtNum(m.delta)}
-                    </td>
-                    <td className="py-1.5 font-mono text-muted">{fmtNum(m.reference_value)}</td>
-                    <td className="py-1.5 font-mono text-muted">{fmtNum(m.current_value)}</td>
-                    <td className="py-1.5">
-                      <StatusBadge status={m.state} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Beamline diagram */}
+          {/* Beamline diagram — shared across containers */}
           {sim.beamline_plot && (
             <div>
               <p className="text-muted text-xs mb-2 uppercase tracking-wide font-medium">Beamline</p>
@@ -150,10 +128,83 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
             </div>
           )}
 
-          {/* Metric plots */}
-          {sim.metrics.filter((m) => m.plot).length > 0 && (
+          {/* Container pager — only for multi-beam runs */}
+          {isMulti && active && (
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                onClick={() => setCIdx((i) => Math.max(0, i - 1))}
+                disabled={safeIdx === 0}
+                className="p-1 rounded border border-border text-muted hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Previous container"
+                aria-label="Previous container"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-fg font-mono">
+                Container {active.id ?? "—"}
+              </span>
+              <span className="text-muted tabular-nums">
+                ({safeIdx + 1} / {containers.length})
+              </span>
+              <button
+                onClick={() =>
+                  setCIdx((i) => Math.min(containers.length - 1, i + 1))
+                }
+                disabled={safeIdx === containers.length - 1}
+                className="p-1 rounded border border-border text-muted hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                title="Next container"
+                aria-label="Next container"
+              >
+                <ChevronRight size={14} />
+              </button>
+              {active.state && (
+                <span className="ml-1">
+                  <StatusBadge status={active.state} />
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Metrics table — from the active container (single-beam runs have exactly one) */}
+          {active && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-muted text-left">
+                  <tr>
+                    <th className="pb-2 font-medium">Metric</th>
+                    <th className="pb-2 font-medium">Mode</th>
+                    <th className="pb-2 font-medium">ε</th>
+                    <th className="pb-2 font-medium">δ</th>
+                    <th className="pb-2 font-medium">Reference</th>
+                    <th className="pb-2 font-medium">Current</th>
+                    <th className="pb-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {active.metrics.map((m) => (
+                    <tr key={m.metric} className="border-t border-border/50">
+                      <td className="py-1.5 font-mono text-fg">{m.metric}</td>
+                      <td className="py-1.5 text-muted">{m.mode}</td>
+                      <td className="py-1.5 text-muted font-mono">{fmtNum(m.eps)}</td>
+                      <td className={`py-1.5 font-mono ${m.delta !== null && m.eps !== null && m.delta < m.eps ? "text-passed" : "text-failed"}`}>
+                        {fmtNum(m.delta)}
+                      </td>
+                      <td className="py-1.5 font-mono text-muted">{fmtNum(m.reference_value)}</td>
+                      <td className="py-1.5 font-mono text-muted">{fmtNum(m.current_value)}</td>
+                      <td className="py-1.5">
+                        <StatusBadge status={m.state} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Metric plots — from the active container */}
+          {active && active.metrics.filter((m) => m.plot).length > 0 && (
             <div className="grid gap-3 sm:grid-cols-2">
-              {sim.metrics
+              {active.metrics
                 .filter((m) => m.plot)
                 .map((m) => (
                   <div key={m.metric}>

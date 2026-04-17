@@ -16,6 +16,7 @@ from typing import Optional
 
 from ..config import Connection, SuiteConfig
 from ..data_model import (
+    RegressionContainer,
     RegressionMetric,
     RegressionSimulation,
     RegressionTestsReport,
@@ -25,6 +26,7 @@ from .parsing.regression import (
     _compute_delta,
     _discover_regression_tests,
     _discover_regression_tests_remote,
+    _enumerate_stat_containers,
     _extract_local_run_command,
     _parse_rt_file,
     _read_stat_data,
@@ -98,24 +100,33 @@ def _wrap_command_with_mpirun_srun_shim(cmd: str) -> str:
     return f"bash -lc {shlex.quote(shim_script)}"
 
 
-def _build_simulation(
+def _plot_basename(test_name: str, container_id: Optional[str], var_name: str) -> str:
+    """Generate plot filename. Single-beam keeps the legacy name unchanged so
+    existing runs still render; multi-beam adds the container id."""
+    if container_id is None:
+        return f"{test_name}_{var_name}.svg"
+    return f"{test_name}_{container_id}_{var_name}.svg"
+
+
+def _build_container(
     test_name: str,
+    container_id: Optional[str],
     rc: int,
-    rt_file: Path,
+    checks: list[tuple[str, str, float]],
     generated_stat: Path,
-    reference_stat: Path,
+    reference_stat: Optional[Path],
     plots_dir: Path,
     pipeline_log_path: Path,
-    test_start: float,
-    input_file: Optional[Path] = None,
-    log_path: Optional[Path] = None,
-) -> RegressionSimulation:
-    """Shared post-processing: parse .rt, read stats, compute deltas, plot, assemble result."""
-    crash_signal, crash_summary = _classify_crash(rc, log_path or generated_stat.parent / f"{test_name}-RT.log")
+) -> tuple[RegressionContainer, bool]:
+    """Build one RegressionContainer from a single stat file pair.
 
-    description, checks = _parse_rt_file(rt_file)
-    sim_metrics: list[RegressionMetric] = []
+    Returns ``(container, any_stat_plots)``. ``any_stat_plots`` tells the
+    caller whether at least one metric produced a comparison plot (used to
+    gate beamline diagram generation).
+    """
+    metrics: list[RegressionMetric] = []
     any_stat_plots = False
+    revision: Optional[str] = None
 
     if checks:
         for var_name, mode, eps in checks:
@@ -124,9 +135,11 @@ def _build_simulation(
                 if generated_stat.exists()
                 else (None, [], [], None)
             )
+            if rev and not revision:
+                revision = rev
             _ref_rev, ref_s_vals, ref_values, _ = (
                 _read_stat_data(reference_stat, var_name)
-                if reference_stat.exists()
+                if reference_stat is not None and reference_stat.exists()
                 else (None, [], [], None)
             )
             delta = _compute_delta(mode, values, ref_values)
@@ -151,7 +164,7 @@ def _build_simulation(
             )
             if can_plot:
                 any_stat_plots = True
-                plot_name = f"{test_name}_{var_name}.svg"
+                plot_name = _plot_basename(test_name, container_id, var_name)
                 plot_path = plots_dir / plot_name
                 try:
                     _write_stat_plot(
@@ -166,14 +179,15 @@ def _build_simulation(
                     )
                     plot_rel = f"plots/{plot_name}"
                 except Exception as exc:
+                    tag = f"{test_name}:{var_name}" if container_id is None else f"{test_name}[{container_id}]:{var_name}"
                     _append_pipeline_line(
                         pipeline_log_path,
-                        f"[regression] plot failed for {test_name}:{var_name}: {exc}",
+                        f"[regression] plot failed for {tag}: {exc}",
                     )
 
             current_value = values[-1] if values else None
             reference_value = ref_values[-1] if ref_values else None
-            sim_metrics.append(
+            metrics.append(
                 RegressionMetric(
                     metric=var_name,
                     mode=mode,
@@ -196,7 +210,7 @@ def _build_simulation(
             state = "failed"
         else:
             state = "broken"
-        sim_metrics.append(
+        metrics.append(
             RegressionMetric(
                 metric="run",
                 mode="presence",
@@ -209,25 +223,115 @@ def _build_simulation(
             )
         )
 
+    container_state = "passed"
+    if any(m.state == "failed" for m in metrics):
+        container_state = "failed"
+    elif any(m.state == "crashed" for m in metrics):
+        container_state = "crashed"
+    elif any(m.state == "broken" for m in metrics):
+        container_state = "broken"
+
+    return (
+        RegressionContainer(
+            id=container_id,
+            state=container_state,
+            metrics=metrics,
+            revision=revision,
+        ),
+        any_stat_plots,
+    )
+
+
+def _build_simulation(
+    test_name: str,
+    rc: int,
+    rt_file: Path,
+    work_test_dir: Path,
+    reference_dir: Path,
+    plots_dir: Path,
+    pipeline_log_path: Path,
+    test_start: float,
+    input_file: Optional[Path] = None,
+    log_path: Optional[Path] = None,
+) -> RegressionSimulation:
+    """Shared post-processing: parse .rt, discover per-container stat files,
+    build one RegressionContainer per (generated, reference) pair, and roll
+    up simulation-level state.
+
+    For single-beam runs, ``containers`` is exactly one entry with ``id=None``
+    so the frontend can trivially detect "render like before".
+    """
+    crash_signal, crash_summary = _classify_crash(
+        rc, log_path or work_test_dir / f"{test_name}-RT.log"
+    )
+
+    description, checks = _parse_rt_file(rt_file)
+
+    generated_pairs = _enumerate_stat_containers(work_test_dir, test_name)
+    reference_pairs = _enumerate_stat_containers(reference_dir, test_name)
+    ref_by_id: dict[Optional[str], Path] = {cid: p for cid, p in reference_pairs}
+
+    containers: list[RegressionContainer] = []
+    any_stat_plots = False
+
+    if generated_pairs:
+        # Normal path: at least one stat file was produced.
+        pairs = generated_pairs
+    elif reference_pairs:
+        # Run crashed/failed and produced no stat files, but we know which
+        # containers were expected from the reference side. Fabricate empty
+        # generated paths so `_build_container` still marks metrics broken /
+        # crashed with the right container ids.
+        pairs = [(cid, work_test_dir / p.name) for cid, p in reference_pairs]
+    else:
+        # No stat files anywhere — fall back to a single legacy container so
+        # the simulation row still shows up (with broken/crashed state).
+        legacy = work_test_dir / f"{test_name}.stat"
+        pairs = [(None, legacy)]
+
+    for container_id, generated_stat in pairs:
+        reference_stat = ref_by_id.get(container_id)
+        if reference_stat is None and container_id is None and reference_pairs:
+            # Generated side has no container suffix but reference side does
+            # (unusual): pick the first reference so we don't silently lose data.
+            reference_stat = reference_pairs[0][1]
+        container, had_plots = _build_container(
+            test_name=test_name,
+            container_id=container_id,
+            rc=rc,
+            checks=checks,
+            generated_stat=generated_stat,
+            reference_stat=reference_stat,
+            plots_dir=plots_dir,
+            pipeline_log_path=pipeline_log_path,
+        )
+        containers.append(container)
+        any_stat_plots = any_stat_plots or had_plots
+
+    # Simulation-level rollup: worst-wins across every container's metrics.
     sim_state = "passed"
-    if any(m.state == "failed" for m in sim_metrics):
+    all_metric_states = [m.state for c in containers for m in c.metrics]
+    if any(s == "failed" for s in all_metric_states):
         sim_state = "failed"
-    elif any(m.state == "crashed" for m in sim_metrics):
+    elif any(s == "crashed" for s in all_metric_states):
         sim_state = "crashed"
-    elif any(m.state == "broken" for m in sim_metrics):
+    elif any(s == "broken" for s in all_metric_states):
         sim_state = "broken"
 
     # --- Beamline visualization -------------------------------------------
     # Look for the ElementPositions.txt file that OPALX writes to a data/
-    # subdirectory next to the .stat file.
+    # subdirectory in the work dir. Multi-beam runs may emit per-container
+    # variants (e.g. *_c0_ElementPositions.txt); we pick the first sorted
+    # match since the beamline geometry is shared across containers.
     beamline_plot: Optional[str] = None
-    work_dir = generated_stat.parent
-    data_dir = work_dir / "data"
+    data_dir = work_test_dir / "data"
     positions_file: Optional[Path] = next(
-        data_dir.glob("*_ElementPositions.txt"), None
+        iter(sorted(data_dir.glob("*_ElementPositions.txt"))), None
     ) if data_dir.is_dir() else None
     if positions_file is None:
-        positions_file = next(work_dir.glob("*_ElementPositions.txt"), None)
+        positions_file = next(
+            iter(sorted(work_test_dir.glob("*_ElementPositions.txt"))), None
+        )
 
     if positions_file is not None and any_stat_plots:
         beamline_out = plots_dir / f"{test_name}_beamline.svg"
@@ -248,7 +352,7 @@ def _build_simulation(
         # The on-disk filenames in `_run_regression_suite[_remote]` use the
         # same suffix; if you change one, change the other.
         log_file=f"logs/{test_name}-RT.log",
-        metrics=sim_metrics,
+        containers=containers,
         duration_seconds=time.monotonic() - test_start,
         beamline_plot=beamline_plot,
         exit_code=rc,
@@ -301,8 +405,7 @@ def _run_regression_suite(
         local_script = work_test_dir / f"{test_name}.local"
         test_input = work_test_dir / f"{test_name}.in"
         rt_file = work_test_dir / f"{test_name}.rt"
-        generated_stat = work_test_dir / f"{test_name}.stat"
-        reference_stat = src_test_dir / "reference" / f"{test_name}.stat"
+        reference_dir = src_test_dir / "reference"
 
         test_log_local = work_test_dir / f"{test_name}-RT.log"
         test_log_run = paths.logs_dir / f"{test_name}-RT.log"
@@ -351,8 +454,8 @@ def _run_regression_suite(
             test_name=test_name,
             rc=rc,
             rt_file=rt_file,
-            generated_stat=generated_stat,
-            reference_stat=reference_stat,
+            work_test_dir=work_test_dir,
+            reference_dir=reference_dir,
             plots_dir=paths.plots_dir,
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
@@ -360,12 +463,13 @@ def _run_regression_suite(
             log_path=test_log_local,
         )
         report.simulations.append(sim)
+        metric_count = sum(len(c.metrics) for c in sim.containers)
         end_extra = f" signal={sim.crash_signal}" if sim.crash_signal else ""
         _append_pipeline_line(
             pipeline_log_path,
-            f"[regression] END {test_name} state={sim.state} metrics={len(sim.metrics)}{end_extra}",
+            f"[regression] END {test_name} state={sim.state} metrics={metric_count}{end_extra}",
         )
-        reg_lines.append(f"{test_name}: {sim.state} ({len(sim.metrics)} checks)")
+        reg_lines.append(f"{test_name}: {sim.state} ({metric_count} checks)")
 
     if not cfg.keep_work_dirs and paths.work_dir.exists():
         shutil.rmtree(paths.work_dir)
@@ -499,8 +603,8 @@ def _run_regression_suite_remote(
                 f"[regression] WARNING: could not fetch {test_name}.in: {exc}",
             )
 
-        local_stat = work_test_dir / f"{test_name}.stat"
-        local_reference_stat = work_test_dir / "reference" / f"{test_name}.stat"
+        local_reference_dir = work_test_dir / "reference"
+        local_reference_dir.mkdir(parents=True, exist_ok=True)
         test_log_local = work_test_dir / f"{test_name}-RT.log"
         test_log_run = paths.logs_dir / f"{test_name}-RT.log"
 
@@ -540,36 +644,90 @@ def _run_regression_suite_remote(
         if test_log_local.exists():
             shutil.copy2(test_log_local, test_log_run)
 
-        remote_stat = f"{remote_test_work}/{test_name}.stat"
-        try:
-            remote.fetch_file(remote_stat, local_stat)
-        except Exception as exc:
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] WARNING: could not fetch {test_name}.stat: {exc}",
+        # Discover which stat files actually exist on the remote for both the
+        # run work dir (generated) and the regtests reference dir. One SSH
+        # round-trip each; we look for the legacy {test}.stat and the
+        # multi-beam {test}_c*.stat variants in the same find invocation.
+        def _list_remote_stats(remote_dir: str) -> list[str]:
+            pattern = (
+                f"find {shlex.quote(remote_dir)} -maxdepth 1 -type f "
+                f"\\( -name {shlex.quote(test_name + '.stat')} "
+                f"-o -name {shlex.quote(test_name + '_c*.stat')} \\) -print "
+                f"2>/dev/null || true"
             )
+            res = remote.conn.run(pattern, hide=True, warn=True)
+            if res.return_code != 0:
+                return []
+            return [
+                line.strip().split("/")[-1]
+                for line in res.stdout.splitlines()
+                if line.strip()
+            ]
 
-        remote_reference = f"{remote_test_src}/reference/{test_name}.stat"
-        local_reference_stat.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            remote.fetch_file(remote_reference, local_reference_stat)
-        except Exception as exc:
-            # No local fallback: the stale-local copy is what we're
-            # explicitly trying to avoid.  _build_simulation will mark the
-            # metrics as ``broken`` when the reference is missing.
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] WARNING: could not fetch reference for {test_name}: {exc}",
-            )
+        generated_basenames = _list_remote_stats(remote_test_work)
+        reference_basenames = _list_remote_stats(f"{remote_test_src}/reference")
 
-        # Try to fetch the element positions file for beamline visualization
-        remote_positions = f"{remote_test_work}/data/{test_name}_ElementPositions.txt"
-        local_positions = work_test_dir / "data" / f"{test_name}_ElementPositions.txt"
-        try:
-            local_positions.parent.mkdir(parents=True, exist_ok=True)
-            remote.fetch_file(remote_positions, local_positions)
-        except Exception:
-            pass  # Not critical — beamline SVG will simply be skipped if absent
+        # Fall back to legacy names so the runner still attempts a fetch on
+        # crashed runs where find returned nothing — keeps behavior the same
+        # as before for failing single-beam tests.
+        if not generated_basenames:
+            generated_basenames = [f"{test_name}.stat"]
+        if not reference_basenames:
+            reference_basenames = [f"{test_name}.stat"]
+
+        for fname in generated_basenames:
+            try:
+                remote.fetch_file(
+                    f"{remote_test_work}/{fname}", work_test_dir / fname
+                )
+            except Exception as exc:
+                _append_pipeline_line(
+                    pipeline_log_path,
+                    f"[regression] WARNING: could not fetch {fname}: {exc}",
+                )
+
+        for fname in reference_basenames:
+            try:
+                remote.fetch_file(
+                    f"{remote_test_src}/reference/{fname}",
+                    local_reference_dir / fname,
+                )
+            except Exception as exc:
+                # No local fallback: the stale-local copy is what we're
+                # explicitly trying to avoid.  _build_simulation will mark
+                # the metrics as ``broken`` when the reference is missing.
+                _append_pipeline_line(
+                    pipeline_log_path,
+                    f"[regression] WARNING: could not fetch reference {fname}: {exc}",
+                )
+
+        # Try to fetch the element positions file for beamline visualization.
+        # Attempt both the legacy single-beam name and any per-container
+        # variants; the beamline SVG only needs one.
+        positions_dir = work_test_dir / "data"
+        positions_dir.mkdir(parents=True, exist_ok=True)
+        positions_list_cmd = (
+            f"find {shlex.quote(remote_test_work + '/data')} -maxdepth 1 -type f "
+            f"-name '*_ElementPositions.txt' -print 2>/dev/null || true"
+        )
+        positions_res = remote.conn.run(positions_list_cmd, hide=True, warn=True)
+        remote_positions_files = [
+            line.strip()
+            for line in positions_res.stdout.splitlines()
+            if line.strip()
+        ] if positions_res.return_code == 0 else []
+        if not remote_positions_files:
+            remote_positions_files = [
+                f"{remote_test_work}/data/{test_name}_ElementPositions.txt"
+            ]
+        for remote_positions in remote_positions_files:
+            try:
+                remote.fetch_file(
+                    remote_positions,
+                    positions_dir / Path(remote_positions).name,
+                )
+            except Exception:
+                pass  # Not critical — beamline SVG will simply be skipped if absent
 
         # Use the remote-fetched .in file for element type resolution.
         in_file = in_file_local if in_file_local.exists() else None
@@ -577,8 +735,8 @@ def _run_regression_suite_remote(
             test_name=test_name,
             rc=rc,
             rt_file=rt_file,
-            generated_stat=local_stat,
-            reference_stat=local_reference_stat,
+            work_test_dir=work_test_dir,
+            reference_dir=local_reference_dir,
             plots_dir=paths.plots_dir,
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
@@ -586,12 +744,13 @@ def _run_regression_suite_remote(
             log_path=test_log_local,
         )
         report.simulations.append(sim)
+        metric_count = sum(len(c.metrics) for c in sim.containers)
         end_extra = f" signal={sim.crash_signal}" if sim.crash_signal else ""
         _append_pipeline_line(
             pipeline_log_path,
-            f"[regression] END {test_name} state={sim.state} metrics={len(sim.metrics)}{end_extra}",
+            f"[regression] END {test_name} state={sim.state} metrics={metric_count}{end_extra}",
         )
-        reg_lines.append(f"{test_name}: {sim.state} ({len(sim.metrics)} checks)")
+        reg_lines.append(f"{test_name}: {sim.state} ({metric_count} checks)")
 
     if not cfg.keep_work_dirs and paths.work_dir.exists():
         shutil.rmtree(paths.work_dir)

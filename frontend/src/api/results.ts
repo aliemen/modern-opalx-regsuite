@@ -46,12 +46,19 @@ export interface RegressionMetric {
   plot: string | null;
 }
 
+export interface RegressionContainer {
+  id: string | null;
+  state: string;
+  metrics: RegressionMetric[];
+  revision: string | null;
+}
+
 export interface RegressionSimulation {
   name: string;
   description: string | null;
   state: string | null;
   log_file: string | null;
-  metrics: RegressionMetric[];
+  containers: RegressionContainer[];
   duration_seconds: number | null;
   beamline_plot: string | null;
   exit_code: number | null;

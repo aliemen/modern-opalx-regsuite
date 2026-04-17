@@ -948,6 +948,33 @@ def backfill_regtest_branches(
     )
 
 
+@app.command("migrate-regression-json")
+def migrate_regression_json_cmd(
+    config: Optional[Path] = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to config.toml (defaults to ./config.toml or $OPALX_REGSUITE_CONFIG).",
+    ),
+) -> None:
+    """Rewrite historical regression-tests.json files to the containers layout.
+
+    Wraps each simulation's flat ``metrics`` array into a single
+    ``containers: [{id: None, ...}]`` entry so the multi-beam UI can read it.
+    Idempotent — already-migrated files are left alone. A ``.bak`` sibling is
+    created on the first modification of each file.
+    """
+    from .runner.migrations import migrate_all_regression_json
+
+    cfg = _load_config_option(config)
+    data_root = cfg.resolved_data_root
+    inspected, migrated = migrate_all_regression_json(data_root)
+    typer.echo(
+        f"Inspected {inspected} regression-tests.json file(s); "
+        f"migrated {migrated}."
+    )
+
+
 if __name__ == "__main__":
     app()
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from ...data_model import (
+    RegressionContainer,
     RegressionMetric,
     RegressionSimulation,
     RegressionTestsReport,
@@ -21,20 +22,43 @@ def _parse_regression_output(output: str) -> RegressionTestsReport:
     sim = RegressionSimulation(
         name="regression-suite",
         description="Aggregated regression tests.",
-        metrics=[
-            RegressionMetric(
-                metric="suite",
-                mode="aggregate",
+        containers=[
+            RegressionContainer(
+                id=None,
                 state=state,
-                eps=None,
-                delta=None,
-                reference_value=None,
-                current_value=None,
-                plot=None,
+                metrics=[
+                    RegressionMetric(
+                        metric="suite",
+                        mode="aggregate",
+                        state=state,
+                        eps=None,
+                        delta=None,
+                        reference_value=None,
+                        current_value=None,
+                        plot=None,
+                    )
+                ],
             )
         ],
     )
     return RegressionTestsReport(simulations=[sim])
+
+
+_CONTAINER_STAT_RE = re.compile(r"_c(\d+)\.stat$")
+
+
+def _has_reference_stat(entry: Path, test: str) -> bool:
+    """Test qualifies if either the legacy single {test}.stat exists or at
+    least one multi-beam {test}_c*.stat exists in reference/."""
+    ref_dir = entry / "reference"
+    if not ref_dir.is_dir():
+        return False
+    if (ref_dir / f"{test}.stat").is_file():
+        return True
+    for candidate in ref_dir.glob(f"{test}_c*.stat"):
+        if _CONTAINER_STAT_RE.search(candidate.name):
+            return True
+    return False
 
 
 def _discover_regression_tests(tests_root: Path) -> list[str]:
@@ -49,10 +73,38 @@ def _discover_regression_tests(tests_root: Path) -> list[str]:
             continue
         if not (entry / f"{test}.in").is_file():
             continue
-        if not (entry / "reference" / f"{test}.stat").is_file():
+        if not _has_reference_stat(entry, test):
             continue
         tests.append(test)
     return tests
+
+
+def _enumerate_stat_containers(
+    stat_dir: Path, test_name: str
+) -> list[tuple[Optional[str], Path]]:
+    """Return [(container_id, stat_path), ...] sorted by id.
+
+    - ``[(None, {test}.stat)]`` for a single-beam run.
+    - ``[("c0", {test}_c0.stat), ("c1", ...), ...]`` for multi-beam runs.
+
+    When both forms are present the multi-beam form wins: OPALX multi-beam
+    runs never emit the legacy name, so any {test}.stat sitting next to
+    {test}_c*.stat files is stale leftover and should be ignored.
+    """
+    if not stat_dir.is_dir():
+        return []
+    multi: list[tuple[str, Path]] = []
+    for path in stat_dir.glob(f"{test_name}_c*.stat"):
+        m = _CONTAINER_STAT_RE.search(path.name)
+        if m:
+            multi.append((f"c{int(m.group(1))}", path))
+    if multi:
+        multi.sort(key=lambda t: int(t[0][1:]))
+        return [(cid, p) for cid, p in multi]
+    legacy = stat_dir / f"{test_name}.stat"
+    if legacy.is_file():
+        return [(None, legacy)]
+    return []
 
 
 def _discover_regression_tests_remote(
@@ -109,6 +161,12 @@ def _discover_regression_tests_remote(
             has_in.add(head)
         elif tail == f"reference/{head}.stat":
             has_ref.add(head)
+        elif tail.startswith("reference/") and _CONTAINER_STAT_RE.search(tail):
+            # Accept reference/{head}_c<N>.stat as evidence of a multi-beam
+            # regression test (OPALX emits one stat file per BEAM container).
+            fname = tail[len("reference/") :]
+            if fname.startswith(head + "_c"):
+                has_ref.add(head)
 
     tests = sorted(
         name for name in dirs

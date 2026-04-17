@@ -368,15 +368,8 @@ def _run_regression_suite(
         reg_lines.append(f"{test_name}: {sim.state} ({len(sim.metrics)} checks)")
 
     if not cfg.keep_work_dirs and paths.work_dir.exists():
-        has_nonfatal = report.crashed > 0 or report.failed > 0 or report.broken > 0
-        if has_nonfatal:
-            _append_pipeline_line(
-                pipeline_log_path,
-                "[regression] Kept work directory for post-mortem (some tests crashed/failed/broken).",
-            )
-        else:
-            shutil.rmtree(paths.work_dir)
-            _append_pipeline_line(pipeline_log_path, "[regression] Removed temporary work directory.")
+        shutil.rmtree(paths.work_dir)
+        _append_pipeline_line(pipeline_log_path, "[regression] Removed temporary work directory.")
 
     paths.reg_log_path.write_text("\n".join(reg_lines) + "\n", encoding="utf-8")
     return report

@@ -563,6 +563,10 @@ def run_pipeline(
         return meta
 
     finally:
+        # Always remove the local work dir so aborted/failed runs leave no debris.
+        if paths.work_dir.exists():
+            shutil.rmtree(paths.work_dir, ignore_errors=True)
+
         if remote is not None:
             # Clean up per-run work dir on remote (always).
             if remote_base is not None and run_id:

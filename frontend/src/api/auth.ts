@@ -24,3 +24,13 @@ export async function tryRefresh(): Promise<string | null> {
     return null;
   }
 }
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  await api.post("/api/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+}

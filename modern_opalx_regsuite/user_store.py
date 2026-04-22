@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,8 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .config import Connection, SuiteConfig
+
+log = logging.getLogger("opalx.user_store")
 
 
 # ── Filesystem helpers ───────────────────────────────────────────────────────
@@ -61,9 +64,34 @@ def ensure_user_dir(cfg: "SuiteConfig", username: str) -> Path:
     keys.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(keys, 0o700)
-    except OSError:
-        # Filesystem may not support chmod (e.g. some network mounts).
-        pass
+    except OSError as exc:
+        # Filesystem may not support chmod (e.g. some network mounts). Do not
+        # raise — users must remain loginnable — but warn loudly: an ssh-keys
+        # dir without 0700 means other local accounts on the server can read
+        # private keys, which is a real exposure. The warning lands in the
+        # regular uvicorn logs where operators see it.
+        log.warning(
+            "Could not chmod 0700 on ssh-keys dir %s: %s. Private keys in "
+            "this directory may be world-readable on disk; verify your "
+            "filesystem permissions manually.",
+            keys,
+            exc,
+        )
+    else:
+        # After a successful chmod, verify the mode actually took — some
+        # network filesystems silently accept chmod without applying it.
+        try:
+            mode = os.stat(keys).st_mode & 0o777
+        except OSError:
+            mode = None
+        if mode is not None and mode != 0o700:
+            log.warning(
+                "ssh-keys dir %s reports mode %s after chmod(0o700). The "
+                "filesystem may be ignoring permission changes; private key "
+                "material may be exposed.",
+                keys,
+                oct(mode),
+            )
 
     prof = profile_path(cfg, username)
     if not prof.exists():

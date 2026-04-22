@@ -14,6 +14,7 @@ scheduler maps both to "skipped" plus a message.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,57 @@ from .state import (
 
 
 StartOutcome = str  # "started" | "queued" | "busy_interactive" | "missing_connection" | "missing_key"
+
+
+def _describe_key_problem(
+    key_path: Optional[Path],
+    *,
+    key_name: str,
+    role: str,
+) -> Optional[str]:
+    """Return a precise, user-facing description of why *key_path* is unusable,
+    or ``None`` if the key is present and readable.
+
+    ``role`` is ``"target"`` or ``"gateway"``; it is included verbatim so the
+    caller does not have to massage the sentence downstream. The distinction
+    between "never resolved", "not on disk", "not readable" and "mode too
+    permissive" matters for operators: each implies a different remediation
+    (configure the connection, re-upload the key, fix permissions, re-chmod).
+    """
+    if key_path is None:
+        return (
+            f"{role.capitalize()} SSH key '{key_name}' could not be resolved "
+            "to a filesystem path (is the connection fully configured?)."
+        )
+    if not key_path.exists():
+        return (
+            f"{role.capitalize()} SSH key '{key_name}' is not on disk at "
+            f"{key_path} - it may have been deleted or never uploaded."
+        )
+    if not key_path.is_file():
+        return (
+            f"{role.capitalize()} SSH key '{key_name}' at {key_path} is not "
+            "a regular file."
+        )
+    if not os.access(key_path, os.R_OK):
+        return (
+            f"{role.capitalize()} SSH key '{key_name}' at {key_path} is not "
+            "readable by the server process; check ownership and permissions."
+        )
+    try:
+        mode = key_path.stat().st_mode & 0o777
+    except OSError as exc:
+        return (
+            f"{role.capitalize()} SSH key '{key_name}' at {key_path} could "
+            f"not be stat'd ({exc.strerror or exc})."
+        )
+    if mode & 0o077:
+        return (
+            f"{role.capitalize()} SSH key '{key_name}' at {key_path} has "
+            f"permissions {oct(mode)}; SSH refuses keys readable by others. "
+            "Run 'chmod 600' on the key."
+        )
+    return None
 
 
 @dataclass
@@ -115,27 +167,34 @@ async def start_run(
         target_key_path, gateway_key_path = resolve_connection_key_paths(
             effective_cfg, owner_for_connection, connection
         )
-        if not target_key_path.is_file():
+        target_problem = _describe_key_problem(
+            target_key_path,
+            key_name=connection.key_name,
+            role="target",
+        )
+        if target_problem is not None:
             return StartRunResult(
                 outcome="missing_key",
                 run_id=run_id,
-                detail=f"SSH key '{connection.key_name}' is missing on disk.",
+                detail=target_problem,
                 connection_name=connection.name,
             )
         if (
             connection.gateway is not None
             and connection.gateway.auth_method != "interactive"
-            and (gateway_key_path is None or not gateway_key_path.is_file())
         ):
-            return StartRunResult(
-                outcome="missing_key",
-                run_id=run_id,
-                detail=(
-                    f"Gateway SSH key '{connection.gateway.key_name}' is "
-                    "missing on disk."
-                ),
-                connection_name=connection.name,
+            gateway_problem = _describe_key_problem(
+                gateway_key_path,
+                key_name=connection.gateway.key_name,
+                role="gateway",
             )
+            if gateway_problem is not None:
+                return StartRunResult(
+                    outcome="missing_key",
+                    run_id=run_id,
+                    detail=gateway_problem,
+                    connection_name=connection.name,
+                )
 
     machine_id = resolve_machine_id(connection)
     resolved_conn_name = connection.name if connection is not None else "local"

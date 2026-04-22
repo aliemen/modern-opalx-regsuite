@@ -3,8 +3,8 @@
 Produces an SVG file showing each beamline element as a coloured rectangle
 above a horizontal reference line (the beam axis).  Overlapping elements are
 stacked in separate vertical lanes using a greedy interval-scheduling
-algorithm.  Drift spaces are rendered as faint background bands so the active
-elements stand out.
+algorithm.  Drift spaces are rendered as short lane-0-height rectangles that
+sit cleanly between active elements without intruding on their vertical space.
 """
 from __future__ import annotations
 
@@ -27,9 +27,21 @@ LANE_STEP = 0.60        # Vertical distance between lane baselines
 LANE_BASE_Y = 0.12      # Distance from the axis (y=0) to the bottom of lane 0
 AXIS_Y = 0.0            # y-coordinate of the beam axis line
 
-# Drift background bands: fill matches ELEMENT_STYLES["drift"]; edge is slightly darker.
+# Drift rectangles match the drift palette entry; edge is slightly darker.
 _DRIFT_FILL = ELEMENT_STYLES["drift"]["color"]
 _DRIFT_BAND_EDGE = "#98A2AC"
+
+# Relative fraction of total length used as epsilon when shrinking drift
+# intervals to keep them clear of neighbouring non-drift elements.
+_DRIFT_GAP_FRAC = 0.0015
+
+# Drifts shorter than this fraction of total length are omitted entirely —
+# they visually clutter the diagram and never carry useful information.
+_DRIFT_MIN_VISIBLE_FRAC = 0.002
+
+# Drifts whose length is below this fraction of total length render without a
+# label to avoid text piling on top of neighbouring element names.
+_DRIFT_LABEL_MIN_FRAC = 0.04
 
 
 # ---------------------------------------------------------------------------
@@ -94,38 +106,77 @@ def render_beamline(elements: list[BeamlineElement], output_path: Path) -> None:
 
     # Minimum rendered width so very short elements remain visible
     min_box_width = total_length * 0.004
+    drift_gap = total_length * _DRIFT_GAP_FRAC
+    drift_min_visible = total_length * _DRIFT_MIN_VISIBLE_FRAC
+    drift_label_min = total_length * _DRIFT_LABEL_MIN_FRAC
 
     fig_height = max(1.6, 0.9 + n_lanes * LANE_STEP)
     fig, ax = plt.subplots(figsize=(12, fig_height))
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
 
-    # -- Drift background bands ------------------------------------------
+    # -- Drift rectangles (lane-0 only) --------------------------------------
+    # Drifts used to be drawn as full-figure-height bands, which caused the
+    # drift rectangle to visually overlap any non-drift element whose s-range
+    # touched the drift's range. Now we draw each drift as a short rectangle
+    # at lane 0, with a small epsilon shrink at both ends so it never touches
+    # a neighbouring element's border. Drifts below a minimum visible width
+    # are skipped entirely.
+    non_drift_intervals = sorted(
+        (e.start, e.end) for e in elements if e.elem_type.lower() != "drift"
+    )
+
+    def _shrink_to_neighbours(start: float, end: float) -> tuple[float, float]:
+        """Clip [start, end] so it stays clear of adjacent non-drift elements
+        by at least ``drift_gap``. Returns the clipped interval or a zero-length
+        range if the drift is entirely consumed by the gap."""
+        new_start, new_end = start, end
+        for n_start, n_end in non_drift_intervals:
+            if n_end <= start or n_start >= end:
+                continue  # No interaction with this neighbour.
+            if n_end <= new_start:
+                continue
+            if n_start >= new_end:
+                continue
+            # Overlap or touching: push our boundary inward.
+            if n_start <= new_start and n_end > new_start:
+                new_start = max(new_start, n_end + drift_gap)
+            if n_end >= new_end and n_start < new_end:
+                new_end = min(new_end, n_start - drift_gap)
+        # Additional epsilon at both ends for visual breathing room.
+        new_start = max(new_start, start) + drift_gap
+        new_end = min(new_end, end) - drift_gap
+        return new_start, new_end
+
+    drift_y_bottom = LANE_BASE_Y
     for drift in drifts:
         if drift.length <= 0:
             continue
-        y_bottom = LANE_BASE_Y - 0.05
-        band_height = n_lanes * LANE_STEP + BOX_HEIGHT + 0.05
+        d_start, d_end = _shrink_to_neighbours(drift.start, drift.end)
+        length = d_end - d_start
+        if length < drift_min_visible:
+            continue
         ax.add_patch(FancyBboxPatch(
-            (drift.start, y_bottom),
-            drift.length,
-            band_height,
+            (d_start, drift_y_bottom),
+            length,
+            BOX_HEIGHT,
             boxstyle="square,pad=0",
             facecolor=_DRIFT_FILL,
             edgecolor=_DRIFT_BAND_EDGE,
             linewidth=0.5,
             zorder=1,
-            alpha=0.8,
+            alpha=0.55,
         ))
-        # Tiny "DRIFT" label at the top of the band
-        ax.text(
-            drift.start + drift.length / 2,
-            y_bottom + band_height + 0.03,
-            f"{drift.name}  ({drift.length:.2f} m)",
-            ha="center", va="bottom",
-            fontsize=6, color="#AAAAAA",
-            zorder=3,
-        )
+        if length >= drift_label_min:
+            ax.text(
+                d_start + length / 2,
+                drift_y_bottom + BOX_HEIGHT / 2,
+                f"{drift.length:.2f} m",
+                ha="center", va="center",
+                fontsize=6, color="#6B7280",
+                zorder=2,
+                clip_on=True,
+            )
 
     # -- Beam axis -----------------------------------------------------------
     ax.axhline(AXIS_Y, color="#2C3E50", linewidth=1.5, zorder=0)

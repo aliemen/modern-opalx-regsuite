@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Iterator, TYPE_CHECKING
 
+from .._atomic_write import write_secret_bytes_atomic
 from .models import ApiKeyRecord
 
 if TYPE_CHECKING:
@@ -64,9 +65,9 @@ def load(user_dir: Path) -> list[ApiKeyRecord]:
 
 
 def save(user_dir: Path, records: list[ApiKeyRecord]) -> None:
-    """Atomic write with 0600 permissions (temp + os.replace).
+    """Atomic write with 0600 permissions.
 
-    We go through ``os.open(O_CREAT|O_EXCL|O_WRONLY, 0o600)`` on the temp file
+    Delegates to the shared helper in :mod:`modern_opalx_regsuite._atomic_write`
     so the record file never transiently exists with a more permissive mode.
     """
     user_dir.mkdir(parents=True, exist_ok=True)
@@ -75,20 +76,7 @@ def save(user_dir: Path, records: list[ApiKeyRecord]) -> None:
         "api_keys": [r.model_dump(mode="json") for r in records],
     }
     encoded = json.dumps(payload, indent=2).encode("utf-8")
-
-    tmp = path.with_suffix(".json.tmp")
-    # Clear any stale temp file from a previous crashed write.
-    if tmp.exists():
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-    fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        os.write(fd, encoded)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
+    write_secret_bytes_atomic(path, encoded)
 
 
 def append(user_dir: Path, record: ApiKeyRecord) -> None:

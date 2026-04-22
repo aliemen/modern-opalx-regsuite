@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from .._atomic_write import write_secret_bytes_atomic
 from ..api_keys import ApiKeyScope
 from ..config import SuiteConfig
 from ..user_store import (
@@ -66,25 +67,9 @@ def _fingerprint(key_path: Path) -> str | None:
 
 
 def _write_key_atomic(key_path: Path, content: bytes) -> None:
-    """Write *content* to *key_path* with mode 0600 atomically.
-
-    Uses ``O_CREAT | O_EXCL | O_WRONLY`` against a temp file then ``os.replace``
-    so the key file never exists at any other mode (no 0644 race window).
-    """
-    key_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(key_path.parent, 0o700)
-    except OSError:
-        pass
-    tmp = key_path.with_suffix(key_path.suffix + ".tmp")
-    if tmp.exists():
-        tmp.unlink()
-    fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        os.write(fd, content)
-    finally:
-        os.close(fd)
-    os.replace(tmp, key_path)
+    """Thin wrapper kept for call-site readability; delegates to the shared
+    0600 atomic-write helper in :mod:`modern_opalx_regsuite._atomic_write`."""
+    write_secret_bytes_atomic(key_path, content)
 
 
 @router.post("", status_code=201, response_model=SshKeyInfo)

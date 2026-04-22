@@ -803,28 +803,104 @@ class RemoteExecutor:
         """Cancel the active Slurm allocation (best-effort).
 
         Tolerates stale or closed connections — if ``scancel`` cannot be
-        delivered, the job will time out on its own via Slurm's ``--time``
-        limit.
+        delivered on the primary connection, we attempt one retry on a freshly
+        opened SSH connection through the same gateway. If that also fails the
+        job will time out on its own via Slurm's ``--time`` limit.
         """
         if self._allocation_id is None:
             return
         job_id = self._allocation_id
         self._allocation_id = None  # clear first so close() won't double-cancel
+        cluster_flag = ""
+        if self._slurm_cluster:
+            cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
+        scancel_cmd = f"scancel{cluster_flag} {shlex.quote(job_id)}"
+
+        primary_err: Optional[Exception] = None
         try:
-            cluster_flag = ""
-            if self._slurm_cluster:
-                cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
-            self.conn.run(
-                f"scancel{cluster_flag} {shlex.quote(job_id)}",
-                hide=True, warn=True,
-            )
-        except Exception:
-            self._log(
-                f"[{self._connection_name}] WARNING: could not cancel Slurm "
-                f"job {job_id} (connection may be unavailable)"
-            )
-        else:
+            self.conn.run(scancel_cmd, hide=True, warn=True)
             self._log(f"[{self._connection_name}] Slurm job {job_id} cancelled")
+            return
+        except Exception as exc:
+            primary_err = exc
+
+        # Primary failed — try once via a fresh side-channel connection so a
+        # dropped transport does not leak the allocation.
+        if self._scancel_via_fresh_connection(job_id):
+            self._log(
+                f"[{self._connection_name}] Slurm job {job_id} cancelled via "
+                "side-channel after primary connection failed."
+            )
+            return
+
+        self._log(
+            f"[{self._connection_name}] WARNING: could not cancel Slurm job "
+            f"{job_id} on either the primary or a fresh connection "
+            f"(err={primary_err!s}). The job will expire on Slurm's --time."
+        )
+
+    def _scancel_via_fresh_connection(self, job_id: str) -> bool:
+        """Open a short-lived SSH connection and run ``scancel``.
+
+        Used when the primary transport has dropped mid-run, so we still get
+        a best-effort chance to free the Slurm allocation instead of leaking
+        it until Slurm's own time limit fires. Returns True on success.
+
+        Interactive gateways are the hard case: a ``scancel`` on a fresh
+        connection requires re-opening the gateway, which normally needs a
+        new OTP. We try the in-memory ControlMaster socket first (no new
+        OTP needed as long as the gateway session is still alive); if that
+        fails we give up silently rather than prompt the user again.
+        """
+        cluster_flag = ""
+        if self._slurm_cluster:
+            cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
+        scancel_cmd = f"scancel{cluster_flag} {shlex.quote(job_id)}"
+
+        fresh_conn: Optional[Connection] = None
+        try:
+            if (
+                self._gateway is not None
+                and self._gateway.auth_method == "interactive"
+            ):
+                if not self._is_gateway_alive():
+                    return False
+                fresh_conn = self._connect_through_control_socket()
+            elif self._gateway is not None:
+                # Key-auth gateway: reopen both legs from scratch.
+                gw_conn = Connection(
+                    host=self._gateway.host,
+                    user=self._gateway.user,
+                    port=self._gateway.port,
+                    connect_kwargs=_connect_kwargs(self._gateway_key_path),
+                )
+                fresh_conn = Connection(
+                    host=self._host,
+                    user=self._user,
+                    port=self._port,
+                    gateway=gw_conn,
+                    connect_kwargs=_connect_kwargs(self._key_path),
+                )
+                fresh_conn.open()
+            else:
+                fresh_conn = Connection(
+                    host=self._host,
+                    user=self._user,
+                    port=self._port,
+                    connect_kwargs=_connect_kwargs(self._key_path),
+                )
+                fresh_conn.open()
+
+            fresh_conn.run(scancel_cmd, hide=True, warn=True)
+            return True
+        except Exception:
+            return False
+        finally:
+            if fresh_conn is not None:
+                try:
+                    fresh_conn.close()
+                except Exception:
+                    pass
 
     # ── Logging helper ───────────────────────────────────────────────────
 
@@ -1020,21 +1096,43 @@ class RemoteExecutor:
         self._log(f"[{self._connection_name}] {cmd}")
 
         # ── Cancel watchdog ──────────────────────────────────────────────
-        # A daemon thread that waits on the cancel_event and closes the SSH
-        # transport to interrupt ``conn.run()``.  This unblocks the main
-        # thread which is stuck reading from the SSH channel.
+        # A daemon thread that waits on the cancel_event and:
+        #   1. best-effort cancels the Slurm allocation (if any) on a fresh
+        #      side-channel connection — the primary channel is blocked
+        #      reading the running command so we can't reuse it;
+        #   2. closes the SSH transport to interrupt ``conn.run()`` and
+        #      unblock the main thread.
+        # Without step 1 a user-triggered cancel would leave the Slurm job
+        # consuming cluster resources until its --time limit expires.
         command_done = threading.Event()
 
         if cancel_event is not None:
             def _cancel_watchdog() -> None:
                 cancel_event.wait()
-                if not command_done.is_set():
-                    try:
-                        transport = self._conn.transport if self._conn else None
-                        if transport:
-                            transport.close()
-                    except Exception:
-                        pass
+                if command_done.is_set():
+                    return
+                if self._allocation_id is not None:
+                    job_id = self._allocation_id
+                    if self._scancel_via_fresh_connection(job_id):
+                        self._log(
+                            f"[{self._connection_name}] cancel: Slurm job "
+                            f"{job_id} cancelled via side-channel."
+                        )
+                        # Clear the allocation id so the subsequent
+                        # release_slurm_job() during close() does not retry.
+                        self._allocation_id = None
+                    else:
+                        self._log(
+                            f"[{self._connection_name}] cancel: could not "
+                            f"reach Slurm to cancel job {job_id} on a "
+                            "side-channel; will rely on Slurm --time."
+                        )
+                try:
+                    transport = self._conn.transport if self._conn else None
+                    if transport:
+                        transport.close()
+                except Exception:
+                    pass
 
             threading.Thread(
                 target=_cancel_watchdog, daemon=True, name="cancel-ssh"
@@ -1065,6 +1163,26 @@ class RemoteExecutor:
                     )
                     self._close_connections()
                     return -1
+                # SSH/transport failure that was NOT a cancellation: the
+                # primary channel is dead. If a Slurm job was active, the
+                # remote process is still consuming a compute node; try
+                # best-effort scancel on a fresh side-channel before
+                # bubbling the error up.
+                if self._allocation_id is not None:
+                    job_id = self._allocation_id
+                    if self._scancel_via_fresh_connection(job_id):
+                        self._log(
+                            f"[{self._connection_name}] transport error; "
+                            f"Slurm job {job_id} cancelled via side-channel."
+                        )
+                        self._allocation_id = None
+                    else:
+                        self._log(
+                            f"[{self._connection_name}] transport error; "
+                            f"could not reach Slurm to cancel job {job_id} "
+                            "on a side-channel. The job will expire on "
+                            "Slurm's --time limit."
+                        )
                 # Re-raise SSH/transport errors so the pipeline can handle them.
                 raise
             finally:
@@ -1191,6 +1309,52 @@ class RemoteExecutor:
             sftp.get(remote_path, str(local_path))
         finally:
             sftp.close()
+
+    def fetch_file_status(
+        self, remote_path: str, local_path: Path
+    ) -> tuple[str, Optional[str]]:
+        """Try to fetch *remote_path*; return a precise status instead of raising.
+
+        Return values:
+          ``("fetched", None)``      — file copied successfully.
+          ``("absent", None)``       — file does not exist on the remote.
+          ``("transport_error", msg)`` — SFTP or transport failure.
+
+        The regression runner uses this to distinguish "the run never produced
+        this stat file" (a genuine test failure, keeps state ``broken``) from
+        "SSH dropped while fetching" (escalates to ``failed`` so operators do
+        not treat transport flakes as silent broken tests).
+        """
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        transport = self.conn.transport
+        if transport is None or not transport.is_active():
+            return ("transport_error", "SSH transport is not active")
+        try:
+            sftp = paramiko.SFTPClient.from_transport(transport)
+        except Exception as exc:
+            return ("transport_error", f"could not open SFTP: {exc}")
+        try:
+            try:
+                sftp.stat(remote_path)
+            except FileNotFoundError:
+                return ("absent", None)
+            except IOError as exc:
+                # Paramiko reports missing file as IOError with errno 2.
+                if getattr(exc, "errno", None) == 2:
+                    return ("absent", None)
+                return ("transport_error", f"stat failed: {exc}")
+            try:
+                sftp.get(remote_path, str(local_path))
+            except (paramiko.SSHException, socket.error, EOFError) as exc:
+                return ("transport_error", f"get failed: {exc}")
+            except IOError as exc:
+                return ("transport_error", f"get failed: {exc}")
+            return ("fetched", None)
+        finally:
+            try:
+                sftp.close()
+            except Exception:
+                pass
 
     # ── Directory helpers ────────────────────────────────────────────────
 

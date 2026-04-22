@@ -11,13 +11,15 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from ..config import load_config
 from ..data_model import runs_index_path
 from ..scheduler.task import scheduler_loop
 from .archive import router as archive_router
-from .auth import REFRESH_COOKIE_NAME, TokenResponse
-from .tokens import create_access_token, verify_refresh_token
+from .auth import REFRESH_COOKIE_NAME, TokenResponse, login_limiter
+from .tokens import create_access_token, validate_secret_configuration, verify_refresh_token
 from .branches import router as branches_router
 from .public import router as public_router
 from .results import router as results_router
@@ -37,6 +39,14 @@ async def _lifespan(app: FastAPI):
     scheduler_task: asyncio.Task | None = None
     scheduler_stop = asyncio.Event()
     cfg = None
+    # Fail fast if the JWT signing secret is not configured. Catching the
+    # RuntimeError here means the server logs a clear error instead of dying
+    # halfway through booting with a partially initialised state.
+    try:
+        validate_secret_configuration()
+    except RuntimeError as exc:
+        log.error("JWT secret configuration is invalid: %s", exc)
+        raise
     try:
         cfg = load_config()
         data_root = cfg.resolved_data_root
@@ -156,6 +166,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
         expose_headers=["X-Total-Count"],
     )
+
+    # Rate-limit /api/auth/login. The limiter state lives on ``app.state`` so
+    # slowapi can read it from the request scope; the exception handler maps
+    # RateLimitExceeded to HTTP 429 with a ``Retry-After`` header.
+    app.state.limiter = login_limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Register API routers.
     app.include_router(runs_router)

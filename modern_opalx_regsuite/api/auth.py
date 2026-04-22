@@ -7,9 +7,11 @@ from typing import Optional
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 import bcrypt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..config import SuiteConfig
 from ..user_store import ensure_user_dir
@@ -22,6 +24,12 @@ from .tokens import (
 )
 
 REFRESH_COOKIE_NAME = "refresh_token"
+
+# Per-IP login rate limit. ``get_remote_address`` picks up the client IP from
+# the ASGI scope; behind nginx we rely on X-Forwarded-For being forwarded as
+# the request's client.host (nginx default with proxy_set_header).
+# Exported so api/app.py can register the handler on the FastAPI app.
+login_limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -81,7 +89,15 @@ class TokenResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, response: Response, cfg: SuiteConfig = Depends(get_config)):
+@login_limiter.limit("10/minute")
+def login(
+    request: Request,
+    body: LoginRequest,
+    response: Response,
+    cfg: SuiteConfig = Depends(get_config),
+):
+    # ``request`` is required by slowapi's decorator so it can extract the
+    # client IP; it is otherwise unused in the handler body.
     users = load_users(cfg)
     hashed = users.get(body.username)
     if hashed is None or not verify_password(body.password, hashed):
@@ -126,3 +142,55 @@ def me(
     """
     ensure_user_dir(cfg, username)
     return MeResponse(username=username)
+
+
+# ── Password change ──────────────────────────────────────────────────────────
+
+MIN_PASSWORD_LENGTH = 12
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=1)
+
+
+def _validate_new_password(current: str, new: str) -> Optional[str]:
+    if len(new) < MIN_PASSWORD_LENGTH:
+        return f"New password must be at least {MIN_PASSWORD_LENGTH} characters."
+    if new == current:
+        return "New password must differ from the current password."
+    return None
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    response: Response,
+    username: Annotated[str, Depends(require_auth)],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
+):
+    """Rotate the caller's password.
+
+    Requires the current password to prevent session-hijack attacks. On success
+    the refresh-token cookie is cleared so the user is forced to re-authenticate
+    with the new credentials on their next refresh.
+    """
+    users = load_users(cfg)
+    hashed = users.get(username)
+    if hashed is None or not verify_password(body.current_password, hashed):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+        )
+    problem = _validate_new_password(body.current_password, body.new_password)
+    if problem is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=problem,
+        )
+    users[username] = hash_password(body.new_password)
+    save_users(cfg, users)
+    # Invalidate the long-lived refresh session so the attacker path (stolen
+    # refresh cookie) cannot outlive the rotation.
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/auth")
+    return {"ok": True}

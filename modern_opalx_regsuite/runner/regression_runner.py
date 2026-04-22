@@ -253,6 +253,7 @@ def _build_simulation(
     test_start: float,
     input_file: Optional[Path] = None,
     log_path: Optional[Path] = None,
+    transport_errors: Optional[list[str]] = None,
 ) -> RegressionSimulation:
     """Shared post-processing: parse .rt, discover per-container stat files,
     build one RegressionContainer per (generated, reference) pair, and roll
@@ -317,6 +318,21 @@ def _build_simulation(
         sim_state = "crashed"
     elif any(s == "broken" for s in all_metric_states):
         sim_state = "broken"
+
+    # Transport-level failures during metadata/stat fetch must not be silently
+    # labelled "broken" — that reads like a test problem when it is really an
+    # infrastructure problem. If the remote fetch step reported any errors and
+    # the current rollup state is the quietest side of the spectrum, escalate
+    # to "failed" and record the cause in crash_summary so the frontend shows
+    # it next to the test row.
+    if transport_errors:
+        if sim_state in ("passed", "broken"):
+            sim_state = "failed"
+        combined = "SSH transport error(s) while fetching test outputs:\n  - " + \
+            "\n  - ".join(transport_errors)
+        crash_summary = (
+            f"{crash_summary}\n\n{combined}" if crash_summary else combined
+        )
 
     # --- Beamline visualization -------------------------------------------
     # Look for the ElementPositions.txt file that OPALX writes to a data/
@@ -465,9 +481,10 @@ def _run_regression_suite(
         report.simulations.append(sim)
         metric_count = sum(len(c.metrics) for c in sim.containers)
         end_extra = f" signal={sim.crash_signal}" if sim.crash_signal else ""
+        duration_ms = int((time.monotonic() - test_start) * 1000)
         _append_pipeline_line(
             pipeline_log_path,
-            f"[regression] END {test_name} state={sim.state} metrics={metric_count}{end_extra}",
+            f"[regression] END {test_name} state={sim.state} duration_ms={duration_ms} metrics={metric_count}{end_extra}",
         )
         reg_lines.append(f"{test_name}: {sim.state} ({metric_count} checks)")
 
@@ -587,20 +604,37 @@ def _run_regression_suite_remote(
 
         has_local_script = remote.path_exists(f"{remote_test_src}/{test_name}.local")
 
-        rt_file = meta_dir / f"{test_name}.rt"
-        try:
-            remote.fetch_file(f"{remote_test_src}/{test_name}.rt", rt_file)
-        except Exception:
-            # .rt is optional (legacy tests without checks still run).
-            pass
+        # Accumulates per-test SSH/SFTP failures so _build_simulation can
+        # distinguish transport flakes from genuinely broken metrics.
+        transport_errors: list[str] = []
 
-        in_file_local = meta_dir / f"{test_name}.in"
-        try:
-            remote.fetch_file(f"{remote_test_src}/{test_name}.in", in_file_local)
-        except Exception as exc:
+        rt_file = meta_dir / f"{test_name}.rt"
+        # .rt is optional (legacy tests without checks still run); only
+        # transport failures are noteworthy.
+        rt_status, rt_detail = remote.fetch_file_status(
+            f"{remote_test_src}/{test_name}.rt", rt_file
+        )
+        if rt_status == "transport_error":
+            transport_errors.append(f"{test_name}.rt: {rt_detail}")
             _append_pipeline_line(
                 pipeline_log_path,
-                f"[regression] WARNING: could not fetch {test_name}.in: {exc}",
+                f"[regression] WARNING: transport error fetching {test_name}.rt: {rt_detail}",
+            )
+
+        in_file_local = meta_dir / f"{test_name}.in"
+        in_status, in_detail = remote.fetch_file_status(
+            f"{remote_test_src}/{test_name}.in", in_file_local
+        )
+        if in_status == "transport_error":
+            transport_errors.append(f"{test_name}.in: {in_detail}")
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] WARNING: transport error fetching {test_name}.in: {in_detail}",
+            )
+        elif in_status == "absent":
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] WARNING: {test_name}.in missing on remote.",
             )
 
         local_reference_dir = work_test_dir / "reference"
@@ -648,6 +682,10 @@ def _run_regression_suite_remote(
         # run work dir (generated) and the regtests reference dir. One SSH
         # round-trip each; we look for the legacy {test}.stat and the
         # multi-beam {test}_c*.stat variants in the same find invocation.
+        #
+        # If the underlying ``find`` transport fails (not a non-zero rc, but
+        # an SSH exception), we flag a transport error so the caller can
+        # escalate the test state away from "broken".
         def _list_remote_stats(remote_dir: str) -> list[str]:
             pattern = (
                 f"find {shlex.quote(remote_dir)} -maxdepth 1 -type f "
@@ -655,7 +693,13 @@ def _run_regression_suite_remote(
                 f"-o -name {shlex.quote(test_name + '_c*.stat')} \\) -print "
                 f"2>/dev/null || true"
             )
-            res = remote.conn.run(pattern, hide=True, warn=True)
+            try:
+                res = remote.conn.run(pattern, hide=True, warn=True)
+            except Exception as exc:
+                transport_errors.append(
+                    f"stat listing on {remote_dir}: {exc}"
+                )
+                return []
             if res.return_code != 0:
                 return []
             return [
@@ -676,29 +720,30 @@ def _run_regression_suite_remote(
             reference_basenames = [f"{test_name}.stat"]
 
         for fname in generated_basenames:
-            try:
-                remote.fetch_file(
-                    f"{remote_test_work}/{fname}", work_test_dir / fname
-                )
-            except Exception as exc:
+            status, detail = remote.fetch_file_status(
+                f"{remote_test_work}/{fname}", work_test_dir / fname
+            )
+            if status == "transport_error":
+                transport_errors.append(f"generated {fname}: {detail}")
                 _append_pipeline_line(
                     pipeline_log_path,
-                    f"[regression] WARNING: could not fetch {fname}: {exc}",
+                    f"[regression] WARNING: transport error fetching {fname}: {detail}",
                 )
+            elif status == "absent":
+                # Genuinely missing — _build_simulation will mark the affected
+                # metrics as "broken" / "crashed" based on the exit code.
+                pass
 
         for fname in reference_basenames:
-            try:
-                remote.fetch_file(
-                    f"{remote_test_src}/reference/{fname}",
-                    local_reference_dir / fname,
-                )
-            except Exception as exc:
-                # No local fallback: the stale-local copy is what we're
-                # explicitly trying to avoid.  _build_simulation will mark
-                # the metrics as ``broken`` when the reference is missing.
+            status, detail = remote.fetch_file_status(
+                f"{remote_test_src}/reference/{fname}",
+                local_reference_dir / fname,
+            )
+            if status == "transport_error":
+                transport_errors.append(f"reference {fname}: {detail}")
                 _append_pipeline_line(
                     pipeline_log_path,
-                    f"[regression] WARNING: could not fetch reference {fname}: {exc}",
+                    f"[regression] WARNING: transport error fetching reference {fname}: {detail}",
                 )
 
         # Try to fetch the element positions file for beamline visualization.
@@ -742,13 +787,15 @@ def _run_regression_suite_remote(
             test_start=test_start,
             input_file=in_file,
             log_path=test_log_local,
+            transport_errors=transport_errors,
         )
         report.simulations.append(sim)
         metric_count = sum(len(c.metrics) for c in sim.containers)
         end_extra = f" signal={sim.crash_signal}" if sim.crash_signal else ""
+        duration_ms = int((time.monotonic() - test_start) * 1000)
         _append_pipeline_line(
             pipeline_log_path,
-            f"[regression] END {test_name} state={sim.state} metrics={metric_count}{end_extra}",
+            f"[regression] END {test_name} state={sim.state} duration_ms={duration_ms} metrics={metric_count}{end_extra}",
         )
         reg_lines.append(f"{test_name}: {sim.state} ({metric_count} checks)")
 

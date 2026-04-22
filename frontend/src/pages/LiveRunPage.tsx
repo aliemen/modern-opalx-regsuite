@@ -365,13 +365,41 @@ export function LiveRunPage() {
       if (endMatch) {
         const name = endMatch[1];
         const state = endMatch[2] as TestStatus;
-        setTests((prev) =>
-          prev.map((t) =>
+        // Backend now embeds duration_ms=... in the END line so late-arriving
+        // subscribers can still show the correct elapsed time. Fall back to
+        // the local Date.now() diff only if the field is missing (older runs).
+        const durationMatch = line.match(/\bduration_ms=(\d+)\b/);
+        const authoritativeMs = durationMatch
+          ? parseInt(durationMatch[1], 10)
+          : null;
+        setTests((prev) => {
+          const existing = prev.find((t) => t.name === name);
+          if (!existing) {
+            // Late subscriber: START scrolled off before we connected.
+            // Synthesize a row so the user sees it as a completed entry.
+            return [
+              ...prev,
+              {
+                name,
+                status: state,
+                startTime: Date.now(),
+                durationMs: authoritativeMs,
+              },
+            ];
+          }
+          return prev.map((t) =>
             t.name === name && t.status === "running"
-              ? { ...t, status: state, durationMs: Date.now() - t.startTime }
+              ? {
+                  ...t,
+                  status: state,
+                  durationMs:
+                    authoritativeMs !== null
+                      ? authoritativeMs
+                      : Date.now() - t.startTime,
+                }
               : t
-          )
-        );
+          );
+        });
       }
     },
     []

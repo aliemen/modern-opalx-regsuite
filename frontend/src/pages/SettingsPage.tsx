@@ -1,6 +1,7 @@
 import { SshKeysSection } from "./settings/SshKeysSection";
 import { ConnectionsSection } from "./settings/ConnectionsSection";
 import { ApiKeysSection } from "./settings/ApiKeysSection";
+import { PasswordSection } from "./settings/PasswordSection";
 
 /**
  * Thin shell. Each section is a self-contained component under
@@ -12,6 +13,7 @@ export function SettingsPage() {
   return (
     <div className="p-6 max-w-3xl mx-auto flex flex-col gap-6">
       <h1 className="text-fg text-2xl font-semibold">Settings</h1>
+      <PasswordSection />
       <SshKeysSection />
       <ConnectionsSection />
       <ApiKeysSection />

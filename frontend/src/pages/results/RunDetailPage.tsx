@@ -115,16 +115,29 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
             </details>
           )}
 
-          {/* Beamline diagram — shared across containers */}
-          {sim.beamline_plot && (
+          {/* Beamline diagram — shared across containers.
+             Prefer the interactive 3D HTML viewer when available; fall back
+             to the legacy 2D SVG for older runs that didn't ship the
+             ElementPositions.py exporter. */}
+          {(sim.beamline_3d_plot || sim.beamline_plot) && (
             <div>
               <p className="text-muted text-xs mb-2 uppercase tracking-wide font-medium">Beamline</p>
-              <img
-                src={`/data/${runPath}/${sim.beamline_plot}`}
-                alt={`${sim.name} beamline diagram`}
-                className="w-full rounded border border-border"
-                loading="lazy"
-              />
+              {sim.beamline_3d_plot ? (
+                <iframe
+                  src={`/data/${runPath}/${sim.beamline_3d_plot}`}
+                  title={`${sim.name} beamline 3D`}
+                  className="w-full aspect-video rounded border border-border bg-surface"
+                  loading="lazy"
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              ) : (
+                <img
+                  src={`/data/${runPath}/${sim.beamline_plot}`}
+                  alt={`${sim.name} beamline diagram`}
+                  className="w-full rounded border border-border"
+                  loading="lazy"
+                />
+              )}
             </div>
           )}
 

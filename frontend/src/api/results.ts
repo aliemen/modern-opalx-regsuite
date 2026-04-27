@@ -61,6 +61,7 @@ export interface RegressionSimulation {
   containers: RegressionContainer[];
   duration_seconds: number | null;
   beamline_plot: string | null;
+  beamline_3d_plot: string | null;
   exit_code: number | null;
   crash_signal: string | null;
   crash_summary: string | null;

@@ -17,11 +17,13 @@ from pathlib import Path
 from typing import Optional
 
 from .elements import ELEMENT_STYLES, BeamlineElement
+from .mesh_extractor import extract_beamline_json
 from .parser import build_elements
 from .renderer import render_beamline
 
 __all__ = [
     "generate_beamline_svg",
+    "extract_beamline_json",
     "BeamlineElement",
     "ELEMENT_STYLES",
 ]

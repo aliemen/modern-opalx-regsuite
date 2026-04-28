@@ -60,6 +60,7 @@ class RegressionSimulation(BaseModel):
     containers: List[RegressionContainer] = Field(default_factory=list)
     duration_seconds: Optional[float] = None
     beamline_plot: Optional[str] = None  # relative path, e.g. "plots/AWAGun-1_beamline.svg"
+    beamline_3d_data: Optional[str] = None  # relative path, e.g. "plots/AWAGun-1_beamline.json"
     exit_code: Optional[int] = None
     crash_signal: Optional[str] = None   # e.g. "SIGSEGV" when killed by a signal
     crash_summary: Optional[str] = None  # MPI signal block extracted from the log

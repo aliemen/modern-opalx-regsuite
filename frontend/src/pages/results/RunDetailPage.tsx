@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Archive, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
 import { archiveRun, deleteRun, getRunDetail, setRunVisibility, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Breadcrumb } from "../../components/Breadcrumb";
+
+// Lazy-load the three.js viewer so its ~500KB chunk only ships when a user
+// actually opens a run detail page that has 3D mesh data.
+const BeamlineViewer = lazy(() =>
+  import("../../components/BeamlineViewer").then((m) => ({ default: m.BeamlineViewer }))
+);
 
 export function fmtNum(n: number | null | undefined, digits = 4) {
   if (n === null || n === undefined) return "—";
@@ -115,16 +121,28 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
             </details>
           )}
 
-          {/* Beamline diagram — shared across containers */}
-          {sim.beamline_plot && (
+          {/* Beamline diagram — shared across containers.
+             Prefer the interactive 3D viewer when mesh data is available;
+             fall back to the legacy 2D SVG for older runs. */}
+          {(sim.beamline_3d_data || sim.beamline_plot) && (
             <div>
               <p className="text-muted text-xs mb-2 uppercase tracking-wide font-medium">Beamline</p>
-              <img
-                src={`/data/${runPath}/${sim.beamline_plot}`}
-                alt={`${sim.name} beamline diagram`}
-                className="w-full rounded border border-border"
-                loading="lazy"
-              />
+              {sim.beamline_3d_data ? (
+                <Suspense
+                  fallback={
+                    <div className="aspect-video animate-pulse bg-surface rounded border border-border" />
+                  }
+                >
+                  <BeamlineViewer url={`/data/${runPath}/${sim.beamline_3d_data}`} />
+                </Suspense>
+              ) : (
+                <img
+                  src={`/data/${runPath}/${sim.beamline_plot}`}
+                  alt={`${sim.name} beamline diagram`}
+                  className="w-full rounded border border-border"
+                  loading="lazy"
+                />
+              )}
             </div>
           )}
 

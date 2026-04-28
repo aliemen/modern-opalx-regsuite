@@ -32,7 +32,7 @@ from .parsing.regression import (
     _read_stat_data,
 )
 from .plotting import _write_stat_plot
-from ..beamline_viz import generate_beamline_svg
+from ..beamline_viz import extract_beamline_json, generate_beamline_svg
 
 
 def _find_opalx_executable(build_dir: Path, relpath: str) -> Optional[Path]:
@@ -360,6 +360,30 @@ def _build_simulation(
                 f"[regression] beamline SVG failed for {test_name}: {exc}",
             )
 
+    # --- Interactive 3D beamline mesh -------------------------------------
+    # Newer OPALX runs emit a self-contained `*_ElementPositions.py` next
+    # to the `.txt` in `data/`.  We import it (side-effect-free at module
+    # load) and emit a compact JSON that the React three.js viewer renders.
+    beamline_3d_data: Optional[str] = None
+    positions_script: Optional[Path] = next(
+        iter(sorted(data_dir.glob("*_ElementPositions.py"))), None
+    ) if data_dir.is_dir() else None
+    if positions_script is None:
+        positions_script = next(
+            iter(sorted(work_test_dir.glob("*_ElementPositions.py"))), None
+        )
+
+    if positions_script is not None and any_stat_plots:
+        mesh_out = plots_dir / f"{test_name}_beamline.json"
+        try:
+            extract_beamline_json(positions_script, mesh_out)
+            beamline_3d_data = f"plots/{test_name}_beamline.json"
+        except Exception as exc:
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] beamline mesh JSON failed for {test_name}: {exc}",
+            )
+
     return RegressionSimulation(
         name=test_name,
         description=description,
@@ -371,6 +395,7 @@ def _build_simulation(
         containers=containers,
         duration_seconds=time.monotonic() - test_start,
         beamline_plot=beamline_plot,
+        beamline_3d_data=beamline_3d_data,
         exit_code=rc,
         crash_signal=crash_signal,
         crash_summary=crash_summary,
@@ -746,14 +771,18 @@ def _run_regression_suite_remote(
                     f"[regression] WARNING: transport error fetching reference {fname}: {detail}",
                 )
 
-        # Try to fetch the element positions file for beamline visualization.
+        # Try to fetch the element positions files for beamline visualization.
         # Attempt both the legacy single-beam name and any per-container
-        # variants; the beamline SVG only needs one.
+        # variants. We pull both the `.txt` (drives the 2D SVG) and the `.py`
+        # (drives the interactive 3D mesh JSON), since extraction runs locally
+        # and so works even if the remote has no Python beyond what OPALX
+        # itself uses.
         positions_dir = work_test_dir / "data"
         positions_dir.mkdir(parents=True, exist_ok=True)
         positions_list_cmd = (
             f"find {shlex.quote(remote_test_work + '/data')} -maxdepth 1 -type f "
-            f"-name '*_ElementPositions.txt' -print 2>/dev/null || true"
+            f"\\( -name '*_ElementPositions.txt' -o -name '*_ElementPositions.py' \\) "
+            f"-print 2>/dev/null || true"
         )
         positions_res = remote.conn.run(positions_list_cmd, hide=True, warn=True)
         remote_positions_files = [

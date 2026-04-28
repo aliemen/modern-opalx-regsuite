@@ -9,8 +9,6 @@ import os
 import shlex
 import shutil
 import signal as _signal
-import subprocess
-import sys
 import time
 import threading
 from pathlib import Path
@@ -362,72 +360,6 @@ def _build_simulation(
                 f"[regression] beamline SVG failed for {test_name}: {exc}",
             )
 
-    # --- Interactive 3D beamline (Babylon.js) -----------------------------
-    # Newer OPALX runs emit a self-contained `*_ElementPositions.py` next
-    # to the `.txt` in `data/`. Running it with `--export-web` writes a
-    # standalone HTML viewer with the mesh data baked in. We invoke that
-    # exporter once per test and surface the HTML alongside the SVG so the
-    # frontend can render an interactive iframe (with SVG fallback).
-    beamline_3d_plot: Optional[str] = None
-    positions_script: Optional[Path] = next(
-        iter(sorted(data_dir.glob("*_ElementPositions.py"))), None
-    ) if data_dir.is_dir() else None
-    if positions_script is None:
-        positions_script = next(
-            iter(sorted(work_test_dir.glob("*_ElementPositions.py"))), None
-        )
-
-    if positions_script is not None and any_stat_plots:
-        # Workaround for a historical Py2-ism in OPALX's MeshGenerator
-        # (Structure/MeshGenerator.cpp emitted `index = str(zlib.decompress(...))`,
-        # which on Python 3 writes the bytes-repr `b'<!DOCTYPE html>\\n...'`
-        # into the produced HTML instead of the actual document). We rewrite
-        # the script in-place before running it; the substitution is a no-op
-        # on OPALX builds that already carry the upstream fix.
-        try:
-            original_src = positions_script.read_text(encoding="utf-8")
-            patched_src = original_src.replace(
-                "index = str(zlib.decompress(index_compressed))",
-                "index = zlib.decompress(index_compressed).decode('utf-8')",
-            )
-            if patched_src != original_src:
-                positions_script.write_text(patched_src, encoding="utf-8")
-        except OSError as exc:
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] beamline 3D pre-patch skipped for {test_name}: {exc}",
-            )
-
-        beamline_html_out = plots_dir / f"{test_name}_beamline.html"
-        try:
-            subprocess.run(
-                [sys.executable, str(positions_script), "--export-web"],
-                cwd=str(positions_script.parent),
-                check=True,
-                capture_output=True,
-            )
-            generated_html = positions_script.with_suffix(".html")
-            if generated_html.is_file():
-                shutil.copy2(generated_html, beamline_html_out)
-                beamline_3d_plot = f"plots/{test_name}_beamline.html"
-            else:
-                _append_pipeline_line(
-                    pipeline_log_path,
-                    f"[regression] beamline 3D export produced no HTML for {test_name}: "
-                    f"expected {generated_html.name}",
-                )
-        except subprocess.CalledProcessError as exc:
-            stderr = (exc.stderr or b"").decode("utf-8", errors="replace").strip()
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] beamline 3D export failed for {test_name}: rc={exc.returncode} {stderr}",
-            )
-        except Exception as exc:
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] beamline 3D export failed for {test_name}: {exc}",
-            )
-
     return RegressionSimulation(
         name=test_name,
         description=description,
@@ -439,7 +371,6 @@ def _build_simulation(
         containers=containers,
         duration_seconds=time.monotonic() - test_start,
         beamline_plot=beamline_plot,
-        beamline_3d_plot=beamline_3d_plot,
         exit_code=rc,
         crash_signal=crash_signal,
         crash_summary=crash_summary,
@@ -815,17 +746,14 @@ def _run_regression_suite_remote(
                     f"[regression] WARNING: transport error fetching reference {fname}: {detail}",
                 )
 
-        # Try to fetch the element positions file(s) for beamline visualization.
+        # Try to fetch the element positions file for beamline visualization.
         # Attempt both the legacy single-beam name and any per-container
-        # variants. We pull both the `.txt` (drives the 2D SVG) and the `.py`
-        # exporter (drives the interactive 3D HTML viewer) so post-processing
-        # can run either path locally without depending on remote Python.
+        # variants; the beamline SVG only needs one.
         positions_dir = work_test_dir / "data"
         positions_dir.mkdir(parents=True, exist_ok=True)
         positions_list_cmd = (
             f"find {shlex.quote(remote_test_work + '/data')} -maxdepth 1 -type f "
-            f"\\( -name '*_ElementPositions.txt' -o -name '*_ElementPositions.py' \\) "
-            f"-print 2>/dev/null || true"
+            f"-name '*_ElementPositions.txt' -print 2>/dev/null || true"
         )
         positions_res = remote.conn.run(positions_list_cmd, hide=True, warn=True)
         remote_positions_files = [
@@ -844,7 +772,7 @@ def _run_regression_suite_remote(
                     positions_dir / Path(remote_positions).name,
                 )
             except Exception:
-                pass  # Not critical — beamline plots will simply be skipped if absent
+                pass  # Not critical — beamline SVG will simply be skipped if absent
 
         # Use the remote-fetched .in file for element type resolution.
         in_file = in_file_local if in_file_local.exists() else None

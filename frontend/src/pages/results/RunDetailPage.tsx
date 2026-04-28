@@ -40,6 +40,10 @@ export function duration(start: string, end: string | null) {
 export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
   const [open, setOpen] = useState(false); // default closed for better overview
   const [cIdx, setCIdx] = useState(0);
+  // Default to 3D when available; user can toggle. Only used when both are present.
+  const [beamlineView, setBeamlineView] = useState<"3d" | "2d">(
+    sim.beamline_3d_data ? "3d" : "2d"
+  );
 
   const containers = sim.containers ?? [];
   const allMetrics = containers.flatMap((c) => c.metrics);
@@ -122,12 +126,42 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
           )}
 
           {/* Beamline diagram — shared across containers.
-             Prefer the interactive 3D viewer when mesh data is available;
-             fall back to the legacy 2D SVG for older runs. */}
+             When both 3D mesh data and the 2D SVG are available, the user can
+             toggle between them; otherwise we render whichever exists. */}
           {(sim.beamline_3d_data || sim.beamline_plot) && (
             <div>
-              <p className="text-muted text-xs mb-2 uppercase tracking-wide font-medium">Beamline</p>
-              {sim.beamline_3d_data ? (
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-muted text-xs uppercase tracking-wide font-medium">Beamline</p>
+                {sim.beamline_3d_data && sim.beamline_plot && (
+                  <div className="inline-flex rounded border border-border overflow-hidden text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setBeamlineView("3d")}
+                      className={`px-2 py-0.5 transition-colors ${
+                        beamlineView === "3d"
+                          ? "bg-border/60 text-fg"
+                          : "text-muted hover:text-fg hover:bg-border/30"
+                      }`}
+                      aria-pressed={beamlineView === "3d"}
+                    >
+                      3D
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBeamlineView("2d")}
+                      className={`px-2 py-0.5 border-l border-border transition-colors ${
+                        beamlineView === "2d"
+                          ? "bg-border/60 text-fg"
+                          : "text-muted hover:text-fg hover:bg-border/30"
+                      }`}
+                      aria-pressed={beamlineView === "2d"}
+                    >
+                      2D
+                    </button>
+                  </div>
+                )}
+              </div>
+              {sim.beamline_3d_data && (beamlineView === "3d" || !sim.beamline_plot) ? (
                 <Suspense
                   fallback={
                     <div className="aspect-video animate-pulse bg-surface rounded border border-border" />
@@ -135,14 +169,14 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
                 >
                   <BeamlineViewer url={`/data/${runPath}/${sim.beamline_3d_data}`} />
                 </Suspense>
-              ) : (
+              ) : sim.beamline_plot ? (
                 <img
                   src={`/data/${runPath}/${sim.beamline_plot}`}
                   alt={`${sim.name} beamline diagram`}
                   className="w-full rounded border border-border"
                   loading="lazy"
                 />
-              )}
+              ) : null}
             </div>
           )}
 

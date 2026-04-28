@@ -378,6 +378,26 @@ def _build_simulation(
         )
 
     if positions_script is not None and any_stat_plots:
+        # Workaround for a historical Py2-ism in OPALX's MeshGenerator
+        # (Structure/MeshGenerator.cpp emitted `index = str(zlib.decompress(...))`,
+        # which on Python 3 writes the bytes-repr `b'<!DOCTYPE html>\\n...'`
+        # into the produced HTML instead of the actual document). We rewrite
+        # the script in-place before running it; the substitution is a no-op
+        # on OPALX builds that already carry the upstream fix.
+        try:
+            original_src = positions_script.read_text(encoding="utf-8")
+            patched_src = original_src.replace(
+                "index = str(zlib.decompress(index_compressed))",
+                "index = zlib.decompress(index_compressed).decode('utf-8')",
+            )
+            if patched_src != original_src:
+                positions_script.write_text(patched_src, encoding="utf-8")
+        except OSError as exc:
+            _append_pipeline_line(
+                pipeline_log_path,
+                f"[regression] beamline 3D pre-patch skipped for {test_name}: {exc}",
+            )
+
         beamline_html_out = plots_dir / f"{test_name}_beamline.html"
         try:
             subprocess.run(

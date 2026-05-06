@@ -1,0 +1,34 @@
+{
+  "tests": [
+    {
+      "name": "TestConstantEFieldCavity",
+      "status": "passed",
+      "duration_seconds": 0.05,
+      "output_snippet": null
+    },
+    {
+      "name": "TestMultipoleT",
+      "status": "passed",
+      "duration_seconds": 0.3,
+      "output_snippet": null
+    },
+    {
+      "name": "TestMultipoleTBase",
+      "status": "passed",
+      "duration_seconds": 0.31,
+      "output_snippet": null
+    },
+    {
+      "name": "TestMultipoleTStraight",
+      "status": "passed",
+      "duration_seconds": 0.31,
+      "output_snippet": null
+    },
+    {
+      "name": "TestMultipoleTCurvedConstRadius",
+      "status": "passed",
+      "duration_seconds": 0.31,
+      "output_snippet": null
+    }
+  ]
+}

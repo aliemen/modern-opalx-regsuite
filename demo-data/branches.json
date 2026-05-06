@@ -1,0 +1,8 @@
+{
+  "demo-corrupt": [
+    "cpu-serial"
+  ],
+  "master": [
+    "cpu-serial"
+  ]
+}

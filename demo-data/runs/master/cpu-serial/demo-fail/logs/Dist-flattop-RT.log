@@ -1,0 +1,161 @@
+$ bash Dist-flattop.local
+OPAL-X>               ____  _____        _       __   __
+OPAL-X> [1;32m
+OPAL-X> 
+OPAL-X>   ██████  ██████   █████  ██      ██   ██
+OPAL-X>  ██    ██ ██   ██ ██   ██ ██       ██ ██
+OPAL-X>  ██    ██ ██████  ███████ ██        ███
+OPAL-X>  ██    ██ ██      ██   ██ ██       ██ ██
+OPAL-X>   ██████  ██      ██   ██ ███████ ██   ██
+OPAL-X> 
+OPAL-X>          This is OPALX (Object Oriented Parallel Accelerator Library for Exascale)
+OPAL-X> 
+OPAL-X> [0m
+OPAL-X> 
+OPAL-X> OPALX is the performance portable version of OPAL :: Version 0.9
+OPAL-X>             git rev. de317a4abfd6577bf75c5a78179ad1a9cd9f156c
+OPAL-X> 
+OPAL-X> 
+OPAL-X>              (c) PSI, https://github.com/OPALX-project/OPALX
+OPAL-X> 
+OPAL-X> 
+OPAL-X> Please send cookies, goodies or other motivations (wine and beer ... ) 
+OPAL-X> to the OPAL developers https://github.com/OPALX-project/OPALX/issues
+OPAL-X> 
+OPAL-X> Time: 09:09:50 date: 26/04/2026
+OPAL-X> 
+OPAL-X> * Host:   Serial
+OPAL-X> * Device: Serial execution
+OPAL-X> 
+OPAL-X> * Reading input stream 'Dist-flattop.in'
+OPAL-X> 
+OPAL-X> value: {OPALVERSION} = {900}
+OPAL-X> 
+OPAL-X> 
+OPAL-X> value: {EDES,P0} = {1, 1.00051}
+OPAL-X> 
+OPAL-X> * ************* F I E L D S O L V E R ********************************************** 
+OPAL-X> * FIELDSOLVER  FS1
+OPAL-X> * BINS         NONE
+OPAL-X> * TYPE         NONE
+OPAL-X> * RANKS        1
+OPAL-X> * NX           32
+OPAL-X> * NY           32
+OPAL-X> * NZ           32
+OPAL-X> * BBOXINCR     5
+OPAL-X> * GREENSF      INTEGRATED
+OPAL-X> * XDIM         parallel  
+OPAL-X> * YDIM         parallel  
+OPAL-X> * ZDIM         serial  
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * RUN resolved beams: BEAM1
+OPAL-X> * ************* B E A M ************************************************************ 
+OPAL-X> * BEAM        BEAM1
+OPAL-X> * PARTICLE    ELECTRON
+OPAL-X> * REST MASS   0.000510999 [GeV]
+OPAL-X> * CHARGE      -e * 1 
+OPAL-X> * MOMENTUM    1.00051e+09 [eV/c]
+OPAL-X> * MOMENTUM    1.00051 [GeV/c]
+OPAL-X> * BCHARGE     1e-09 [C]
+OPAL-X> * NALLOC      32768
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X[2]> * Beam[0] BEAM1 macro charge per particle [C]: -3.05176e-14
+OPAL-X[2]> * Beam[0] BEAM1 macro mass per particle [GeV/c^2]: 97.3329
+OPAL-X[2]> * Beam[0] BEAM1 particles per macro particle: 190476
+OPAL-X> 
+OPAL-X> * Creating new file for data: 'Dist-flattop.stat'
+OPAL-X> * Creating new file for data: 'Dist-flattop.lbal'
+PartBunch::setSolver[2]> Initializing solver: NONE
+PartBunch::setBins[2]> Solver FS1 has no binning command attached, not using binning.
+PartBunch::pre_run[2]> Starting pre_run...
+OPAL-X[2]> * BCHandler<3>: [OPEN, OPEN, OPEN]
+OPAL-X[2]> * Configured emitting source of type FLATTOP with NPARTDIST = 32768, t0 = 0
+OPAL-X[2]> * Particle sampling / sampler setup for all emission sources done.
+OPAL-X> 
+OPAL-X> * ************** B U N C H ********************************************************* 
+OPAL-X> * CONTAINER       = 0
+OPAL-X> * PARTICLES       = 0
+OPAL-X> * CHARGE          = -0.000000e+00 (Cb) 
+OPAL-X> * QM STORAGE MODE = SINGLE
+OPAL-X> * <EKIN>          = 0.000 [eV]
+OPAL-X> * <dEKIN>         = 0.000 [eV]
+OPAL-X> * INTEGRATOR      = LF2
+OPAL-X> * MIN R (origin)  = (      0.00000 ,      0.00000 ,      0.00000 ) [um]
+OPAL-X> * MAX R (max ext) = (      0.00000 ,      0.00000 ,      0.00000 ) [um]
+OPAL-X> * RMS R           = (      0.00000 ,      0.00000 ,      0.00000 ) [um]
+OPAL-X> * RMS P           = ( 0.000000e+00 , 0.000000e+00 , 0.000000e+00 ) [beta gamma]
+OPAL-X> * Mean R          = ( 0.000000e+00 , 0.000000e+00 , 0.000000e+00 ) [m]
+OPAL-X> * Mean P          = ( 0.000000e+00 , 0.000000e+00 , 0.000000e+00 ) [beta gamma]
+OPAL-X> * MESH SPACING    = (      0.00312 ,      0.00312 ,      0.00312 ) [um]
+OPAL-X> * COMPDOM INCR    = 5.000000e+00 (%) 
+OPAL-X> * FIELD LAYOUT    = Domain = {[0:31:1],[0:31:1],[0:31:1]}
+OPAL-X> Total number of boxes = 1
+OPAL-X>     Box 0 {[0:31:1],[0:31:1],[0:31:1]}
+OPAL-X> 
+OPAL-X> * Centroid : 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * Cov Matrix : 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 
+OPAL-X> * * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * D1 gone live
+ParallelTracker::execute[2]> Dump initial phase space done.
+OPAL-X> * OrbitThreader dt_m= 5e-11
+OPAL-X> * OrbitThreader maxDistance= 0.149896
+OPAL-X> * OrbitThreader #elements  = 1
+OPAL-X> 
+OPAL-X> * Size of map 1 sections 
+OPAL-X> * Key: (0.000000 - 1.004305) number of overlapping elements 1
+OPAL-X> *                            D1
+OPAL-X> 
+OPAL-X> * Creating new file for data: 'data/Dist-flattop_ElementPositions.sdds'
+OPAL-X> * Track start at: 09:09:50, t= 0.000 [fs]; zstart at: 0.000 [um]
+OPAL-X> * Initial dt = 15625.000 [ms]
+OPAL-X> * Max integration steps = 40, next step = 0
+OPAL-X>                dt [ns]           zStop [m]        num Steps [1]
+OPAL-X> ->         5.000000e-11        1.000000e+00                  40
+PartBunch::performBunchSanityChecks[2]> ========= Done performing PartBunch sanity checks... =========
+ParallelTracker::execute[2]> Starting track with dt = 50.000 [ps], track steps = 0 to 40.
+OPAL-X> * 09:09:50 Step      0 container[0] at 14.990 [mm], t= 50.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      1 container[0] at 29.979 [mm], t= 100.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      2 container[0] at 44.969 [mm], t= 150.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      3 container[0] at 59.958 [mm], t= 200.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      4 container[0] at 74.948 [mm], t= 250.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      5 container[0] at 89.938 [mm], t= 300.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      6 container[0] at 104.927 [mm], t= 350.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      7 container[0] at 119.917 [mm], t= 400.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      8 container[0] at 134.907 [mm], t= 450.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step      9 container[0] at 149.896 [mm], t= 500.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     10 container[0] at 164.886 [mm], t= 550.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     11 container[0] at 179.875 [mm], t= 600.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     12 container[0] at 194.865 [mm], t= 650.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     13 container[0] at 209.855 [mm], t= 700.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     14 container[0] at 224.844 [mm], t= 750.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     15 container[0] at 239.834 [mm], t= 800.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     16 container[0] at 254.824 [mm], t= 850.000 [ps], E=0.000 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X> * 09:09:50 Step     17 container[0] at 269.8
+[demo-data] log truncated

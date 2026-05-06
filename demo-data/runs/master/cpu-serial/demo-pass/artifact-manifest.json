@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-06T14:36:17.910927Z",
+  "files": [
+    {
+      "path": "logs/Dist-fromfile-RT.log",
+      "kind": "log",
+      "size_bytes": 8231,
+      "sha256": "7278b0bab6edf8b3654e708becfcebd64fd0fdac238dcdcb3ad130c03292fbfd"
+    },
+    {
+      "path": "logs/FodoCell-multibeam-fromfile-RT.log",
+      "kind": "log",
+      "size_bytes": 8231,
+      "sha256": "eec467b32ffb42825726f3f9daffd52fdbf962694603f82808a04e121ae81052"
+    },
+    {
+      "path": "logs/pipeline.log",
+      "kind": "log",
+      "size_bytes": 8186,
+      "sha256": "f19c1168ec09f1be467c09d924960261814640d92b81fe16d14ce9c62e759386"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_beamline.json",
+      "kind": "beamline",
+      "size_bytes": 197109,
+      "sha256": "09e73230941d4af490f9715afc99e801f57d2855545355e117a18de3dc4c1d6a"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_beamline.svg",
+      "kind": "plot",
+      "size_bytes": 34372,
+      "sha256": "8bab1447599de66b0519290b586ea4c6397976fac9cb48577122201bc3aad3fc"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_emit_s.svg",
+      "kind": "plot",
+      "size_bytes": 56934,
+      "sha256": "0648326068fe82f802ff8cd275ae5e92bc97c86741443de4d59549ef2aa8bd13"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_emit_x.svg",
+      "kind": "plot",
+      "size_bytes": 52562,
+      "sha256": "b65c4f24a496cd031c1372596a0b42bb28c281e6b261c448020cdd1339ac9a22"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_emit_y.svg",
+      "kind": "plot",
+      "size_bytes": 51758,
+      "sha256": "6a4cc1bb10a2dd334ba210a00df62c495ee0942c8622b67c0afcf105e9701875"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_energy.svg",
+      "kind": "plot",
+      "size_bytes": 75006,
+      "sha256": "4634058e3501c44a6c348168c982a2e1749dd25937ea62d21fd85777f2c8035a"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_rms_s.svg",
+      "kind": "plot",
+      "size_bytes": 49446,
+      "sha256": "a5328c488d976a18353cadc962dd75b4eb68793ecf15a72427f55cdc0afd7026"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_rms_x.svg",
+      "kind": "plot",
+      "size_bytes": 51782,
+      "sha256": "6bb1a828fb675f12216c15f94cb50e7eb0dbabfa444610143fb4971da917c8a9"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c0_rms_y.svg",
+      "kind": "plot",
+      "size_bytes": 53696,
+      "sha256": "62017371f8f239360d452416c5db022264f7663ba7a1ef648a33b7330b2dcbbc"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_emit_s.svg",
+      "kind": "plot",
+      "size_bytes": 57169,
+      "sha256": "a4989fb64553f10ae95ac7e1e817aec2fea2225853877291ddde352d9da53f12"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_emit_x.svg",
+      "kind": "plot",
+      "size_bytes": 51293,
+      "sha256": "afbf2f88c4d3981c94adc75c5dbdea77caf1059fafdf5b2cfd733c7145611722"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_emit_y.svg",
+      "kind": "plot",
+      "size_bytes": 47115,
+      "sha256": "83e5f084e5353aa329ad3799c9b15fafe7212619471459a1c7ca1641b2add6a5"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_energy.svg",
+      "kind": "plot",
+      "size_bytes": 75600,
+      "sha256": "b7879554d661da833f09c040a31794207addad04b0b358182af152ff98521e13"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_rms_s.svg",
+      "kind": "plot",
+      "size_bytes": 54993,
+      "sha256": "1a181794c1cbcdefb3a1334506a8e84f4c825746f85461bdc929223213e96675"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_rms_x.svg",
+      "kind": "plot",
+      "size_bytes": 49657,
+      "sha256": "96e5a3af7fd4a6cca254c922167f833496146b1a9f1b163a89666c4b20a74b32"
+    },
+    {
+      "path": "plots/FodoCell-multibeam-fromfile_c1_rms_y.svg",
+      "kind": "plot",
+      "size_bytes": 49839,
+      "sha256": "2613cca26e9a54dffa45e67f412bc45cb05e0e078ba50645d229aac74a79efeb"
+    },
+    {
+      "path": "regression-tests.json",
+      "kind": "regression-report",
+      "size_bytes": 11682,
+      "sha256": "32c8c7bbe8b815aeef5a93adae2e560c302262997f737acd6117b4de52314a18"
+    },
+    {
+      "path": "run-meta.json",
+      "kind": "meta",
+      "size_bytes": 665,
+      "sha256": "0d64ce70ea1996f9b115be6f054275aa674546b89a794dfeff9510dea76de2d4"
+    },
+    {
+      "path": "unit-tests.json",
+      "kind": "unit-report",
+      "size_bytes": 717,
+      "sha256": "7e0a9a94fcdb077b85b564aa0e91b396707033f3f50bbe3788da73a0761831f7"
+    }
+  ]
+}

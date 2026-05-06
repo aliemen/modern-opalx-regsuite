@@ -1,0 +1,27 @@
+{
+  "branch": "master",
+  "arch": "cpu-serial",
+  "run_id": "demo-fail",
+  "started_at": "2026-04-26T09:06:45.411995Z",
+  "finished_at": "2026-04-26T09:13:40.172148Z",
+  "status": "failed",
+  "opalx_commit": "de317a4ab",
+  "tests_repo_commit": "e86c803",
+  "regtest_branch": "master",
+  "connection_name": "local",
+  "triggered_by": "demo-user",
+  "unit_tests_total": 5,
+  "unit_tests_failed": 0,
+  "regression_total": 22,
+  "regression_passed": 21,
+  "regression_failed": 1,
+  "regression_broken": 0,
+  "archived": false,
+  "public": false,
+  "run_options": {
+    "skip_unit": false,
+    "skip_regression": false,
+    "clean_build": false
+  },
+  "rerun_of": null
+}

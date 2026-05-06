@@ -1,0 +1,27 @@
+{
+  "branch": "master",
+  "arch": "cpu-serial",
+  "run_id": "demo-pass",
+  "started_at": "2026-04-28T15:29:41.910937Z",
+  "finished_at": "2026-04-28T15:34:10.303939Z",
+  "status": "passed",
+  "opalx_commit": "5d38107b7",
+  "tests_repo_commit": "78bc387",
+  "regtest_branch": "master",
+  "connection_name": "local",
+  "triggered_by": "demo-user",
+  "unit_tests_total": 5,
+  "unit_tests_failed": 0,
+  "regression_total": 29,
+  "regression_passed": 29,
+  "regression_failed": 0,
+  "regression_broken": 0,
+  "archived": false,
+  "public": false,
+  "run_options": {
+    "skip_unit": false,
+    "skip_regression": false,
+    "clean_build": false
+  },
+  "rerun_of": null
+}

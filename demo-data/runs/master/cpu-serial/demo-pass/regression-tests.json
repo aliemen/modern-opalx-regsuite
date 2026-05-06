@@ -1,0 +1,343 @@
+{
+  "simulations": [
+    {
+      "name": "Dist-fromfile",
+      "description": "Dist-fromfile: 1 step FROMFILE distribution read-in sanity check without BINNING element.",
+      "state": "passed",
+      "log_file": "logs/Dist-fromfile-RT.log",
+      "containers": [
+        {
+          "id": null,
+          "state": "passed",
+          "metrics": [
+            {
+              "metric": "rms_x",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 0.0,
+              "state": "passed",
+              "reference_value": 0.001562957237647974,
+              "current_value": 0.001562957237647974,
+              "plot": null
+            },
+            {
+              "metric": "rms_y",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 1.0842021724855044e-18,
+              "state": "passed",
+              "reference_value": 0.001547274523311366,
+              "current_value": 0.001547274523311365,
+              "plot": null
+            },
+            {
+              "metric": "rms_s",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 8.673617379884035e-19,
+              "state": "passed",
+              "reference_value": 0.001220150256047855,
+              "current_value": 0.001220150256047854,
+              "plot": null
+            },
+            {
+              "metric": "rms_px",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 2.0816681711721685e-17,
+              "state": "passed",
+              "reference_value": 0.0277288174505686,
+              "current_value": 0.02772881745056862,
+              "plot": null
+            },
+            {
+              "metric": "rms_py",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 1.0408340855860843e-17,
+              "state": "passed",
+              "reference_value": 0.02772422902548531,
+              "current_value": 0.0277242290254853,
+              "plot": null
+            },
+            {
+              "metric": "rms_ps",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 1.0408340855860843e-17,
+              "state": "passed",
+              "reference_value": 0.02757546611686626,
+              "current_value": 0.02757546611686627,
+              "plot": null
+            },
+            {
+              "metric": "emit_x",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 4.912791094074942e-20,
+              "state": "passed",
+              "reference_value": 1.259369013321174e-05,
+              "current_value": 1.259369013321179e-05,
+              "plot": null
+            },
+            {
+              "metric": "emit_y",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 9.994988777600744e-20,
+              "state": "passed",
+              "reference_value": 1.128653833880856e-05,
+              "current_value": 1.128653833880846e-05,
+              "plot": null
+            },
+            {
+              "metric": "emit_s",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 6.776263578034403e-21,
+              "state": "passed",
+              "reference_value": 3.176650275439385e-05,
+              "current_value": 3.176650275439384e-05,
+              "plot": null
+            },
+            {
+              "metric": "mean_x",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 2.6889987352873824e-20,
+              "state": "passed",
+              "reference_value": 1.882698105782135e-08,
+              "current_value": 1.882698105784824e-08,
+              "plot": null
+            },
+            {
+              "metric": "mean_y",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 1.3011551035459125e-20,
+              "state": "passed",
+              "reference_value": 1.137277711498949e-08,
+              "current_value": 1.13727771150025e-08,
+              "plot": null
+            },
+            {
+              "metric": "mean_s",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 8.337980574534519e-21,
+              "state": "passed",
+              "reference_value": -6.941380519133108e-08,
+              "current_value": -6.941380519132274e-08,
+              "plot": null
+            },
+            {
+              "metric": "energy",
+              "mode": "last",
+              "eps": 1e-10,
+              "delta": 4.336808689942018e-19,
+              "state": "passed",
+              "reference_value": 0.0005877406829048393,
+              "current_value": 0.0005877406829048398,
+              "plot": null
+            },
+            {
+              "metric": "nBins",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 0.0,
+              "state": "passed",
+              "reference_value": 1.0,
+              "current_value": 1.0,
+              "plot": null
+            },
+            {
+              "metric": "numParticles",
+              "mode": "last",
+              "eps": 1e-12,
+              "delta": 0.0,
+              "state": "passed",
+              "reference_value": 1000.0,
+              "current_value": 1000.0,
+              "plot": null
+            }
+          ],
+          "revision": "OPALX 0.9 git rev. 5d38107"
+        }
+      ],
+      "duration_seconds": 0.561734571121633,
+      "beamline_plot": null,
+      "beamline_3d_data": null,
+      "exit_code": 0,
+      "crash_signal": null,
+      "crash_summary": null
+    },
+    {
+      "name": "FodoCell-multibeam-fromfile",
+      "description": "FodoCell without space charge using multipole elements.",
+      "state": "passed",
+      "log_file": "logs/FodoCell-multibeam-fromfile-RT.log",
+      "containers": [
+        {
+          "id": "c0",
+          "state": "passed",
+          "metrics": [
+            {
+              "metric": "rms_x",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.5190715170294322e-15,
+              "state": "passed",
+              "reference_value": 0.008695413177581953,
+              "current_value": 0.008695413177615316,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_rms_x.svg"
+            },
+            {
+              "metric": "rms_y",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.4784728119634507e-14,
+              "state": "passed",
+              "reference_value": 0.01717675762990458,
+              "current_value": 0.01717675762969745,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_rms_y.svg"
+            },
+            {
+              "metric": "rms_s",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.607219033644617e-14,
+              "state": "passed",
+              "reference_value": 0.009744565905083723,
+              "current_value": 0.009744565905415763,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_rms_s.svg"
+            },
+            {
+              "metric": "emit_x",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.1754927492464627e-14,
+              "state": "passed",
+              "reference_value": 0.006555691576284858,
+              "current_value": 0.006555691575449859,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_emit_x.svg"
+            },
+            {
+              "metric": "emit_y",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 2.5909671939547783e-14,
+              "state": "passed",
+              "reference_value": 0.005871371994621141,
+              "current_value": 0.00587137199449425,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_emit_y.svg"
+            },
+            {
+              "metric": "emit_s",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 6.317090607043733e-14,
+              "state": "passed",
+              "reference_value": 0.0001813091008705575,
+              "current_value": 0.0001813091040145975,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_emit_s.svg"
+            },
+            {
+              "metric": "energy",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 8.231145531175791e-13,
+              "state": "passed",
+              "reference_value": 1000.000000000707,
+              "current_value": 1000.000000000675,
+              "plot": "plots/FodoCell-multibeam-fromfile_c0_energy.svg"
+            }
+          ],
+          "revision": "OPALX 0.9 git rev. 5d38107"
+        },
+        {
+          "id": "c1",
+          "state": "passed",
+          "metrics": [
+            {
+              "metric": "rms_x",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 2.3269633943478953e-16,
+              "state": "passed",
+              "reference_value": 0.01362425606907115,
+              "current_value": 0.01362425606907118,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_rms_x.svg"
+            },
+            {
+              "metric": "rms_y",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.3624523862956686e-15,
+              "state": "passed",
+              "reference_value": 0.00708111646998244,
+              "current_value": 0.007081116469985655,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_rms_y.svg"
+            },
+            {
+              "metric": "rms_s",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.4557187628735266e-15,
+              "state": "passed",
+              "reference_value": 0.009750942614298189,
+              "current_value": 0.009750942614296635,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_rms_s.svg"
+            },
+            {
+              "metric": "emit_x",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 3.911316273790473e-15,
+              "state": "passed",
+              "reference_value": 0.004160686634791875,
+              "current_value": 0.004160686634826318,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_emit_x.svg"
+            },
+            {
+              "metric": "emit_y",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 1.0213715363711368e-14,
+              "state": "passed",
+              "reference_value": 0.005872542731978946,
+              "current_value": 0.00587254273194493,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_emit_y.svg"
+            },
+            {
+              "metric": "emit_s",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 8.274584098724255e-15,
+              "state": "passed",
+              "reference_value": 0.0001431530137253357,
+              "current_value": 0.0001431530140608147,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_emit_s.svg"
+            },
+            {
+              "metric": "energy",
+              "mode": "avg",
+              "eps": 1e-05,
+              "delta": 7.613751351054685e-13,
+              "state": "passed",
+              "reference_value": 1000.000000000678,
+              "current_value": 1000.000000000752,
+              "plot": "plots/FodoCell-multibeam-fromfile_c1_energy.svg"
+            }
+          ],
+          "revision": "OPALX 0.9 git rev. 5d38107"
+        }
+      ],
+      "duration_seconds": 15.006499867886305,
+      "beamline_plot": "plots/FodoCell-multibeam-fromfile_beamline.svg",
+      "beamline_3d_data": "plots/FodoCell-multibeam-fromfile_beamline.json",
+      "exit_code": 0,
+      "crash_signal": null,
+      "crash_summary": null
+    }
+  ]
+}

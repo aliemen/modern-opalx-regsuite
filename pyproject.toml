@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["black", "ruff", "mypy"]
+dev = ["black", "ruff", "mypy", "pytest", "pytest-cov", "httpx"]
 
 [project.scripts]
 opalx-regsuite = "modern_opalx_regsuite.cli:app"
@@ -40,5 +40,4 @@ include = ["modern_opalx_regsuite*"]
 "modern_opalx_regsuite" = ["static/**/*", "templates/**/*"]
 
 [dependency-groups]
-dev = []
-
+dev = ["pytest", "pytest-cov", "httpx"]

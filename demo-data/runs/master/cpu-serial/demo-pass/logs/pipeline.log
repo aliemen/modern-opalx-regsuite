@@ -1,0 +1,185 @@
+# OPALX regression run
+branch=master
+arch=cpu-serial
+run_id=20260428-152941
+started_at=2026-04-28T15:29:41.910908+00:00Z
+
+[env] modules: gcc/15, openmpi/5.0.5-gcc15, hdf5/1.14.6-gcc15, gtest/1.16.0-gcc15, h5hut/cmake-gcc15
+== PHASE: git ==
+Updating OPALX repo at /home/demo-user/demo-user
+[git] git fetch origin
+$ git fetch origin
+[git] git checkout master
+$ git checkout master
+Already on 'master'
+Your branch is up to date with 'origin/master'.
+[git] git reset --hard origin/master
+$ git reset --hard origin/master
+HEAD is now at 5d38107b7 Merge pull request #388 from OPALX-project/decayprocess
+Updating regression-tests repo at /home/demo-user/regression-tests-x (branch master)
+[git] git fetch origin
+$ git fetch origin
+[git] git checkout master
+$ git checkout master
+Already on 'master'
+Your branch is up to date with 'origin/master'.
+[git] git reset --hard origin/master
+$ git reset --hard origin/master
+HEAD is now at 78bc387 Merge pull request #35 from OPALX-project/25-redo-flattop-after-image-charge-PR
+== PHASE: cmake ==
+Configuring build: cmake -DBUILD_TYPE=Debug -DPLATFORMS=SERIAL -DOPALX_ENABLE_UNIT_TESTS=ON -DOPALX_USE_INSTALLED_HDF5=ON -DOPALX_USE_INSTALLED_H5HUT=ON -DOPALX_USE_INSTALLED_GTEST=ON -DHeffte_VERSION=git.v2.4.1 /home/demo-user/demo-user
+$ cmake -DBUILD_TYPE=Debug -DPLATFORMS=SERIAL -DOPALX_ENABLE_UNIT_TESTS=ON -DOPALX_USE_INSTALLED_HDF5=ON -DOPALX_USE_INSTALLED_H5HUT=ON -DOPALX_USE_INSTALLED_GTEST=ON -DHeffte_VERSION=git.v2.4.1 /home/demo-user/demo-user
+-- 🔧 OPALX unit tests: ON
+-- [36mℹ️  Host-only backend (SERIAL/OPENMP) - OPALX_DEVICE_COMPILATION not defined[m
+-- 🔧 HIP profiler (OPALX_ENABLE_HIP_PROFILER): OFF
+-- [32m✅ Kokkos math constants enabled (OPALX_USE_KOKKOS_MATH_CONSTANTS)[m
+-- 🔧 Skip failing tests (OPALX_SKIP_FAILING_TESTS): OFF
+-- 📦 Configuring OPALX Version: 0.9 : "OPALX v0.9"
+-- [32m🔧 OPALX will be built as a STATIC library[m
+-- [32mBuild type is: Debug[m
+-- ✅ Project setup complete
+-- 🔧 OPALX_USE_STANDARD_FOLDERS=OFF: using CMake default output directories
+-- [32m✅ gen_OPALXrevision completed successfully.[m
+-- ✅ Compiler options configured
+-- Found MPI: TRUE (found version "3.1") found components: CXX 
+-- [32m✅ MPI found 3.1[m
+-- Fetching IPPL branch/tag: master
+-- Build type is: Debug
+-- 📦 Configuring IPPL Version: 3.2 : "IPPL v3.2"
+-- [32m🔧IPPL will be built as a STATIC library[m
+-- [32mBuild type is: Debug[m
+-- ✅ Project setup complete
+-- ✅ Compiler options configured
+-- [32m✅ MPI found 3.1[m
+-- [32m✅ Kokkos  building from source[m
+-- IPPL_PLATFORM set: Kokkos_ENABLE_SERIAL 'ON'
+-- IPPL_PLATFORM set: Kokkos_ENABLE_OPENMP 'OFF'
+-- IPPL_PLATFORM set: Kokkos_ENABLE_CUDA 'OFF'
+-- IPPL_PLATFORM set: Kokkos_ENABLE_HIP 'OFF'
+-- Setting default Kokkos CXX standard to 20
+-- Kokkos version: 4.7.1
+-- The project name is: Kokkos
+-- Using internal gtest for testing
+-- Using -std=c++20 for C++20 standard as feature
+-- Built-in Execution Spaces:
+--     Device Parallel: NoTypeDefined
+--     Host Parallel: NoTypeDefined
+--       Host Serial: SERIAL
+-- 
+-- Architectures:
+-- Using internal desul_atomics copy
+-- Performing Test KOKKOS_LINK_OPTIONS_CHECK
+-- Performing Test KOKKOS_LINK_OPTIONS_CHECK - Success
+-- Experimental mdspan support is enabled
+-- Using internal mdspan directory /home/demo-user/builds/master/cpu-serial/build/_deps/ippl-build/_deps/kokkos-src/tpls/mdspan/include
+-- Kokkos Backends: SERIAL
+-- [32m✅ Heffte git.v2.4.1 building from source[m
+-- Found MPI: TRUE (found version "3.1")  
+-- Setting Heffte INSTALL_RPATH = /usr/lib/x86_64-linux-gnu/openmpi/lib
+-- 🔗 Created ALIAS Heffte::Heffte for Heffte target.
+-- 📄 Generating IpplVersions.h
+-- 🔧 Target 'ippl': type=STATIC, POSITION_INDEPENDENT_CODE=_ippl_pic-NOTFOUND
+-- Adding Solver subdirectories
+-- ⏱️  Kokkos_DEVICES not set — defaulting to TimerFences = true.
+-- IPPL include path: /home/demo-user/builds/master/cpu-serial/build/_deps/ippl-src/src
+-- Found IPPL_DIR: 
+-- Defaulting to IPPL-3.2.0
+-- ⚙ Using system-installed HDF5
+-- ✔ Found system HDF5 version: 1.14.6
+-- ✔ HDF5 include dir: /home/demo-user/.lmod/hdf5-1.14.6-gcc15/include
+-- HDF5 libraries: hdf5-shared
+-- HDF5 include dir: /home/demo-user/.lmod/hdf5-1.14.6-gcc15/include
+-- ⚙ Using system-installed H5hut
+-- ✔ Using H5hut include: /home/demo-user/.lmod/h5hut-cmake-gcc15/include
+-- ✔ Using H5hut library: /home/demo-user/.lmod/h5hut-cmake-gcc15/lib/libh5hut.so
+-- ✔ Found system H5Hut
+-- H5HUT include dir: /home/demo-user/.lmod/h5hut-cmake-gcc15/include
+-- ⚙ Using system-installed GoogleTest
+-- ✅ System GTest targets ready.
+-- ✅ ZLIB linked via target ZLIB::ZLIB (/usr/lib/x86_64-linux-gnu/libz.so)
+-- 📄 Generating BuildInfo.h
+-- 🔧 OPALX_EMBED_BUILD_METADATA: OFF
+-- 🧩 Not embedding build metadata into BuildInfo.h
+-- 🔧 Target 'demo-user': type=STATIC, POSITION_INDEPENDENT_CODE=_demo-user_pic-NOTFOUND
+-- ⏱️  Kokkos_DEVICES not set — defaulting to TimerFences = true.
+-- Adding unit tests found in unit_tests/AbsBeamline
+-- Adding unit tests found in unit_tests/BeamlineCore
+-- Adding unit tests found in unit_tests/Distribution
+-- Adding unit tests found in unit_tests/Fields
+-- Adding unit tests found in unit_tests/Physics
+-- Adding unit tests found in unit_tests/Utilities
+-- Adding unit tests found in unit_tests/Structure
+-- Adding unit tests found in unit_tests/Algorithms
+-- Adding unit tests found in unit_tests/PartBunch
+-- Adding unit tests found in unit_tests/PartBunch/Binning
+-- Adding unit tests found in unit_tests/BasicActions
+-- Adding unit tests found in unit_tests/Elements
+-- Adding unit tests found in unit_tests/Processes
+-- Adding unit tests found in unit_tests/Processes/GlobalProcesses
+-- Project Name OPALX
+-- IPPL_INC: 
+-- IPPL_LIB: ippl
+-- HDF5 libraries: hdf5-shared
+-- HDF5 include dir: /home/demo-user/.lmod/hdf5-1.14.6-gcc15/include
+-- H5HUT libraries: /home/demo-user/.lmod/h5hut-cmake-gcc15/lib/libh5hut.so
+-- H5HUT include dir: /home/demo-user/.lmod/h5hut-cmake-gcc15/include
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/demo-user/builds/master/cpu-serial/build
+[local] CMake configuration done.
+== PHASE: build ==
+Building: make -j8
+$ make -j8
+[  0%] Built target kokkossimd
+[  1%] Built target Heffte
+[  5%] Built target kokkoscore
+[  6%] Built target kokkosalgorithms
+[  6%] Built target kokkoscontainers
+[  6%] Built target AlwaysCheckGit
+[  7%] Built target impl_git_version
+[  9%] Built target ippl
+[ 65%] Built target demo-user
+[ 66%] Built target TestMultipoleTBase
+[ 65%] Built target TestMultipoleTCurvedConstRadius
+[ 67%] Built target demo-user_exe
+[ 67%] Built target TestMultipoleT
+[ 68%] Built target TestSolenoid
+[ 68%] Built target TestVariableRFCavity
+[ 69%] Built target TestConstantEFieldCavity
+[ 70%] Built target TestMultipoleTStraight
+[ 70%] Built target TestConstantEFieldCavityRep
+[ 71%] Built target TestGaussian
+[ 72%] Built target TestTravelingWave
+[ 72%] Built target TestRFCavity
+[ 73%] Built target TestMultiVariateGaussian
+[ 74%] Built target TestFM2DMagnetoStatic
+[ 75%] Built target TestFlatTop
+[ 75%] Built target TestAstra1DDynamic
+[ 76%] Built target TestLinearCompton
+[ 76%] Built target TestFM2DDynamic
+[ 76%] Built target TestFromFile
+[ 76%] Built target TestConstEzField
+[ 77%] Built target LinearComptonSpectrumBenchmark
+[ 77%] Built target TestLinearBreitWheeler
+[ 78%] Built target TestBiMap
+[ 78%] Built target LinearBreitWheelerBenchmark
+[ 78%] Built target TestMuonDecay
+[ 79%] Built target TestCubicSpline
+[ 80%] Built target TestFFT
+[ 80%] Built target TestLinearSpline
+[ 80%] Built target TestHistogram
+[ 81%] Built target TestQuasiRandom
+[ 81%] Built target TestGSLCompat
+[ 82%] Built target TestRandom
+[ 83%] Built target TestGSLComplex
+[ 84%] Built target TestGSLBLAS
+[ 85%] Built target TestOpalException
+[ 85%] Built target TestGSLLinalg
+[ 86%] Built target TestGSLMatrix
+[ 86%] Built target TestGSLEigen
+[ 86%] Built target TestPredefinedString
+[ 87%] Built target TestBinConfigWriter
+[ 88%] Built target TestGSLIntegration
+[ 88%] Built target TestBinningCmd
+[ 89%] Built target TestPol
+[demo-data] log truncated

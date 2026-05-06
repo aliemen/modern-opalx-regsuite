@@ -1,0 +1,160 @@
+# OPALX regression run
+branch=master
+arch=cpu-serial
+run_id=20260426-090645
+started_at=2026-04-26T09:06:45.411976+00:00Z
+
+[env] modules: gcc/15, openmpi/5.0.5-gcc15, hdf5/1.14.6-gcc15, gtest/1.16.0-gcc15, h5hut/cmake-gcc15
+== PHASE: git ==
+Updating OPALX repo at /home/demo-user/demo-user
+[git] git fetch origin
+$ git fetch origin
+From https://github.com/OPALX-project/OPALX
+   591310275..8446c0f6c  319-implement-image-charges -> origin/319-implement-image-charges
+   84a0076cd..e3a7f00f9  384-general-element-placement -> origin/384-general-element-placement
+   7d846c03b..c98606be6  391-placement-of-sbend-and-rbend-analytic-fields-including-fringe-fields -> origin/391-placement-of-sbend-and-rbend-analytic-fields-including-fringe-fields
+   6060b42cb..de317a4ab  master     -> origin/master
+[git] git checkout master
+$ git checkout master
+Switched to branch 'master'
+Your branch is behind 'origin/master' by 67 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+[git] git reset --hard origin/master
+$ git reset --hard origin/master
+HEAD is now at de317a4ab Merge pull request #389 from OPALX-project/319-implement-image-charges
+Updating regression-tests repo at /home/demo-user/regression-tests-x (branch master)
+[git] git fetch origin
+$ git fetch origin
+[git] git checkout master
+$ git checkout master
+Already on 'master'
+Your branch is up to date with 'origin/master'.
+[git] git reset --hard origin/master
+$ git reset --hard origin/master
+HEAD is now at e86c803 Merge pull request #34 from OPALX-project/31-traveling-wave-cavity-regression-tests
+== PHASE: cmake ==
+Configuring build: cmake -DBUILD_TYPE=Debug -DPLATFORMS=SERIAL -DOPALX_ENABLE_UNIT_TESTS=ON -DOPALX_USE_INSTALLED_HDF5=ON -DOPALX_USE_INSTALLED_H5HUT=ON -DOPALX_USE_INSTALLED_GTEST=ON -DHeffte_VERSION=git.v2.4.1 /home/demo-user/demo-user
+$ cmake -DBUILD_TYPE=Debug -DPLATFORMS=SERIAL -DOPALX_ENABLE_UNIT_TESTS=ON -DOPALX_USE_INSTALLED_HDF5=ON -DOPALX_USE_INSTALLED_H5HUT=ON -DOPALX_USE_INSTALLED_GTEST=ON -DHeffte_VERSION=git.v2.4.1 /home/demo-user/demo-user
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /home/demo-user/.lmod/gcc/15.2.0/bin/gcc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /home/demo-user/.lmod/gcc/15.2.0/bin/g++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- 🔧 OPALX unit tests: ON
+-- [36mℹ️  Host-only backend (SERIAL/OPENMP) - OPALX_DEVICE_COMPILATION not defined[m
+-- 🔧 HIP profiler (OPALX_ENABLE_HIP_PROFILER): OFF
+-- [32m✅ Kokkos math constants enabled (OPALX_USE_KOKKOS_MATH_CONSTANTS)[m
+-- 🔧 Skip failing tests (OPALX_SKIP_FAILING_TESTS): OFF
+-- 📦 Configuring OPALX Version: 0.9 : "OPALX v0.9"
+-- [32m🔧 OPALX will be built as a STATIC library[m
+-- [32mBuild type is: Debug[m
+-- ✅ Project setup complete
+-- 🔧 OPALX_USE_STANDARD_FOLDERS=OFF: using CMake default output directories
+-- [32m✅ gen_OPALXrevision completed successfully.[m
+-- ✅ Compiler options configured
+-- Found MPI_CXX: /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi_cxx.so (found version "3.1") 
+-- Found MPI: TRUE (found version "3.1") found components: CXX 
+-- [32m✅ MPI found 3.1[m
+-- Fetching IPPL branch/tag: master
+-- Build type is: Debug
+-- 📦 Configuring IPPL Version: 3.2 : "IPPL v3.2"
+-- [32m🔧IPPL will be built as a STATIC library[m
+-- [32mBuild type is: Debug[m
+-- ✅ Project setup complete
+-- ✅ Compiler options configured
+-- [32m✅ MPI found 3.1[m
+-- [32m✅ Kokkos  building from source[m
+-- IPPL_PLATFORM set: Kokkos_ENABLE_SERIAL 'ON'
+-- IPPL_PLATFORM set: Kokkos_ENABLE_OPENMP 'OFF'
+-- IPPL_PLATFORM set: Kokkos_ENABLE_CUDA 'OFF'
+-- IPPL_PLATFORM set: Kokkos_ENABLE_HIP 'OFF'
+-- Setting default Kokkos CXX standard to 20
+-- Kokkos version: 4.7.1
+-- The project name is: Kokkos
+-- Using internal gtest for testing
+-- Using -std=c++20 for C++20 standard as feature
+-- Built-in Execution Spaces:
+--     Device Parallel: NoTypeDefined
+--     Host Parallel: NoTypeDefined
+--       Host Serial: SERIAL
+-- 
+-- Architectures:
+-- Found TPLLIBDL: /usr/include  
+-- Using internal desul_atomics copy
+-- Performing Test KOKKOS_LINK_OPTIONS_CHECK
+-- Performing Test KOKKOS_LINK_OPTIONS_CHECK - Success
+-- Experimental mdspan support is enabled
+-- Using internal mdspan directory /home/demo-user/builds/master/cpu-serial/build/_deps/ippl-build/_deps/kokkos-src/tpls/mdspan/include
+-- Kokkos Backends: SERIAL
+-- [32m✅ Heffte git.v2.4.1 building from source[m
+-- Found Git: /usr/bin/git (found version "2.39.5") 
+-- Found MPI_C: /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi.so (found version "3.1") 
+-- Found MPI: TRUE (found version "3.1")  
+-- Setting Heffte INSTALL_RPATH = /usr/lib/x86_64-linux-gnu/openmpi/lib
+-- 🔗 Created ALIAS Heffte::Heffte for Heffte target.
+-- 📄 Generating IpplVersions.h
+-- 🔧 Target 'ippl': type=STATIC, POSITION_INDEPENDENT_CODE=_ippl_pic-NOTFOUND
+-- Adding Solver subdirectories
+-- ⏱️  Kokkos_DEVICES not set — defaulting to TimerFences = true.
+-- IPPL include path: /home/demo-user/builds/master/cpu-serial/build/_deps/ippl-src/src
+-- Found IPPL_DIR: 
+-- Defaulting to IPPL-3.2.0
+-- ⚙ Using system-installed HDF5
+-- Found HDF5: hdf5-shared (found version "1.14.6") found components: C 
+-- ✔ Found system HDF5 version: 1.14.6
+-- ✔ HDF5 include dir: /home/demo-user/.lmod/hdf5-1.14.6-gcc15/include
+-- HDF5 libraries: hdf5-shared
+-- HDF5 include dir: /home/demo-user/.lmod/hdf5-1.14.6-gcc15/include
+-- ⚙ Using system-installed H5hut
+-- ✔ Using H5hut include: /home/demo-user/.lmod/h5hut-cmake-gcc15/include
+-- ✔ Using H5hut library: /home/demo-user/.lmod/h5hut-cmake-gcc15/lib/libh5hut.so
+-- Found H5hut: /home/demo-user/.lmod/h5hut-cmake-gcc15/include  
+-- ✔ Found system H5Hut
+-- H5HUT include dir: /home/demo-user/.lmod/h5hut-cmake-gcc15/include
+-- ⚙ Using system-installed GoogleTest
+-- Found GTest: /home/demo-user/.lmod/gtest-1.16.0-gcc15/lib/cmake/GTest/GTestConfig.cmake (found version "1.16.0")  
+-- ✅ System GTest targets ready.
+-- Found ZLIB: /usr/lib/x86_64-linux-gnu/libz.so (found version "1.2.13") 
+-- ✅ ZLIB linked via target ZLIB::ZLIB (/usr/lib/x86_64-linux-gnu/libz.so)
+-- 📄 Generating BuildInfo.h
+-- 🔧 OPALX_EMBED_BUILD_METADATA: OFF
+-- 🧩 Not embedding build metadata into BuildInfo.h
+-- 🔧 Target 'demo-user': type=STATIC, POSITION_INDEPENDENT_CODE=_demo-user_pic-NOTFOUND
+-- ⏱️  Kokkos_DEVICES not set — defaulting to TimerFences = true.
+-- Adding unit tests found in unit_tests/AbsBeamline
+-- Adding unit tests found in unit_tests/BeamlineCore
+-- Adding unit tests found in unit_tests/Distribution
+-- Adding unit tests found in unit_tests/Fields
+-- Adding unit tests found in unit_tests/Physics
+-- Adding unit tests found in unit_tests/Utilities
+-- Adding unit tests found in unit_tests/Structure
+-- Adding unit tests found in unit_tests/Algorithms
+-- Adding unit tests found in unit_tests/PartBunch
+-- Adding unit tests found in unit_tests/PartBunch/Binning
+-- Adding unit tests found in unit_tests/BasicActions
+-- Adding unit tests found in unit_tests/Elements
+-- Project Name OPALX
+-- IPPL_INC: 
+-- IPPL_LIB: ippl
+-- HDF5 libraries: hdf5-shared
+-- HDF5 include dir: /home/demo-user/.lmod/hdf5-1.14.6-gcc15/include
+-- H5HUT libraries: /home/demo-user/.lmod/h5hut-cmake-gcc15/lib/libh5hut.so
+-- H5HUT include dir: /home/demo-user/.lmod/h5hut-cmake-gcc15/include
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/demo-user/builds/master/cpu-serial/build
+[local] CMake configuration done.
+== PHASE: build ==
+Building: make -j8
+$ make -j8
+[  0%] Building CXX object _deps/ippl-build/_deps/kokkos-build/core/src/CMakeFiles/kokkoscore.dir/impl/Kokkos_Abort.cpp.o
+[  0%] Building CXX object _deps/ippl-build/_deps/kokkos-build/core/src/CMakeFiles/kokkoscore.dir/impl/Kokkos_Command_Line_Parsing.cpp.o
+[  0%] Building CXX obje
+[demo-data] log truncated

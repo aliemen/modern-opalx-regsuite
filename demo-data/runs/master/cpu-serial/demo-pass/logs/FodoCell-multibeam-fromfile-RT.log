@@ -1,0 +1,161 @@
+$ bash FodoCell-multibeam-fromfile.local
+OPAL-X>               ____  _____        _       __   __
+OPAL-X> [1;32m
+OPAL-X> 
+OPAL-X>   ██████  ██████   █████  ██      ██   ██
+OPAL-X>  ██    ██ ██   ██ ██   ██ ██       ██ ██
+OPAL-X>  ██    ██ ██████  ███████ ██        ███
+OPAL-X>  ██    ██ ██      ██   ██ ██       ██ ██
+OPAL-X>   ██████  ██      ██   ██ ███████ ██   ██
+OPAL-X> 
+OPAL-X>          This is OPALX (Object Oriented Parallel Accelerator Library for Exascale)
+OPAL-X> 
+OPAL-X> [0m
+OPAL-X> 
+OPAL-X> OPALX is the performance portable version of OPAL :: Version 0.9
+OPAL-X>             git rev. 5d38107b739806a36ac84d3784bb8a6f5c7584f6
+OPAL-X> 
+OPAL-X> 
+OPAL-X>              (c) PSI, https://github.com/OPALX-project/OPALX
+OPAL-X> 
+OPAL-X> 
+OPAL-X> Please send cookies, goodies or other motivations (wine and beer ... ) 
+OPAL-X> to the OPAL developers https://github.com/OPALX-project/OPALX/issues
+OPAL-X> 
+OPAL-X> Time: 15:31:41 date: 28/04/2026
+OPAL-X> 
+OPAL-X> * Host:   Serial
+OPAL-X> * Device: Serial execution
+OPAL-X> 
+OPAL-X> * Reading input stream 'FodoCell-multibeam-fromfile.in'
+OPAL-X> 
+OPAL-X> value: {EDES,P0,OPALVERSION} = {1, 1.00051, 900}
+OPAL-X> 
+OPAL-X> * ************* F I E L D S O L V E R ********************************************** 
+OPAL-X> * FIELDSOLVER  FS_SC
+OPAL-X> * BINS         NONE
+OPAL-X> * TYPE         NONE
+OPAL-X> * RANKS        1
+OPAL-X> * NX           16
+OPAL-X> * NY           16
+OPAL-X> * NZ           16
+OPAL-X> * BBOXINCR     1
+OPAL-X> * GREENSF      INTEGRATED
+OPAL-X> * XDIM         serial  
+OPAL-X> * YDIM         serial  
+OPAL-X> * ZDIM         parallel  
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * RUN resolved beams: BEAM1, BEAM2
+OPAL-X> * ************* B E A M ************************************************************ 
+OPAL-X> * BEAM        BEAM1
+OPAL-X> * PARTICLE    ELECTRON
+OPAL-X> * REST MASS   0.000510999 [GeV]
+OPAL-X> * CHARGE      -e * 1 
+OPAL-X> * MOMENTUM    1 [eV/c]
+OPAL-X> * MOMENTUM    0 [GeV/c]
+OPAL-X> * BCHARGE     1.60218e-15 [C]
+OPAL-X> * NALLOC      1000
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * ************* B E A M ************************************************************ 
+OPAL-X> * BEAM        BEAM2
+OPAL-X> * PARTICLE    ELECTRON
+OPAL-X> * REST MASS   0.000510999 [GeV]
+OPAL-X> * CHARGE      +e * 1 
+OPAL-X> * MOMENTUM    1 [eV/c]
+OPAL-X> * MOMENTUM    0 [GeV/c]
+OPAL-X> * BCHARGE     1.60218e-15 [C]
+OPAL-X> * NALLOC      1000
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X[2]> * Beam[0] BEAM1 macro charge per particle [C]: -1.60218e-18
+OPAL-X[2]> * Beam[0] BEAM1 macro mass per particle [GeV/c^2]: 0.00510999
+OPAL-X[2]> * Beam[0] BEAM1 particles per macro particle: 10
+OPAL-X> 
+OPAL-X[2]> * Beam[1] BEAM2 macro charge per particle [C]: 1.60218e-18
+OPAL-X[2]> * Beam[1] BEAM2 macro mass per particle [GeV/c^2]: 0.00510999
+OPAL-X[2]> * Beam[1] BEAM2 particles per macro particle: 10
+OPAL-X> 
+OPAL-X> * Creating new file for data: 'FodoCell-multibeam-fromfile_c0.stat'
+OPAL-X> * Creating new file for data: 'FodoCell-multibeam-fromfile_c1.stat'
+OPAL-X> * Creating new file for data: 'FodoCell-multibeam-fromfile.lbal'
+PartBunch::setSolver[2]> Initializing solver: NONE
+PartBunch::setBins[2]> Solver FS_SC has no binning command attached, not using binning.
+PartBunch::pre_run[2]> Starting pre_run...
+OPAL-X[2]> * BCHandler<3>: [OPEN, OPEN, OPEN]
+FromFile::generateParticles> FromFile: Loaded 1000 particles from file 'input-distribution-gauss.txt'
+FromFile::generateParticles> Rank 0: 1000 local particles
+OPAL-X[2]> * Particle sampling / sampler setup for all emission sources done.
+FromFile::generateParticles> FromFile: Loaded 1000 particles from file 'input-distribution-gauss.txt'
+FromFile::generateParticles> Rank 0: 1000 local particles
+OPAL-X[2]> * Particle sampling / sampler setup for all emission sources done.
+OPAL-X> 
+OPAL-X> * ************** B U N C H ********************************************************* 
+OPAL-X> * CONTAINER       = 0
+OPAL-X> * PARTICLES       = 1000
+OPAL-X> * CHARGE          = -1.602177e-15 (Cb) 
+OPAL-X> * QM STORAGE MODE = SINGLE
+OPAL-X> * <EKIN>          = 1.000 [GeV]
+OPAL-X> * <dEKIN>         = 0.014 [eV]
+OPAL-X> * INTEGRATOR      = LF2
+OPAL-X> * MIN R (origin)  = (    -29.05193 ,    -29.10437 ,    -27.09135 ) [mm]
+OPAL-X> * MAX R (max ext) = (     28.68475 ,     29.90142 ,     29.16019 ) [mm]
+OPAL-X> * RMS R           = (     10.03918 ,     10.10394 ,      9.75492 ) [mm]
+OPAL-X> * RMS P           = ( 3.092850e-01 , 3.147442e-01 , 5.003483e-05 ) [beta gamma]
+OPAL-X> * Mean R          = ( -1.212177e-08 , -1.830813e-08 , -3.807045e-10 ) [m]
+OPAL-X> * Mean P          = ( -1.583351e-03 , -2.391416e-03 , 1.957951e+03 ) [beta gamma]
+OPAL-X> * MESH SPACING    = (      3.68071 ,      3.76162 ,      3.58604 ) [mm]
+OPAL-X> * COMPDOM INCR    = 1.000000e+00 (%) 
+OPAL-X> * FIELD LAYOUT    = Domain = {[0:15:1],[0:15:1],[0:15:1]}
+OPAL-X> Total number of boxes = 1
+OPAL-X>     Box 0 {[0:15:1],[0:15:1],[0:15:1]}
+OPAL-X> 
+OPAL-X> * Centroid : 
+OPAL-X> * -1.212177e-05 -1.583351e+00 -1.830813e-05 -2.391416e+00 -3.807045e-07 1.957951e+06 
+OPAL-X> * Cov Matrix : 
+OPAL-X> * 1.007852e-04 3.014538e-03 -3.236804e-06 9.479063e-05 3.430719e-07 2.228630e-08 
+OPAL-X> * 3.014538e-03 9.565721e-02 -9.474463e-05 3.004186e-03 3.688023e-05 6.284759e-07 
+OPAL-X> * -3.236804e-06 -9.474463e-05 1.020896e-04 -3.120479e-03 -2.354062e-06 -2.866783e-08 
+OPAL-X> * 9.479063e-05 3.004186e-03 -3.120479e-03 9.906394e-02 1.144624e-04 7.911837e-07 
+OPAL-X> * 3.430719e-07 3.688023e-05 -2.354062e-06 1.144624e-04 9.515838e-05 -7.789121e-08 
+OPAL-X> * 2.228630e-08 6.284759e-07 -2.866783e-08 7.911837e-07 -7.789121e-08 2.503484e-09 
+OPAL-X> * * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> 
+OPAL-X> * ************** B U N C H ********************************************************* 
+OPAL-X> * CONTAINER       = 1
+OPAL-X> * PARTICLES       = 1000
+OPAL-X> * CHARGE          = 1.602177e-15 (Cb) 
+OPAL-X> * QM STORAGE MODE = SINGLE
+OPAL-X> * <EKIN>          = 1.000 [GeV]
+OPAL-X> * <dEKIN>         = 0.014 [eV]
+OPAL-X> * INTEGRATOR      = LF2
+OPAL-X> * MIN R (origin)  = (    -29.05193 ,    -29.10437 ,    -27.09135 ) [mm]
+OPAL-X> * MAX R (max ext) = (     28.68475 ,     29.90142 ,     29.16019 ) [mm]
+OPAL-X> * RMS R           = (     10.03918 ,     10.10394 ,      9.75492 ) [mm]
+OPAL-X> * RMS P           = ( 3.092850e-01 , 3.147442e-01 , 5.003483e-05 ) [beta gamma]
+OPAL-X> * Mean R          = ( -1.212177e-08 , -1.830813e-08 , -3.807045e-10 ) [m]
+OPAL-X> * Mean P          = ( -1.583351e-03 , -2.391416e-03 , 1.957951e+03 ) [beta gamma]
+OPAL-X> * MESH SPACING    = (      3.68071 ,      3.76162 ,      3.58604 ) [mm]
+OPAL-X> * COMPDOM INCR    = 1.000000e+00 (%) 
+OPAL-X> * FIELD LAYOUT    = Domain = {[0:15:1],[0:15:1],[0:15:1]}
+OPAL-X> Total number of boxes = 1
+OPAL-X>     Box 0 {[0:15:1],[0:15:1],[0:15:1]}
+OPAL-X> 
+OPAL-X> * Centroid : 
+OPAL-X> * -1.212177e-05 -1.583351e+00 -1.830813e-05 -2.391416e+00 -3.807045e-07 1.957951e+06 
+OPAL-X> * Cov Matrix : 
+OPAL-X> * 1.007852e-04 3.014538e-03 -3.236804e-06 9.479063e-05 3.430719e-07 2.228630e-08 
+OPAL-X> * 3.014538e-03 9.565721e-02 -9.474463e-05 3.004186e-03 3.688023e-05 6.284759e-07 
+OPAL-X> * -3.236804e-06 -9.474463e-05 1.020896e-04 -3.120479e-03 -2.354062e-06 -2.866783e-08 
+OPAL-X> * 9.479063e-05 3.004186e-03 -3.120479e-03 9.906394e-02 1.144624e-04 7.911837e-07 
+OPAL-X> * 3.430719e-07 3.688023e-05 -2.354062e-06 1.144624e-04 9.515838e-05 -7.789121e-08 
+OPAL-X> * 2.228630e-08 6.284759e-07 -2.866783e-08 7.911837e-07 -7.789121e-08 2.503484e-09 
+OPAL-X> * * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * FOCUS_POLE_0 gone live
+OPAL-X> * FIRST_DRIFT_0 gone live
+OPAL-X> * DEFOCUS_POLE_0 gone live
+OPAL-X> * SECON
+[demo-data] log truncated

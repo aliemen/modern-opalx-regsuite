@@ -1,0 +1,27 @@
+[
+  {
+    "branch": "demo-corrupt",
+    "arch": "cpu-serial",
+    "run_id": "demo-corrupt",
+    "started_at": "2026-04-01T00:00:00Z",
+    "finished_at": "2026-04-01T00:01:00Z",
+    "status": "failed",
+    "connection_name": "local",
+    "triggered_by": "demo-user",
+    "regtest_branch": "master",
+    "unit_tests_total": 0,
+    "unit_tests_failed": 0,
+    "regression_total": 0,
+    "regression_passed": 0,
+    "regression_failed": 0,
+    "regression_broken": 0,
+    "archived": false,
+    "public": false,
+    "run_options": {
+      "skip_unit": false,
+      "skip_regression": false,
+      "clean_build": false
+    },
+    "rerun_of": null
+  }
+]

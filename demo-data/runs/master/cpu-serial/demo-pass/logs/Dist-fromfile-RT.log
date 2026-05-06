@@ -1,0 +1,179 @@
+$ bash Dist-fromfile.local
+OPAL-X>               ____  _____        _       __   __
+OPAL-X> [1;32m
+OPAL-X> 
+OPAL-X>   ██████  ██████   █████  ██      ██   ██
+OPAL-X>  ██    ██ ██   ██ ██   ██ ██       ██ ██
+OPAL-X>  ██    ██ ██████  ███████ ██        ███
+OPAL-X>  ██    ██ ██      ██   ██ ██       ██ ██
+OPAL-X>   ██████  ██      ██   ██ ███████ ██   ██
+OPAL-X> 
+OPAL-X>          This is OPALX (Object Oriented Parallel Accelerator Library for Exascale)
+OPAL-X> 
+OPAL-X> [0m
+OPAL-X> 
+OPAL-X> OPALX is the performance portable version of OPAL :: Version 0.9
+OPAL-X>             git rev. 5d38107b739806a36ac84d3784bb8a6f5c7584f6
+OPAL-X> 
+OPAL-X> 
+OPAL-X>              (c) PSI, https://github.com/OPALX-project/OPALX
+OPAL-X> 
+OPAL-X> 
+OPAL-X> Please send cookies, goodies or other motivations (wine and beer ... ) 
+OPAL-X> to the OPAL developers https://github.com/OPALX-project/OPALX/issues
+OPAL-X> 
+OPAL-X> Time: 15:30:00 date: 28/04/2026
+OPAL-X> 
+OPAL-X> * Host:   Serial
+OPAL-X> * Device: Serial execution
+OPAL-X> 
+OPAL-X> * Reading input stream 'Dist-fromfile.in'
+OPAL-X> 
+OPAL-X> value: {OPALVERSION} = {900}
+OPAL-X> 
+OPAL-X> 
+OPAL-X> value: {EDES,P0} = {1e-09, 1.01094e-06}
+OPAL-X> 
+OPAL-X> * ************* F I E L D S O L V E R ********************************************** 
+OPAL-X> * FIELDSOLVER  FS1
+OPAL-X> * BINS         NONE
+OPAL-X> * TYPE         NONE
+OPAL-X> * RANKS        1
+OPAL-X> * NX           32
+OPAL-X> * NY           32
+OPAL-X> * NZ           32
+OPAL-X> * BBOXINCR     5
+OPAL-X> * GREENSF      STANDARD
+OPAL-X> * XDIM         parallel  
+OPAL-X> * YDIM         parallel  
+OPAL-X> * ZDIM         serial  
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * RUN resolved beams: BEAM1
+OPAL-X> * ************* B E A M ************************************************************ 
+OPAL-X> * BEAM        BEAM1
+OPAL-X> * PARTICLE    ELECTRON
+OPAL-X> * REST MASS   0.000510999 [GeV]
+OPAL-X> * CHARGE      -e * 1 
+OPAL-X> * MOMENTUM    1 [eV/c]
+OPAL-X> * MOMENTUM    0 [GeV/c]
+OPAL-X> * BCHARGE     1e-09 [C]
+OPAL-X> * NALLOC      1000
+OPAL-X> * ********************************************************************************** 
+OPAL-X> 
+OPAL-X[2]> * Beam[0] BEAM1 macro charge per particle [C]: -1e-12
+OPAL-X[2]> * Beam[0] BEAM1 macro mass per particle [GeV/c^2]: 3189.4
+OPAL-X[2]> * Beam[0] BEAM1 particles per macro particle: 6.24151e+06
+OPAL-X> 
+OPAL-X> * Creating new file for data: 'Dist-fromfile.stat'
+OPAL-X> * Creating new file for data: 'Dist-fromfile.lbal'
+PartBunch::setSolver[2]> Initializing solver: NONE
+PartBunch::setBins[2]> Solver FS1 has no binning command attached, not using binning.
+PartBunch::pre_run[2]> Starting pre_run...
+OPAL-X[2]> * BCHandler<3>: [OPEN, OPEN, OPEN]
+FromFile::generateParticles> FromFile: Loaded 1000 particles from file 'inputdistr.dat'
+FromFile::generateParticles> Rank 0: 1000 local particles
+OPAL-X[2]> * Particle sampling / sampler setup for all emission sources done.
+OPAL-X> 
+OPAL-X> * ************** B U N C H ********************************************************* 
+OPAL-X> * CONTAINER       = 0
+OPAL-X> * PARTICLES       = 1000
+OPAL-X> * CHARGE          = -1.000000e-09 (Cb) 
+OPAL-X> * QM STORAGE MODE = SINGLE
+OPAL-X> * <EKIN>          = 587.741 [eV]
+OPAL-X> * <dEKIN>         = 203.032 [eV]
+OPAL-X> * INTEGRATOR      = LF2
+OPAL-X> * MIN R (origin)  = (     -3.12455 ,     -2.91923 ,     -2.91923 ) [mm]
+OPAL-X> * MAX R (max ext) = (      3.06622 ,      3.08159 ,      3.08159 ) [mm]
+OPAL-X> * RMS R           = (      1.17195 ,      1.15203 ,      1.15203 ) [mm]
+OPAL-X> * RMS P           = ( 2.772882e-02 , 2.772423e-02 , 2.757547e-02 ) [beta gamma]
+OPAL-X> * Mean R          = ( 6.275661e-09 , 3.790925e-09 , 3.790925e-09 ) [m]
+OPAL-X> * Mean P          = ( -8.305353e-12 , -6.519085e-12 , 1.978359e-03 ) [beta gamma]
+OPAL-X> * MESH SPACING    = (    212.80761 ,    206.27826 ,    206.27826 ) [um]
+OPAL-X> * COMPDOM INCR    = 5.000000e+00 (%) 
+OPAL-X> * FIELD LAYOUT    = Domain = {[0:31:1],[0:31:1],[0:31:1]}
+OPAL-X> Total number of boxes = 1
+OPAL-X>     Box 0 {[0:31:1],[0:31:1],[0:31:1]}
+OPAL-X> 
+OPAL-X> * Centroid : 
+OPAL-X> * 6.275661e-06 -8.305353e-09 3.790925e-06 -6.519085e-09 3.790925e-06 1.978359e+00 
+OPAL-X> * Cov Matrix : 
+OPAL-X> * 1.373465e-06 2.995823e-05 2.669691e-08 3.592513e-07 2.669691e-08 1.306464e-07 
+OPAL-X> * 2.995823e-05 7.688873e-04 3.545471e-07 -5.537677e-06 3.545471e-07 -2.354842e-06 
+OPAL-X> * 2.669691e-08 3.545471e-07 1.327180e-06 2.987939e-05 1.327180e-06 -2.954473e-07 
+OPAL-X> * 3.592513e-07 -5.537677e-06 2.987939e-05 7.686329e-04 2.987939e-05 4.485872e-06 
+OPAL-X> * 2.669691e-08 3.545471e-07 1.327180e-06 2.987939e-05 1.327180e-06 -2.954473e-07 
+OPAL-X> * 1.306464e-07 -2.354842e-06 -2.954473e-07 4.485872e-06 -2.954473e-07 7.604063e-04 
+OPAL-X> * * ********************************************************************************** 
+OPAL-X> 
+OPAL-X> * D1 gone live
+ParallelTracker::execute[2]> Dump initial phase space done.
+OPAL-X> * OrbitThreader dt_m= 5e-11
+OPAL-X> * OrbitThreader maxDistance= 1.0003
+OPAL-X> * OrbitThreader #elements  = 1
+OPAL-X> 
+OPAL-X> * Size of map 1 sections 
+OPAL-X> * Key: (0.000000 - 0.999990) number of overlapping elements 1
+OPAL-X> *                            D1
+OPAL-X> 
+OPAL-X> * Creating new file for data: 'data/Dist-fromfile_ElementPositions.sdds'
+OPAL-X> * Track start at: 15:30:00, t= 0.000 [fs]; zstart at: 0.000 [um]
+OPAL-X> * Initial dt = 50.000 [ps]
+OPAL-X> * Max integration steps = 1, next step = 0
+OPAL-X>                dt [ns]           zStop [m]        num Steps [1]
+OPAL-X> ->         5.000000e-11        1.000000e+00                   1
+PartBunch::performBunchSanityChecks[2]> ========= Done performing PartBunch sanity checks... =========
+ParallelTracker::execute[2]> Starting track with dt = 50.000 [ps], track steps = 0 to 1.
+OPAL-X> * 15:30:00 Step      0 container[0] at 29.655 [um], t= 50.000 [ps], E=587.741 [eV]
+OPAL-X[2]> * Wrote beam statistics.
+OPAL-X[2]> * Dump phase space of last step
+OPAL-X> * D1 gone off
+ParallelTracker::execute[2]> Total FieldSolver calls: 0
+OPAL-X> 
+OPAL-X> * Done executing ParallelTracker at 15:30:00
+OPAL-X> 
+OPAL-X> * End of input stream 'Dist-fromfile.in'
+Timings> ---------------------------------------------
+Timings>      Timing results for 1 rank(s):
+Timings> ---------------------------------------------
+Timings> mainTimer........... Wall tot =   0.254916
+Timings> 
+Timings> Write Stat.......... Wall max = 0.000459687
+Timings>                      Wall avg = 0.000459687
+Timings>                      Wall min = 0.000459687
+Timings> 
+Timings> Write H5-File....... Wall max = 0.00527528
+Timings>                      Wall avg = 0.00527528
+Timings>                      Wall min = 0.00527528
+Timings> 
+Timings> samplingTime........ Wall max = 0.00216823
+Timings>                      Wall avg = 0.00216823
+Timings>                      Wall min = 0.00216823
+Timings> 
+Timings> particleBC.......... Wall max = 9.1019e-05
+Timings>                      Wall avg = 9.1019e-05
+Timings>                      Wall min = 9.1019e-05
+Timings> 
+Timings> updateParticle...... Wall max =          0
+Timings>                      Wall avg =          0
+Timings>                      Wall min =          0
+Timings> 
+Timings> computeMoments...... Wall max = 0.00159913
+Timings>                      Wall avg = 0.00159913
+Timings>                      Wall min = 0.00159913
+Timings> 
+Timings> TIntegration1....... Wall max = 7.2008e-05
+Timings>                      Wall avg = 7.2008e-05
+Timings>                      Wall min = 7.2008e-05
+Timings> 
+Timings> TIntegration2....... Wall max = 0.000247284
+Timings>                      Wall avg = 0.000247284
+Timings>                      Wall min = 0.000247284
+Timings> 
+Timings> External field eval. Wall max = 0.000375921
+Timings>                      Wall avg = 0.000375921
+Timings>                      Wall min = 0.000375921
+Timings> 
+Timings> Binaryrepart........ Wall max =          0
+Ti
+[demo-data] log truncated

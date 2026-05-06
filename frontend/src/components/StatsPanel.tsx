@@ -7,6 +7,7 @@ import { NewlyBrokenCard } from "./stats/NewlyBrokenCard";
 import { SuiteDurationCard } from "./stats/SuiteDurationCard";
 import { ActivitySparkline } from "./stats/ActivitySparkline";
 import { UsersLeaderboardCard } from "./stats/UsersLeaderboardCard";
+import { FlakinessCard } from "./stats/FlakinessCard";
 import { StatusBadge } from "./StatusBadge";
 
 function relativeTime(iso: string): string {
@@ -79,6 +80,7 @@ export function StatsPanel() {
       <LastRunTile />
       <LatestMasterMatrix />
       <NewlyBrokenCard />
+      <FlakinessCard />
       <SuiteDurationCard />
       <ActivitySparkline />
       <UsersLeaderboardCard />

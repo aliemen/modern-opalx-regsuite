@@ -1,8 +1,10 @@
+/* eslint-disable react-refresh/only-export-components */
 import { lazy, Suspense, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Archive, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Globe2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { archiveRun, deleteRun, getRunDetail, restoreRun, setRunVisibility, type RegressionSimulation } from "../../api/results";
+import { getRunIntegrity } from "../../api/integrity";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Breadcrumb } from "../../components/Breadcrumb";
 
@@ -311,6 +313,12 @@ export function RunDetailPage() {
     enabled: !!branch && !!arch && !!runId,
   });
 
+  const { data: integrity } = useQuery({
+    queryKey: ["run-integrity", branch, arch, runId],
+    queryFn: () => getRunIntegrity(branch!, arch!, runId!),
+    enabled: !!branch && !!arch && !!runId,
+  });
+
   const deleteMutation = useMutation({
     mutationFn: () => deleteRun(branch!, arch!, runId!),
     onSuccess: () => {
@@ -407,6 +415,21 @@ export function RunDetailPage() {
   const listHref = `/results/${branch}/${arch}${qs ? `?${qs}` : ""}`;
   const regtestLabel = meta.regtest_branch ?? "\u2014";
   const isColdStored = meta.archived && data.archived_on_cold_storage;
+  const rerunParams = new URLSearchParams({
+    branch: meta.branch,
+    regtests_branch: meta.regtest_branch ?? "master",
+    arch: meta.arch,
+    connection_name:
+      meta.connection_name && meta.connection_name !== "local"
+        ? meta.connection_name
+        : "local",
+    skip_unit: String(meta.run_options?.skip_unit ?? false),
+    skip_regression: String(meta.run_options?.skip_regression ?? false),
+    clean_build: String(meta.run_options?.clean_build ?? false),
+    rerun_branch: meta.branch,
+    rerun_arch: meta.arch,
+    rerun_id: meta.run_id,
+  });
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
@@ -461,6 +484,13 @@ export function RunDetailPage() {
           </div>
         ) : (
           <div className="flex items-center gap-3">
+            <Link
+              to={`/trigger?${rerunParams.toString()}`}
+              className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
+              title="Start a new run with this run's settings"
+            >
+              <RotateCcw size={14} /> Run again
+            </Link>
             <button
               onClick={() => publishMutation.mutate(!meta.public)}
               disabled={publishMutation.isPending}
@@ -543,6 +573,29 @@ export function RunDetailPage() {
           <p className="text-muted text-xs">Status</p>
           <div className="flex items-center gap-2">
             <StatusBadge status={meta.status} size="md" />
+            {integrity && (
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
+                  integrity.status === "ok"
+                    ? "border-passed/40 text-passed bg-passed/10"
+                    : integrity.status === "warning"
+                      ? "border-broken/40 text-broken bg-broken/10"
+                      : "border-failed/40 text-failed bg-failed/10"
+                }`}
+                title={
+                  integrity.issues.length === 0
+                    ? "Artifacts verified"
+                    : integrity.issues.map((i) => `${i.code}: ${i.path ?? i.message}`).join("; ")
+                }
+              >
+                {integrity.status === "ok" ? (
+                  <ShieldCheck size={10} />
+                ) : (
+                  <ShieldAlert size={10} />
+                )}
+                {integrity.status === "ok" ? "Artifacts OK" : `Artifacts ${integrity.status}`}
+              </span>
+            )}
             {meta.public ? (
               <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-accent/40 text-accent bg-accent/10">
                 <Globe2 size={10} />

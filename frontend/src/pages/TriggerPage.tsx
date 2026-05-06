@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Play, Info, ShieldAlert } from "lucide-react";
 import {
@@ -20,14 +20,25 @@ function truncateBranchLabel(branch: string): string {
 
 export function TriggerPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [opalxBranch, setOpalxBranch] = useState("master");
-  const [regtestsBranch, setRegtestsBranch] = useState("master");
-  const [arch, setArch] = useState("cpu-serial");
-  const [connectionName, setConnectionName] = useState<string>(LOCAL_CONNECTION);
-  const [skipUnit, setSkipUnit] = useState(false);
-  const [skipRegression, setSkipRegression] = useState(false);
-  const [cleanBuild, setCleanBuild] = useState(false);
+  const [opalxBranch, setOpalxBranch] = useState(
+    searchParams.get("branch") ?? "master"
+  );
+  const [regtestsBranch, setRegtestsBranch] = useState(
+    searchParams.get("regtests_branch") ?? "master"
+  );
+  const [arch, setArch] = useState(searchParams.get("arch") ?? "cpu-serial");
+  const [connectionName, setConnectionName] = useState<string>(
+    searchParams.get("connection_name") ?? LOCAL_CONNECTION
+  );
+  const [skipUnit, setSkipUnit] = useState(searchParams.get("skip_unit") === "true");
+  const [skipRegression, setSkipRegression] = useState(
+    searchParams.get("skip_regression") === "true"
+  );
+  const [cleanBuild, setCleanBuild] = useState(
+    searchParams.get("clean_build") === "true"
+  );
   const [error, setError] = useState<string | null>(null);
   const [queuedInfo, setQueuedInfo] = useState<{ runId: string; position: number } | null>(null);
 
@@ -62,6 +73,10 @@ export function TriggerPage() {
   // Detect if the selected connection uses an interactive gateway.
   const selectedConnection =
     connections?.find((c) => c.name === connectionName) ?? null;
+  const connectionMissing =
+    connectionName !== LOCAL_CONNECTION &&
+    !loadingConnections &&
+    selectedConnection === null;
   const needsInteractiveCredentials =
     selectedConnection !== null &&
     selectedConnection.gateway != null &&
@@ -70,6 +85,11 @@ export function TriggerPage() {
   async function handleStart() {
     setError(null);
     setQueuedInfo(null);
+
+    if (connectionMissing) {
+      setError("The source run's connection is not available for this user. Choose another connection.");
+      return;
+    }
 
     if (needsInteractiveCredentials) {
       if (!gatewayPassword.trim()) {
@@ -92,6 +112,16 @@ export function TriggerPage() {
         clean_build: cleanBuild,
         connection_name: connectionName,
       };
+      const rerunBranch = searchParams.get("rerun_branch");
+      const rerunArch = searchParams.get("rerun_arch");
+      const rerunId = searchParams.get("rerun_id");
+      if (rerunBranch && rerunArch && rerunId) {
+        body.rerun_of = {
+          branch: rerunBranch,
+          arch: rerunArch,
+          run_id: rerunId,
+        };
+      }
       if (needsInteractiveCredentials) {
         body.gateway_password = gatewayPassword;
         body.gateway_otp = gatewayOtp;
@@ -186,6 +216,9 @@ export function TriggerPage() {
             className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
             disabled={loadingArchs}
           >
+            {archConfigs && !archConfigs.includes(arch) && (
+              <option value={arch}>{arch} (not configured)</option>
+            )}
             {(archConfigs ?? ["cpu-serial"]).map((a) => (
               <option key={a}>{a}</option>
             ))}
@@ -207,6 +240,11 @@ export function TriggerPage() {
             disabled={loadingConnections}
           >
             <option value={LOCAL_CONNECTION}>Local</option>
+            {connectionMissing && (
+              <option value={connectionName}>
+                {connectionName} (unavailable)
+              </option>
+            )}
             {(connections ?? []).map((c) => (
               <option key={c.name} value={c.name}>
                 {c.name}
@@ -217,6 +255,12 @@ export function TriggerPage() {
           <p className="text-muted text-xs mt-1">
             Manage connections in <span className="text-fg">Settings</span>.
           </p>
+          {connectionMissing && (
+            <p className="text-failed text-xs mt-1">
+              This saved connection is not available for your account. Choose
+              another connection before starting the run.
+            </p>
+          )}
         </div>
 
         {/* Interactive gateway credentials */}
@@ -326,7 +370,8 @@ export function TriggerPage() {
 
         <button
           onClick={handleStart}
-          className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2.5 text-sm hover:brightness-110 transition"
+          disabled={connectionMissing}
+          className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2.5 text-sm hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Play size={15} />
           Start Run

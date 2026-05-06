@@ -65,6 +65,27 @@ export interface UsersLeaderboard {
   users: UserRunCount[];
 }
 
+export interface FlakySimulation {
+  name: string;
+  observations: number;
+  passed: number;
+  failed: number;
+  broken: number;
+  crashed: number;
+  latest_status: string | null;
+  latest_run_id: string | null;
+}
+
+export interface FlakinessReport {
+  branch: string;
+  arch: string;
+  regtests_branch: string;
+  limit: number;
+  min_observations: number;
+  runs_considered: number;
+  simulations: FlakySimulation[];
+}
+
 // ── Endpoints ──────────────────────────────────────────────────────────────
 
 export async function getLatestMaster(
@@ -109,6 +130,18 @@ export async function getUsersLeaderboard(
 ): Promise<UsersLeaderboard> {
   const res = await api.get<UsersLeaderboard>("/api/stats/users-leaderboard", {
     params: { view },
+  });
+  return res.data;
+}
+
+export async function getFlakiness(
+  branch = "master",
+  arch = "cpu-serial",
+  regtestsBranch = "master",
+  limit = 20
+): Promise<FlakinessReport> {
+  const res = await api.get<FlakinessReport>("/api/stats/flakiness", {
+    params: { branch, arch, regtests_branch: regtestsBranch, limit },
   });
   return res.data;
 }

@@ -22,6 +22,8 @@ export interface RunIndexEntry {
   regression_broken: number;
   archived: boolean;
   public: boolean;
+  run_options: RunOptions;
+  rerun_of: RerunReference | null;
 }
 
 export interface UnitTestCase {
@@ -91,6 +93,20 @@ export interface RunMeta {
   regression_broken: number;
   archived: boolean;
   public: boolean;
+  run_options: RunOptions;
+  rerun_of: RerunReference | null;
+}
+
+export interface RunOptions {
+  skip_unit: boolean;
+  skip_regression: boolean;
+  clean_build: boolean;
+}
+
+export interface RerunReference {
+  branch: string;
+  arch: string;
+  run_id: string;
 }
 
 export interface RunDetail {

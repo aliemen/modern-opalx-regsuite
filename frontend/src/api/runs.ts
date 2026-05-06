@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { RerunReference } from "./results";
 
 export interface CurrentRunStatus {
   run_id: string;
@@ -30,6 +31,7 @@ export interface TriggerRequest {
   /** Interactive gateway credentials -- never persisted, used once. */
   gateway_password?: string;
   gateway_otp?: string;
+  rerun_of?: RerunReference;
 }
 
 export interface TriggerResponse {

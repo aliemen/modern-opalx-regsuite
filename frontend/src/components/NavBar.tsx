@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   Archive,
+  BookOpen,
   CalendarClock,
   History,
   LayoutDashboard,
@@ -47,6 +48,7 @@ const NAV_ITEMS: {
 }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/activity", label: "Activity", icon: History },
+  { to: "/catalog", label: "Catalog", icon: BookOpen },
   { to: "/trigger", label: "Run", icon: Play },
   { to: "/schedule", label: "Schedule", icon: CalendarClock },
   { to: "/archive", label: "Archive", icon: Archive },

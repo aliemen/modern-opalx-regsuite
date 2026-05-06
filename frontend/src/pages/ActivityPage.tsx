@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Clock, Globe2, History, User as UserIcon } from "lucide-react";
 import { getAllRuns, type RunIndexEntry } from "../api/results";
 import { getUsersLeaderboard } from "../api/stats";
 import { Pagination } from "../components/Pagination";
+import { RunSummaryCard } from "../components/RunSummaryCard";
 
 function fmtDate(d: string | null) {
   if (!d) return "\u2014";
@@ -29,12 +30,6 @@ export function ActivityPage() {
   const [pageSize, setPageSize] = useState(25);
   const [offset, setOffset] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  // Reset paging whenever the user filter changes so we don't end up
-  // looking at offset 200 of a freshly-narrowed result set.
-  useEffect(() => {
-    setOffset(0);
-  }, [triggeredBy]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["all-runs", pageSize, offset, triggeredBy],
@@ -62,6 +57,7 @@ export function ActivityPage() {
   }
 
   function handleUserChange(value: string) {
+    setOffset(0);
     const next = new URLSearchParams(searchParams);
     if (value) {
       next.set("user", value);
@@ -72,17 +68,17 @@ export function ActivityPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto">
       <h1 className="text-fg text-xl font-semibold mb-1 flex items-center gap-2">
         <History size={20} />
         Activity
       </h1>
       <p className="text-muted text-sm mb-4">{total} runs total</p>
 
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-col items-stretch gap-2 mb-6 sm:flex-row sm:items-center sm:gap-3">
         <label
           htmlFor="activity-user-filter"
-          className="flex items-center gap-1.5 text-muted text-xs"
+          className="flex items-center gap-1.5 text-muted text-xs shrink-0"
         >
           <UserIcon size={13} />
           User
@@ -92,7 +88,7 @@ export function ActivityPage() {
           value={triggeredBy ?? ""}
           onChange={(e) => handleUserChange(e.target.value)}
           disabled={userOptions.length === 0 && !triggeredBy}
-          className="bg-surface border border-border rounded-lg text-fg text-xs px-3 py-1.5 focus:outline-none focus:border-accent disabled:opacity-50 min-w-[10rem]"
+          className="w-full bg-surface border border-border rounded-lg text-fg text-xs px-3 py-2 focus:outline-none focus:border-accent disabled:opacity-50 sm:w-auto sm:min-w-[10rem] sm:py-1.5"
         >
           <option value="">All users</option>
           {userOptions.map((u) => (
@@ -115,7 +111,24 @@ export function ActivityPage() {
         <div className="text-muted text-sm">No runs found.</div>
       ) : (
         <>
-          <div className="border border-border rounded-xl overflow-hidden">
+          <div className="md:hidden space-y-3">
+            {runs.map((run: RunIndexEntry) => (
+              <RunSummaryCard
+                key={`${run.branch}-${run.arch}-${run.run_id}`}
+                run={run}
+                to={`/results/${run.branch}/${run.arch}/${run.run_id}`}
+                userLink={
+                  run.triggered_by
+                    ? `/activity?user=${encodeURIComponent(run.triggered_by)}`
+                    : undefined
+                }
+                copiedPublicLink={copiedId === run.run_id}
+                onCopyPublicLink={copyPublicLink}
+              />
+            ))}
+          </div>
+
+          <div className="hidden md:block border border-border rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-surface text-muted text-left">
                 <tr>

@@ -78,61 +78,66 @@ export function AccordionGroup({
 
   return (
     <div className="border border-border rounded-xl overflow-hidden">
-      <div className="w-full flex items-center gap-3 px-5 py-3.5 bg-surface hover:bg-border/30 transition-colors">
-        {/* Optional bulk-select-all checkbox (only when selection mode is on). */}
-        {selection && hasSelectable && (
-          <label
-            className="flex items-center cursor-pointer"
-            onClick={(e) => e.stopPropagation()}
+      <div className="w-full flex flex-col gap-3 px-4 py-3.5 bg-surface hover:bg-border/30 transition-colors sm:flex-row sm:items-center sm:px-5">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          {/* Optional bulk-select-all checkbox (only when selection mode is on). */}
+          {selection && hasSelectable && (
+            <label
+              className="flex items-center cursor-pointer mt-0.5 shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={() =>
+                  allSelected
+                    ? selection.deselectCells(group.cells)
+                    : selection.selectCells(group.cells)
+                }
+                className="w-4 h-4 rounded border-border accent-accent dark:[color-scheme:dark] cursor-pointer"
+              />
+            </label>
+          )}
+
+          <button
+            onClick={onToggle}
+            className="min-w-0 flex-1 text-left"
           >
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={() =>
-                allSelected
-                  ? selection.deselectCells(group.cells)
-                  : selection.selectCells(group.cells)
-              }
-              className="w-4 h-4 rounded border-border accent-accent dark:[color-scheme:dark] cursor-pointer"
-            />
-          </label>
-        )}
+            <div className="flex items-center gap-2 min-w-0">
+              {open ? (
+                <ChevronDown size={14} className="text-muted shrink-0" />
+              ) : (
+                <ChevronRight size={14} className="text-muted shrink-0" />
+              )}
+              <GroupIcon kind={group.kind} />
+              <span className="text-fg font-medium text-sm truncate" title={group.label}>
+                {group.label}
+              </span>
+            </div>
 
-        <button
-          onClick={onToggle}
-          className="flex items-center gap-3 flex-1 text-left"
-        >
-          {open ? (
-            <ChevronDown size={14} className="text-muted shrink-0" />
-          ) : (
-            <ChevronRight size={14} className="text-muted shrink-0" />
-          )}
-          <GroupIcon kind={group.kind} />
-          <span className="text-fg font-medium text-sm">{group.label}</span>
-          {exactRunCount !== undefined && (
-            <span className="text-accent text-xs ml-1">
-              {exactRunCount} archived run{exactRunCount !== 1 ? "s" : ""}
-            </span>
-          )}
-          <span className="text-muted text-xs ml-1">
-            {group.cells.length} {group.kind === "arch" ? "branch" : "arch"}
-            {group.cells.length !== 1 ? (group.kind === "arch" ? "es" : "s") : ""}
-          </span>
-
-          {/* Status summary badges. */}
-          <div className="ml-auto flex items-center gap-3 text-xs">
-            {Object.entries(counts)
-              .filter(([s]) => s !== "unknown")
-              .map(([status, count]) => (
-                <span
-                  key={status}
-                  className={`${SUMMARY_COLORS[status] ?? "text-muted"} font-medium`}
-                >
-                  {count} {status}
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {exactRunCount !== undefined && (
+                <span className="text-accent">
+                  {exactRunCount} archived run{exactRunCount !== 1 ? "s" : ""}
                 </span>
-              ))}
-          </div>
-        </button>
+              )}
+              <span className="text-muted">
+                {group.cells.length} {group.kind === "arch" ? "branch" : "arch"}
+                {group.cells.length !== 1 ? (group.kind === "arch" ? "es" : "s") : ""}
+              </span>
+              {Object.entries(counts)
+                .filter(([s]) => s !== "unknown")
+                .map(([status, count]) => (
+                  <span
+                    key={status}
+                    className={`${SUMMARY_COLORS[status] ?? "text-muted"} font-medium`}
+                  >
+                    {count} {status}
+                  </span>
+                ))}
+            </div>
+          </button>
+        </div>
 
         {headerAction && (
           <button
@@ -142,7 +147,7 @@ export function AccordionGroup({
             }}
             className={
               headerAction.className ??
-              "ml-2 px-2.5 py-1 text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded-md transition-colors"
+              "w-full px-2.5 py-1.5 text-xs text-muted hover:text-fg border border-border hover:border-accent/40 rounded-md transition-colors sm:w-auto"
             }
           >
             {headerAction.label}

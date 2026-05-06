@@ -1,7 +1,20 @@
-import { useState } from "react";
+import { type ComponentType, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Archive, CalendarClock, History, LogOut, Moon, Play, Settings, Sun, LayoutDashboard } from "lucide-react";
+import {
+  Activity,
+  Archive,
+  CalendarClock,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Moon,
+  Play,
+  Settings,
+  Sun,
+  X,
+} from "lucide-react";
 import { getCurrentRun } from "../api/runs";
 import { logout } from "../api/auth";
 import { setAccessToken } from "../api/client";
@@ -27,9 +40,23 @@ function useDarkMode() {
   return { dark, toggle };
 }
 
+const NAV_ITEMS: {
+  to: string;
+  label: string;
+  icon: ComponentType<{ size?: number; className?: string }>;
+}[] = [
+  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/activity", label: "Activity", icon: History },
+  { to: "/trigger", label: "Run", icon: Play },
+  { to: "/schedule", label: "Schedule", icon: CalendarClock },
+  { to: "/archive", label: "Archive", icon: Archive },
+  { to: "/settings", label: "Settings", icon: Settings },
+];
+
 export function NavBar() {
   const navigate = useNavigate();
   const { dark, toggle } = useDarkMode();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { data: activeRun } = useQuery({
     queryKey: ["current-run"],
@@ -40,80 +67,64 @@ export function NavBar() {
   async function handleLogout() {
     await logout();
     setAccessToken(null);
+    setDrawerOpen(false);
     navigate("/login");
   }
 
-  return (
-    <nav className="bg-surface border-b border-border px-6 py-3 flex items-center gap-6">
-      <Link
-        to="/"
-        className="flex items-center gap-2 text-accent font-semibold text-lg tracking-tight"
-      >
-        <img
-          src={regsuiteIconUrl}
-          alt=""
-          className="w-7 h-7 shrink-0"
-        />
-        OPALX Reg Suite
-      </Link>
+  useEffect(() => {
+    if (!drawerOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setDrawerOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen]);
 
-      <div className="flex items-center gap-4 ml-4">
+  const activeRunLink =
+    activeRun && activeRun.status === "running" ? (
+      <Link
+        to="/live"
+        onClick={() => setDrawerOpen(false)}
+        className="flex items-center gap-1.5 text-accent text-sm animate-pulse"
+      >
+        <Activity size={15} />
+        <span className="hidden sm:inline">Run in progress</span>
+      </Link>
+    ) : null;
+
+  return (
+    <nav className="bg-surface border-b border-border px-4 py-3 sm:px-6 flex items-center gap-4">
+      <div className="flex items-center gap-6 min-w-0">
         <Link
           to="/"
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
+          onClick={() => setDrawerOpen(false)}
+          className="flex items-center gap-2 text-accent font-semibold text-lg tracking-tight min-w-0"
         >
-          <LayoutDashboard size={15} />
-          Dashboard
+          <img
+            src={regsuiteIconUrl}
+            alt=""
+            className="w-7 h-7 shrink-0"
+          />
+          <span className="truncate">OPALX Reg Suite</span>
         </Link>
-        <Link
-          to="/activity"
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
-        >
-          <History size={15} />
-          Activity
-        </Link>
-        <Link
-          to="/trigger"
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
-        >
-          <Play size={15} />
-          Run
-        </Link>
-        <Link
-          to="/schedule"
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
-        >
-          <CalendarClock size={15} />
-          Schedule
-        </Link>
-        <Link
-          to="/archive"
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
-        >
-          <Archive size={15} />
-          Archive
-        </Link>
-        <Link
-          to="/settings"
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
-        >
-          <Settings size={15} />
-          Settings
-        </Link>
+
+        <div className="hidden md:flex items-center gap-4">
+          {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+            <Link
+              key={to}
+              to={to}
+              className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors whitespace-nowrap"
+            >
+              <Icon size={15} />
+              {label}
+            </Link>
+          ))}
+        </div>
       </div>
 
-      <div className="ml-auto flex items-center gap-4">
-        {activeRun && activeRun.status === "running" && (
-          <Link
-            to="/live"
-            className="flex items-center gap-1.5 text-accent text-sm animate-pulse"
-          >
-            <Activity size={15} />
-            Run in progress
-          </Link>
-        )}
+      <div className="ml-auto flex items-center gap-2 md:gap-4 shrink-0">
+        {activeRunLink}
 
-        {/* Light / dark toggle */}
         <button
           onClick={toggle}
           title={dark ? "Switch to light mode" : "Switch to dark mode"}
@@ -124,12 +135,64 @@ export function NavBar() {
 
         <button
           onClick={handleLogout}
-          className="flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
+          className="hidden md:flex items-center gap-1.5 text-muted hover:text-fg text-sm transition-colors"
         >
           <LogOut size={15} />
           Logout
         </button>
+
+        <button
+          onClick={() => setDrawerOpen(true)}
+          title="Open navigation"
+          className="flex md:hidden items-center justify-center w-8 h-8 rounded-md text-muted hover:text-fg hover:bg-border/40 transition-colors"
+        >
+          <Menu size={18} />
+        </button>
       </div>
+
+      {drawerOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setDrawerOpen(false)}
+          />
+          <div className="absolute right-0 top-0 h-full w-72 max-w-[85vw] bg-surface border-l border-border shadow-xl p-4 flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-fg font-semibold">Navigation</span>
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                className="flex items-center justify-center w-8 h-8 rounded-md text-muted hover:text-fg hover:bg-border/40 transition-colors"
+                title="Close navigation"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  onClick={() => setDrawerOpen(false)}
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted hover:text-fg hover:bg-border/30 transition-colors"
+                >
+                  <Icon size={16} />
+                  {label}
+                </Link>
+              ))}
+            </div>
+            <button
+              onClick={handleLogout}
+              className="mt-auto flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted hover:text-fg hover:bg-border/30 transition-colors"
+            >
+              <LogOut size={16} />
+              Logout
+            </button>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

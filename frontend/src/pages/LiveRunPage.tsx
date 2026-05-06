@@ -423,7 +423,7 @@ export function LiveRunPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       {/* Run switcher tabs */}
       <RunSwitcher activeRuns={allActiveRuns} currentRunId={runId} />
 

@@ -117,10 +117,10 @@ export function TriggerPage() {
   }
 
   return (
-    <div className="p-6 max-w-xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-xl mx-auto">
       <h1 className="text-fg text-2xl font-semibold mb-6">Start a Run</h1>
 
-      <div className="bg-surface border border-border rounded-xl p-6 flex flex-col gap-5">
+      <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-5 sm:p-6">
         {/* OPALX branch */}
         <div>
           <label className="block text-sm text-muted mb-1">OPALX branch</label>
@@ -231,7 +231,7 @@ export function TriggerPage() {
                 this run only and are never stored.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="block text-xs text-muted mb-1">
                   Gateway password

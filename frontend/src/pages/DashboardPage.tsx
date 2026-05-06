@@ -130,11 +130,11 @@ export function DashboardPage() {
   const hasEntries = Object.keys(branches).length > 0;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       {activeRuns.length > 0 ? (
         <Link
           to={`/live/${activeRuns[0].run_id}`}
-          className="flex items-center gap-3 bg-accent/10 border border-accent/30 rounded-xl px-5 py-3 mb-6 text-accent text-sm hover:bg-accent/20 transition-colors"
+          className="flex flex-wrap items-center gap-3 bg-accent/10 border border-accent/30 rounded-xl px-4 py-3 mb-6 text-accent text-sm hover:bg-accent/20 transition-colors sm:px-5"
         >
           <span className="w-2 h-2 rounded-full bg-accent animate-ping inline-block" />
           {activeRuns.length === 1 ? (
@@ -148,7 +148,7 @@ export function DashboardPage() {
               {totalQueued > 0 && <>, {totalQueued} queued</>}
             </>
           )}
-          <span className="ml-auto text-xs underline">View live output →</span>
+          <span className="sm:ml-auto text-xs underline">View live output →</span>
         </Link>
       ) : (
         <Link

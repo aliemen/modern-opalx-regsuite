@@ -42,7 +42,7 @@ function LastRunTile() {
 
   const inner = (
     <div className="bg-surface border border-border rounded-xl p-5 hover:border-accent/40 transition-colors">
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2 min-w-0">
         <Clock size={13} className="text-muted" />
         <span className="text-muted text-xs">Last run</span>
         {stats.last_run_status && (
@@ -55,7 +55,10 @@ function LastRunTile() {
         {stats.last_run ? relativeTime(stats.last_run) : "—"}
       </p>
       {stats.last_run_branch && stats.last_run_arch && (
-        <p className="text-muted text-xs mt-1">
+        <p
+          className="text-muted text-xs mt-1 truncate"
+          title={`${stats.last_run_branch} / ${stats.last_run_arch}`}
+        >
           {stats.last_run_branch} / {stats.last_run_arch}
         </p>
       )}

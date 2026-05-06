@@ -83,8 +83,8 @@ export function ApiKeysSection() {
   }
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-surface border border-border rounded-xl p-4 sm:p-6">
+      <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-fg text-lg font-medium flex items-center gap-2">
           <Terminal size={18} />
           API keys
@@ -114,7 +114,8 @@ export function ApiKeysSection() {
       {isLoading ? (
         <p className="text-muted text-sm">Loading API keys...</p>
       ) : keys && keys.length > 0 ? (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[42rem] text-sm">
           <thead>
             <tr className="border-b border-border text-muted text-left">
               <th className="pb-2 font-medium">Name</th>
@@ -176,6 +177,7 @@ export function ApiKeysSection() {
             ))}
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="text-muted text-sm">
           No API keys yet. Click{" "}

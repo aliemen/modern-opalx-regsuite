@@ -109,7 +109,7 @@ export function ArchivePage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <h1 className="text-fg text-2xl font-semibold mb-2 flex items-center gap-3">
         <Archive size={22} className="text-muted" />
         Archive

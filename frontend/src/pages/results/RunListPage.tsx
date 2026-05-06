@@ -6,6 +6,7 @@ import { getRuns, type RunIndexEntry } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Pagination } from "../../components/Pagination";
 import { Breadcrumb } from "../../components/Breadcrumb";
+import { RunSummaryCard } from "../../components/RunSummaryCard";
 
 function fmtDate(d: string | null) {
   if (!d) return "\u2014";
@@ -37,7 +38,7 @@ export function RunListPage() {
   const qs = searchParams.toString();
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       <Breadcrumb
         crumbs={[
           {
@@ -59,7 +60,17 @@ export function RunListPage() {
         <div className="text-muted text-sm">No runs found.</div>
       ) : (
         <>
-          <div className="border border-border rounded-xl overflow-hidden">
+          <div className="md:hidden space-y-3">
+            {runs.map((run: RunIndexEntry) => (
+              <RunSummaryCard
+                key={run.run_id}
+                run={run}
+                to={`/results/${branch}/${arch}/${run.run_id}${qs ? `?${qs}` : ""}`}
+              />
+            ))}
+          </div>
+
+          <div className="hidden md:block border border-border rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-surface text-muted text-left">
                 <tr>

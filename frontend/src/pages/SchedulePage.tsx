@@ -55,8 +55,8 @@ export function SchedulePage() {
       ?.detail ?? null;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
+      <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-fg text-2xl font-semibold flex items-center gap-2">
             <CalendarClock size={24} />
@@ -70,7 +70,7 @@ export function SchedulePage() {
         <button
           type="button"
           onClick={openNew}
-          className="flex items-center gap-2 bg-accent text-bg font-medium rounded-md px-4 py-2 text-sm hover:brightness-110 transition"
+          className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md px-4 py-2 text-sm hover:brightness-110 transition sm:w-auto"
         >
           <Plus size={15} />
           New schedule

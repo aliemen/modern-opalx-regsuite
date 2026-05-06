@@ -79,8 +79,8 @@ export function ConnectionsSection() {
   });
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-surface border border-border rounded-xl p-4 sm:p-6">
+      <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-fg text-lg font-medium flex items-center gap-2">
           <Plug size={18} />
           Connections
@@ -121,7 +121,8 @@ export function ConnectionsSection() {
       {connectionsLoading ? (
         <p className="text-muted text-sm">Loading connections...</p>
       ) : connections && connections.length > 0 ? (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[44rem] text-sm">
           <thead>
             <tr className="border-b border-border text-muted text-left">
               <th className="pb-2 font-medium">Name</th>
@@ -276,6 +277,7 @@ export function ConnectionsSection() {
             })}
           </tbody>
         </table>
+        </div>
       ) : (
         !showNewForm && (
           <p className="text-muted text-sm">

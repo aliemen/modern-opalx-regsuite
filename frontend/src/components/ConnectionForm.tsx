@@ -125,7 +125,7 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
       </div>
 
       {/* Name + description */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label className="block text-xs text-muted mb-1">Name</label>
           <input

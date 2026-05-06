@@ -75,7 +75,7 @@ export function PasswordSection() {
   const disabled = mut.isPending || done;
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
+    <div className="bg-surface border border-border rounded-xl p-4 sm:p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-fg text-lg font-medium flex items-center gap-2">
           <Lock size={18} />

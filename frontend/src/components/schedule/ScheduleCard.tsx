@@ -139,7 +139,7 @@ export function ScheduleCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted">
+      <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs text-muted sm:grid-cols-2">
         <div className="flex items-center gap-1.5">
           <Calendar size={12} />
           <span className="text-fg">{daysLabel}</span>
@@ -191,7 +191,7 @@ export function ScheduleCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between text-[11px] border-t border-border pt-2">
+      <div className="flex flex-col gap-1 text-[11px] border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-between">
         <span className={lastStatus.className}>{lastStatus.label}</span>
         {schedule.last_triggered_at && (
           <span className="text-muted">

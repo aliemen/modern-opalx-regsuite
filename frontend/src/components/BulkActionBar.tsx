@@ -35,16 +35,16 @@ export function BulkActionBar({
 
   return (
     <div className="sticky top-0 z-20 mb-4">
-      <div className="bg-surface border border-accent/40 rounded-xl px-5 py-3 flex items-center gap-3 shadow-md">
-        <span className="text-fg text-sm font-medium">
+      <div className="bg-surface border border-accent/40 rounded-xl px-4 py-3 flex flex-col gap-3 shadow-md sm:px-5 sm:flex-row sm:items-center">
+        <span className="text-fg text-sm font-medium min-w-0">
           {selection.count} run{selection.count !== 1 ? "s" : ""} selected
         </span>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           <button
             onClick={onArchiveToggle}
             disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-fg bg-bg hover:bg-border/40 border border-border rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm text-fg bg-bg hover:bg-border/40 border border-border rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isArchived ? (
               <>
@@ -63,7 +63,7 @@ export function BulkActionBar({
             <button
               onClick={onHardDelete}
               disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-failed bg-bg hover:bg-failed/10 border border-failed/40 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm text-failed bg-bg hover:bg-failed/10 border border-failed/40 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Trash2 size={14} />
               Hard delete
@@ -73,7 +73,7 @@ export function BulkActionBar({
           <button
             onClick={selection.clear}
             disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted hover:text-fg border border-border hover:border-accent/40 rounded-md transition-colors disabled:opacity-50"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm text-muted hover:text-fg border border-border hover:border-accent/40 rounded-md transition-colors disabled:opacity-50"
           >
             <X size={14} />
             Clear

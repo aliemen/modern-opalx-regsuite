@@ -58,10 +58,10 @@ function MachineSection({ machine }: { machine: MachineStatus }) {
       {machine.active_run && (
         <Link
           to={`/live/${machine.active_run.run_id}`}
-          className="flex items-center gap-2 pl-5 py-1 text-xs hover:bg-border/30 rounded transition-colors"
+          className="flex items-center gap-2 pl-5 py-1 text-xs hover:bg-border/30 rounded transition-colors min-w-0"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-          <span className="text-fg">
+          <span className="text-fg truncate min-w-0" title={`${machine.active_run.branch}/${machine.active_run.arch}`}>
             {machine.active_run.branch}/{machine.active_run.arch}
           </span>
           <PhaseBadge phase={machine.active_run.phase} />
@@ -75,12 +75,12 @@ function MachineSection({ machine }: { machine: MachineStatus }) {
       {machine.queue.map((qr, i) => (
         <div
           key={qr.queue_id}
-          className="flex items-center gap-2 pl-5 py-1 text-xs"
+          className="flex items-center gap-2 pl-5 py-1 text-xs min-w-0"
         >
           <span className="text-muted w-3 text-right tabular-nums">
             {i + 1}.
           </span>
-          <span className="text-fg">
+          <span className="text-fg truncate min-w-0" title={`${qr.branch}/${qr.arch}`}>
             {qr.branch}/{qr.arch}
           </span>
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-border text-muted font-medium">

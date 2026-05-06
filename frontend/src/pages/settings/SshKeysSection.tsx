@@ -142,7 +142,7 @@ export function SshKeysSection() {
   const submitPending = uploadMut.isPending || replaceMut.isPending;
 
   return (
-    <div className="bg-surface border border-border rounded-xl p-6">
+    <div className="bg-surface border border-border rounded-xl p-4 sm:p-6">
       <h2 className="text-fg text-lg font-medium mb-4 flex items-center gap-2">
         <Key size={18} />
         SSH Keys
@@ -227,7 +227,8 @@ export function SshKeysSection() {
       {keysLoading ? (
         <p className="text-muted text-sm">Loading keys...</p>
       ) : keys && keys.length > 0 ? (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[34rem] text-sm">
           <thead>
             <tr className="border-b border-border text-muted text-left">
               <th className="pb-2 font-medium">Name</th>
@@ -282,6 +283,7 @@ export function SshKeysSection() {
             })}
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="text-muted text-sm">
           No SSH keys registered. Upload a private key to enable remote

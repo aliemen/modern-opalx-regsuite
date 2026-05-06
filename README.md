@@ -7,6 +7,10 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 ### Features
 
 - **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), results browsing, dashboard statistics, and live queue display.
+- **Test catalog**: Browse the local `regression-tests-x` clone by branch without checking it out. The catalog shows enabled/disabled tests, `.rt` metric checks, reference data, multi-container references, last status, and flaky suspects.
+- **Re-run from results**: A run detail page can prefill Start a Run with the original branch, tests branch, architecture, connection, and run options.
+- **Artifact integrity checks**: Runs carry an `artifact-manifest.json`; CLI and API checks verify required JSON, logs, plots, hashes, and referenced artifacts.
+- **Flakiness signals**: Dashboard and catalog surfaces flag simulations with mixed pass/fail outcomes in the recent history for the same OPALX branch, regression-tests branch, and architecture.
 - **Per-machine run queuing**: Runs are queued per machine instead of rejected. Local and remote machines can run in parallel; only one run per physical host at a time.
 - **Config-driven build recipes**: `config.toml` with per-architecture overrides (`[[arch_configs]]`) carrying only the *build recipe* (cmake args, build jobs, mpi ranks, env activation).
 - **Per-user named connections**: Each authenticated regsuite user manages their own SSH keys and named *connections* (target host, user, key, optional ProxyJump gateway, environment activation) via the Settings UI. At trigger time the user picks a run config + a connection (or "Local").
@@ -96,6 +100,8 @@ cd frontend && npm run dev   # frontend on :5173, proxies /api → :8000
 | `opalx-regsuite gen-data-site` | Generate offline static HTML snapshot |
 | `opalx-regsuite del-test` | Delete run data |
 | `opalx-regsuite rebuild-indexes` | Rebuild `runs-index/` and `branches.json` from disk |
+| `opalx-regsuite check-artifacts` | Validate run artifact manifests and referenced files |
+| `opalx-regsuite rebuild-artifact-manifests` | Regenerate `artifact-manifest.json` files for indexed runs |
 
 ---
 
@@ -349,12 +355,29 @@ git clone <opalx-regsuite-test-data> /srv/opalx/test-data
 
 ---
 
+### Demo data
+
+The repository includes a small sanitized fixture data root under
+`demo-data/`. It is generated from selected production runs but strips user
+identity and truncates logs. It contains one passing run, one failing run with
+real metric deltas, one multi-container example, and one deliberately corrupt
+run for integrity tests.
+
+To regenerate it from a local sibling `opalx-regsuite-test-data` checkout:
+
+```bash
+python scripts/generate_demo_data.py
+```
+
+---
+
 ### Data layout
 
 ```
 data_root/                                 # publicly shareable: only test/run data
   runs/<branch>/<arch>/<run_id>/
     run-meta.json                           # carries connection_name, NOT host/user/key
+    artifact-manifest.json                  # generated file inventory with size/hash data
     unit-tests.json
     regression-tests.json
     logs/pipeline.log, cmake.log, build.log, <TestName>-RT.o, ...
@@ -409,6 +432,7 @@ run queue state is held in process memory. This is enforced by the CLI's `serve`
 | Route | Description |
 |---|---|
 | `/` | Dashboard — latest run per branch/arch, stats panel, live queue display |
+| `/catalog` | Test catalog from the local `regression-tests-x` clone |
 | `/trigger` | Start a new run (queues if machine is busy) |
 | `/live/:runId?` | Live log streaming for a specific run (or the most recent active run) |
 | `/results/:branch/:arch` | Run history table |

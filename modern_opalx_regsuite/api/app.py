@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,8 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
+from ..archive_service import locked_index
 from ..config import load_config
-from ..data_model import runs_index_path
+from ..data_model import branches_index_path, run_dir, runs_index_path
 from ..scheduler.task import scheduler_loop
 from .archive import router as archive_router
 from .auth import REFRESH_COOKIE_NAME, TokenResponse, login_limiter
@@ -50,6 +52,9 @@ async def _lifespan(app: FastAPI):
     try:
         cfg = load_config()
         data_root = cfg.resolved_data_root
+        archive_root = cfg.resolved_archive_root
+        if archive_root is not None:
+            _reconcile_archive_layout(data_root, archive_root)
         _heal_stale_runs(data_root)
         try:
             from ..runner.migrations import migrate_all_regression_json
@@ -144,6 +149,107 @@ def _heal_index_entry(data_root: Path, meta: dict) -> None:
             json.dump(entries, f, indent=2, default=str)
     except Exception:
         pass
+
+
+def _patch_meta_archived(rdir: Path, archived: bool) -> None:
+    meta_path = rdir / "run-meta.json"
+    if not meta_path.is_file():
+        return
+    try:
+        with meta_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if bool(data.get("archived", False)) == archived:
+            return
+        data["archived"] = archived
+        with meta_path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception:
+        log.exception("archive reconcile: failed to patch %s", meta_path)
+
+
+def _clean_staging_dirs(root: Path) -> int:
+    runs_root = root / "runs"
+    if not runs_root.is_dir():
+        return 0
+    cleaned = 0
+    for staging in sorted(runs_root.rglob("*.staging")):
+        if staging.is_dir():
+            try:
+                shutil.rmtree(staging)
+                cleaned += 1
+            except Exception:
+                log.exception("archive reconcile: failed to remove %s", staging)
+    return cleaned
+
+
+def _reconcile_archive_layout(data_root: Path, archive_root: Path) -> None:
+    """Repair index/archive-layout mismatches left by interrupted moves."""
+    cleaned = _clean_staging_dirs(data_root) + _clean_staging_dirs(archive_root)
+    if cleaned:
+        log.info("archive reconcile: removed %d stale staging directorie(s).", cleaned)
+
+    branches_path = branches_index_path(data_root)
+    if not branches_path.is_file():
+        return
+    try:
+        with branches_path.open("r", encoding="utf-8") as f:
+            branches = json.load(f)
+    except Exception:
+        log.exception("archive reconcile: failed to read %s", branches_path)
+        return
+    if not isinstance(branches, dict):
+        return
+
+    for branch, archs in branches.items():
+        if not isinstance(branch, str) or not isinstance(archs, list):
+            continue
+        for arch in archs:
+            if not isinstance(arch, str):
+                continue
+            idx_path = runs_index_path(data_root, branch, arch)
+            if not idx_path.is_file():
+                continue
+            try:
+                with locked_index(idx_path):
+                    with idx_path.open("r", encoding="utf-8") as f:
+                        entries = json.load(f)
+                    if not isinstance(entries, list):
+                        continue
+                    changed = False
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        run_id = entry.get("run_id")
+                        if not isinstance(run_id, str):
+                            continue
+                        data_dir = run_dir(data_root, branch, arch, run_id)
+                        archive_dir = run_dir(archive_root, branch, arch, run_id)
+                        on_data = data_dir.is_dir()
+                        on_archive = archive_dir.is_dir()
+                        indexed_archived = bool(entry.get("archived", False))
+
+                        if on_data and on_archive:
+                            if indexed_archived:
+                                shutil.rmtree(data_dir)
+                                _patch_meta_archived(archive_dir, True)
+                            else:
+                                shutil.rmtree(archive_dir)
+                                _patch_meta_archived(data_dir, False)
+                            continue
+                        if on_data and indexed_archived:
+                            entry["archived"] = False
+                            _patch_meta_archived(data_dir, False)
+                            changed = True
+                            continue
+                        if on_archive and not indexed_archived:
+                            entry["archived"] = True
+                            _patch_meta_archived(archive_dir, True)
+                            changed = True
+                    if changed:
+                        with idx_path.open("w", encoding="utf-8") as f:
+                            json.dump(entries, f, indent=2, default=str)
+            except Exception:
+                log.exception("archive reconcile: failed for %s", idx_path)
 
 
 def create_app() -> FastAPI:

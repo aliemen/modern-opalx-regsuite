@@ -204,10 +204,22 @@ def run_dir(data_root: Path, branch: str, arch: str, run_id: str) -> Path:
     return data_root / "runs" / branch / arch / run_id
 
 
+def resolve_run_dir(
+    data_root: Path,
+    archive_root: Optional[Path],
+    branch: str,
+    arch: str,
+    run_id: str,
+    archived: bool,
+) -> Path:
+    if archived and archive_root is not None:
+        return archive_root / "runs" / branch / arch / run_id
+    return run_dir(data_root, branch, arch, run_id)
+
+
 def runs_index_path(data_root: Path, branch: str, arch: str) -> Path:
     return data_root / "runs-index" / branch / f"{arch}.json"
 
 
 def branches_index_path(data_root: Path) -> Path:
     return data_root / "branches.json"
-

@@ -97,6 +97,7 @@ export interface RunDetail {
   meta: RunMeta;
   unit: UnitTestsReport;
   regression: RegressionTestsReport;
+  archived_on_cold_storage: boolean;
 }
 
 /** Build a query-param object that omits null/undefined values so axios
@@ -190,6 +191,7 @@ export interface ArchiveResult {
   changed: number;
   skipped_active: string[];
   not_found: string[];
+  failed_move: string[];
 }
 
 export async function archiveBranch(
@@ -222,6 +224,17 @@ export async function archiveRun(
   const res = archived
     ? await api.post<ArchiveResult>(url, payload)
     : await api.delete<ArchiveResult>(url, { data: payload });
+  return res.data;
+}
+
+export async function restoreRun(
+  branch: string,
+  arch: string,
+  runId: string
+): Promise<ArchiveResult> {
+  const res = await api.post<ArchiveResult>(
+    `/api/archive/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs/${encodeURIComponent(runId)}/restore`
+  );
   return res.data;
 }
 

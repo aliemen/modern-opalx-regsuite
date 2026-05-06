@@ -11,7 +11,13 @@ import typer
 from . import config as config_mod
 from . import archive_service
 from .config import SuiteConfig
-from .data_model import RunIndexEntry, RunMeta, branches_index_path, run_dir, runs_index_path
+from .data_model import (
+    RunIndexEntry,
+    RunMeta,
+    branches_index_path,
+    resolve_run_dir,
+    runs_index_path,
+)
 from .runner import run_pipeline
 from .sitegen import generate_site
 
@@ -198,6 +204,7 @@ def del_test(
     """Delete one or more test runs from the data directory."""
     cfg = _load_config_option(config)
     data_root = cfg.resolved_data_root
+    archive_root = cfg.resolved_archive_root
 
     branch = branch or cfg.default_branch
     if arch is not None:
@@ -230,7 +237,14 @@ def del_test(
             rid = entry.get("run_id")
             if isinstance(rid, str) and fnmatch.fnmatch(rid, run_id):
                 deleted_ids.append(rid)
-                run_path = run_dir(data_root, branch, current_arch, rid)
+                run_path = resolve_run_dir(
+                    data_root,
+                    archive_root,
+                    branch,
+                    current_arch,
+                    rid,
+                    bool(entry.get("archived", False)),
+                )
                 if run_path.exists():
                     shutil.rmtree(run_path)
             else:
@@ -308,6 +322,7 @@ def archive_cmd(
 
     cfg = _load_config_option(config)
     data_root = cfg.resolved_data_root
+    archive_root = cfg.resolved_archive_root
 
     archived = not unarchive
     action = "archive" if archived else "unarchive"
@@ -315,15 +330,27 @@ def archive_cmd(
     try:
         if run_id:
             result = archive_service.set_archived_for_runs(
-                data_root, branch, arch, run_id, archived=archived
+                data_root,
+                branch,
+                arch,
+                run_id,
+                archived=archived,
+                archive_root=archive_root,
             )
         elif arch:
             result = archive_service.set_archived_for_arch(
-                data_root, branch, arch, archived=archived
+                data_root,
+                branch,
+                arch,
+                archived=archived,
+                archive_root=archive_root,
             )
         else:
             result = archive_service.set_archived_for_branch(
-                data_root, branch, archived=archived
+                data_root,
+                branch,
+                archived=archived,
+                archive_root=archive_root,
             )
     except archive_service.ProtectedBranchError as exc:
         typer.echo(f"Error: {exc}", err=True)
@@ -343,6 +370,11 @@ def archive_cmd(
     if result.not_found:
         typer.echo(
             f"Not found in index: " + ", ".join(sorted(result.not_found))
+        )
+    if result.failed_move:
+        typer.echo(
+            f"Failed to move: " + ", ".join(sorted(result.failed_move)),
+            err=True,
         )
 
 
@@ -412,23 +444,37 @@ def patch_visibility(
 
     cfg = _load_config_option(config)
     data_root = cfg.resolved_data_root
+    archive_root = cfg.resolved_archive_root
     want_public = public
     action = "publish" if want_public else "unpublish"
 
     if run_id:
         result = archive_service.set_public_for_runs(
-            data_root, branch, arch, run_id, public=want_public
+            data_root,
+            branch,
+            arch,
+            run_id,
+            public=want_public,
+            archive_root=archive_root,
         )
     elif arch:
         result = archive_service.set_public_for_branch_arch(
-            data_root, branch, arch, public=want_public
+            data_root,
+            branch,
+            arch,
+            public=want_public,
+            archive_root=archive_root,
         )
     else:
         # Walk every arch the branch has ever produced.
         total = 0
         for a in archive_service._list_archs_for_branch(data_root, branch):
             r = archive_service.set_public_for_branch_arch(
-                data_root, branch, a, public=want_public
+                data_root,
+                branch,
+                a,
+                public=want_public,
+                archive_root=archive_root,
             )
             total += r.changed
         typer.echo(
@@ -586,27 +632,45 @@ def rebuild_indexes(
     """
     cfg = _load_config_option(config)
     data_root = cfg.resolved_data_root
-    runs_root = data_root / "runs"
+    archive_root = cfg.resolved_archive_root
+    run_roots: list[tuple[Path, bool]] = [(data_root / "runs", False)]
+    if archive_root is not None:
+        run_roots.append((archive_root / "runs", True))
 
-    if not runs_root.is_dir():
-        typer.echo(f"No runs directory found at {runs_root}")
+    if not any(root.is_dir() for root, _ in run_roots):
+        searched = ", ".join(str(root) for root, _ in run_roots)
+        typer.echo(f"No runs directory found at {searched}")
         raise typer.Exit(0)
 
     # Collect all valid metas grouped by (branch, arch).
     from collections import defaultdict
-    by_branch_arch: dict[tuple[str, str], list[RunMeta]] = defaultdict(list)
-    total = 0
+    by_branch_arch: dict[tuple[str, str], list[tuple[RunMeta, bool]]] = defaultdict(list)
+    seen_locations: dict[tuple[str, str, str], bool] = {}
+    for runs_root, archived in run_roots:
+        if not runs_root.is_dir():
+            continue
+        for meta_path in sorted(runs_root.rglob("run-meta.json")):
+            if any(part.endswith(".staging") for part in meta_path.parts):
+                continue
+            try:
+                with meta_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                meta = RunMeta.model_validate(data)
+                key = (meta.branch, meta.arch, meta.run_id)
+                previous_archived = seen_locations.get(key)
+                if previous_archived is False:
+                    continue
+                if previous_archived is True and not archived:
+                    bucket = by_branch_arch[(meta.branch, meta.arch)]
+                    by_branch_arch[(meta.branch, meta.arch)] = [
+                        item for item in bucket if item[0].run_id != meta.run_id
+                    ]
+                by_branch_arch[(meta.branch, meta.arch)].append((meta, archived))
+                seen_locations[key] = archived
+            except Exception as exc:
+                typer.echo(f"  Skipping {meta_path}: {exc}", err=True)
 
-    for meta_path in sorted(runs_root.glob("*/*/*/run-meta.json")):
-        try:
-            with meta_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            meta = RunMeta.model_validate(data)
-            by_branch_arch[(meta.branch, meta.arch)].append(meta)
-            total += 1
-        except Exception as exc:
-            typer.echo(f"  Skipping {meta_path}: {exc}", err=True)
-
+    total = sum(len(metas) for metas in by_branch_arch.values())
     if total == 0:
         typer.echo("No valid run-meta.json files found.")
         raise typer.Exit(0)
@@ -616,7 +680,7 @@ def rebuild_indexes(
     branches: dict[str, list[str]] = {}
 
     for (branch, arch), metas in sorted(by_branch_arch.items()):
-        metas.sort(key=lambda m: m.started_at, reverse=True)
+        metas.sort(key=lambda item: item[0].started_at, reverse=True)
         entries = [
             RunIndexEntry(
                 branch=m.branch,
@@ -625,14 +689,19 @@ def rebuild_indexes(
                 started_at=m.started_at,
                 finished_at=m.finished_at,
                 status=m.status,
+                connection_name=m.connection_name,
+                triggered_by=m.triggered_by,
+                regtest_branch=m.regtest_branch,
                 unit_tests_total=m.unit_tests_total,
                 unit_tests_failed=m.unit_tests_failed,
                 regression_total=m.regression_total,
                 regression_passed=m.regression_passed,
                 regression_failed=m.regression_failed,
                 regression_broken=m.regression_broken,
+                archived=archived,
+                public=m.public,
             )
-            for m in metas
+            for m, archived in metas
         ]
         idx_path = runs_index_path(data_root, branch, arch)
         idx_path.parent.mkdir(parents=True, exist_ok=True)
@@ -977,4 +1046,3 @@ def migrate_regression_json_cmd(
 
 if __name__ == "__main__":
     app()
-

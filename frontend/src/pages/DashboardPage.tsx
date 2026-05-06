@@ -82,10 +82,19 @@ export function DashboardPage() {
       branch,
       archived: true,
     });
+    const messages: string[] = [];
     if (result.skipped_active.length > 0) {
-      setSkippedToast(
+      messages.push(
         `${result.skipped_active.length} run${result.skipped_active.length !== 1 ? "s" : ""} skipped (currently running)`
       );
+    }
+    if (result.failed_move.length > 0) {
+      messages.push(
+        `${result.failed_move.length} run${result.failed_move.length !== 1 ? "s" : ""} failed to move`
+      );
+    }
+    if (messages.length > 0) {
+      setSkippedToast(messages.join("; "));
     }
   }
 
@@ -99,10 +108,20 @@ export function DashboardPage() {
     });
     selection.clear();
     const skipped = mutations.collectSkippedActive(results);
+    const failed = mutations.collectFailedMove(results);
+    const messages: string[] = [];
     if (skipped.length > 0) {
-      setSkippedToast(
+      messages.push(
         `${skipped.length} run${skipped.length !== 1 ? "s" : ""} skipped (currently running)`
       );
+    }
+    if (failed.length > 0) {
+      messages.push(
+        `${failed.length} run${failed.length !== 1 ? "s" : ""} failed to move`
+      );
+    }
+    if (messages.length > 0) {
+      setSkippedToast(messages.join("; "));
     }
   }
 

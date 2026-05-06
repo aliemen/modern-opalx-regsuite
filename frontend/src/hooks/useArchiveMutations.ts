@@ -84,5 +84,10 @@ export function useArchiveMutations() {
       for (const r of results) for (const id of r.skipped_active) all.add(id);
       return Array.from(all);
     },
+    collectFailedMove(results: ArchiveResult[]): string[] {
+      const all = new Set<string>();
+      for (const r of results) for (const id of r.failed_move) all.add(id);
+      return Array.from(all);
+    },
   };
 }

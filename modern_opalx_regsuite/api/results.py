@@ -13,6 +13,7 @@ from ..archive_service import (
     filter_entries_by_user,
     filter_entries_by_view,
     list_visible_branches,
+    locked_index,
     set_public_for_runs,
 )
 from ..config import SuiteConfig
@@ -22,7 +23,7 @@ from ..data_model import (
     RunMeta,
     UnitTestsReport,
     branches_index_path,
-    run_dir,
+    resolve_run_dir,
     runs_index_path,
 )
 from .deps import get_config, require_auth
@@ -37,6 +38,7 @@ class RunDetail(BaseModel):
     meta: RunMeta
     unit: UnitTestsReport
     regression: RegressionTestsReport
+    archived_on_cold_storage: bool = False
 
 
 class PaginatedRuns(BaseModel):
@@ -46,6 +48,25 @@ class PaginatedRuns(BaseModel):
 
 class VisibilityBody(BaseModel):
     public: bool
+
+
+def _index_entry_for_run(
+    data_root: Path, branch: str, arch: str, run_id: str
+) -> Optional[dict]:
+    idx_path = runs_index_path(data_root, branch, arch)
+    if not idx_path.is_file():
+        return None
+    try:
+        with idx_path.open("r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("run_id") == run_id:
+            return entry
+    return None
 
 
 @router.get("/branches")
@@ -146,7 +167,13 @@ def get_run(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
 ) -> RunDetail:
-    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
+    data_root = cfg.resolved_data_root
+    archive_root = cfg.resolved_archive_root
+    index_entry = _index_entry_for_run(data_root, branch, arch, run_id)
+    if index_entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    archived = bool(index_entry.get("archived", False))
+    rdir = resolve_run_dir(data_root, archive_root, branch, arch, run_id, archived)
     if not rdir.is_dir():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
 
@@ -160,11 +187,16 @@ def get_run(
     meta_data = _load("run-meta.json")
     unit_data = _load("unit-tests.json")
     reg_data = _load("regression-tests.json")
+    meta = RunMeta.model_validate(meta_data)
+    meta.archived = archived
+    if "public" in index_entry:
+        meta.public = bool(index_entry.get("public", False))
 
     return RunDetail(
-        meta=RunMeta.model_validate(meta_data),
+        meta=meta,
         unit=UnitTestsReport.model_validate(unit_data) if unit_data else UnitTestsReport(),
         regression=RegressionTestsReport.model_validate(reg_data) if reg_data else RegressionTestsReport(),
+        archived_on_cold_storage=archived and archive_root is not None,
     )
 
 
@@ -189,14 +221,33 @@ def set_run_visibility(
     """
     # Guard: make sure the run actually exists on disk before mutating state,
     # so a typo returns 404 instead of silently succeeding with 0 changes.
-    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
+    data_root = cfg.resolved_data_root
+    archive_root = cfg.resolved_archive_root
+    index_entry = _index_entry_for_run(data_root, branch, arch, run_id)
+    if index_entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found."
+        )
+    rdir = resolve_run_dir(
+        data_root,
+        archive_root,
+        branch,
+        arch,
+        run_id,
+        bool(index_entry.get("archived", False)),
+    )
     if not rdir.is_dir():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Run not found."
         )
 
     result = set_public_for_runs(
-        cfg.resolved_data_root, branch, arch, [run_id], body.public
+        data_root,
+        branch,
+        arch,
+        [run_id],
+        body.public,
+        archive_root=archive_root,
     )
     if result.not_found:
         raise HTTPException(
@@ -206,7 +257,7 @@ def set_run_visibility(
 
     # Return the updated index entry so the frontend can update its cache
     # without a second round trip.
-    idx_path = runs_index_path(cfg.resolved_data_root, branch, arch)
+    idx_path = runs_index_path(data_root, branch, arch)
     if idx_path.is_file():
         with idx_path.open("r", encoding="utf-8") as f:
             entries = json.load(f)
@@ -235,17 +286,30 @@ def delete_run(
             detail="Cannot delete a run that is currently in progress.",
         )
 
-    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
+    data_root = cfg.resolved_data_root
+    archive_root = cfg.resolved_archive_root
+    index_entry = _index_entry_for_run(data_root, branch, arch, run_id)
+    if index_entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    rdir = resolve_run_dir(
+        data_root,
+        archive_root,
+        branch,
+        arch,
+        run_id,
+        bool(index_entry.get("archived", False)),
+    )
     if not rdir.is_dir():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
 
     shutil.rmtree(rdir)
 
     # Remove the entry from the runs index.
-    idx_path = runs_index_path(cfg.resolved_data_root, branch, arch)
+    idx_path = runs_index_path(data_root, branch, arch)
     if idx_path.is_file():
-        with idx_path.open("r", encoding="utf-8") as f:
-            entries = json.load(f)
-        entries = [e for e in entries if e.get("run_id") != run_id]
-        with idx_path.open("w", encoding="utf-8") as f:
-            json.dump(entries, f, indent=2)
+        with locked_index(idx_path):
+            with idx_path.open("r", encoding="utf-8") as f:
+                entries = json.load(f)
+            entries = [e for e in entries if e.get("run_id") != run_id]
+            with idx_path.open("w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2)

@@ -5,9 +5,10 @@ the same code path is exercised in both contexts.
 
 Design notes
 ------------
-* Archive is a soft-delete: the ``archived`` boolean is flipped on every
-  affected ``run-meta.json`` plus the corresponding entry in
-  ``runs-index/<branch>/<arch>.json``. No files are moved on disk.
+* Archive is a soft-delete when no archive root is configured. When
+  ``archive_root`` is set, archive/unarchive physically moves the run
+  directory between ``data_root`` and ``archive_root`` and then flips the
+  same ``archived`` booleans.
 * Hard delete uses ``shutil.rmtree`` on the run directory plus a rewrite of
   the index file (mirrors the existing single-run delete in ``api/results.py``).
 * Index reads/writes are serialised with ``fcntl.flock`` so concurrent
@@ -21,17 +22,20 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Iterator, Literal, Optional
+from urllib.parse import quote
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .data_model import (
     RunIndexEntry,
     RunMeta,
     branches_index_path,
+    resolve_run_dir,
     run_dir,
     runs_index_path,
 )
@@ -62,8 +66,9 @@ class ArchiveResult(BaseModel):
     """Outcome of an archive / unarchive / hard-delete operation."""
 
     changed: int = 0
-    skipped_active: list[str] = []  # run ids skipped because they're running/queued
-    not_found: list[str] = []        # run ids that did not exist on disk
+    skipped_active: list[str] = Field(default_factory=list)  # running/queued ids
+    not_found: list[str] = Field(default_factory=list)       # ids missing from index
+    failed_move: list[str] = Field(default_factory=list)     # ids whose physical move failed
 
 
 # ── Index file locking ──────────────────────────────────────────────────────
@@ -94,6 +99,27 @@ def locked_index(index_path: Path) -> Iterator[None]:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def _run_move_lock(
+    data_root: Path, branch: str, arch: str, run_id: str
+) -> Iterator[None]:
+    """Serialise archive/unarchive moves for one run id.
+
+    Lock files live under data_root even when the run directory itself lives
+    on archive storage, so every process has one cheap, shared lock point.
+    """
+    lock_dir = data_root / ".archive-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_name = "__".join(quote(part, safe="") for part in (branch, arch, run_id))
+    lock_path = lock_dir / f"{lock_name}.lock"
+    with lock_path.open("a+", encoding="utf-8") as f:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 def _read_index(index_path: Path) -> list[dict]:
     if not index_path.is_file():
         return []
@@ -111,6 +137,55 @@ def _write_index(index_path: Path, entries: list[dict]) -> None:
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with index_path.open("w", encoding="utf-8") as f:
         json.dump(entries, f, indent=2, default=str)
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def _move_run_dir(
+    src_root: Path, dst_root: Path, branch: str, arch: str, run_id: str
+) -> bool:
+    """Move one run directory between roots.
+
+    The copy lands in a sibling ``.staging`` directory first, then is renamed
+    into place with ``os.replace``. If a previous attempt finished the move
+    but crashed before updating metadata/indexes, ``src`` will be gone and
+    ``dst`` will exist; that is treated as success.
+    """
+    src = run_dir(src_root, branch, arch, run_id)
+    dst = run_dir(dst_root, branch, arch, run_id)
+    staging = dst.with_name(f"{dst.name}.staging")
+
+    if src == dst:
+        return True
+    if not src.exists():
+        if dst.exists():
+            if staging.exists():
+                _remove_path(staging)
+            return True
+        return False
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if staging.exists():
+            _remove_path(staging)
+        if dst.exists():
+            _remove_path(dst)
+        shutil.copytree(
+            src,
+            staging,
+            copy_function=shutil.copy2,
+            dirs_exist_ok=False,
+        )
+        os.replace(staging, dst)
+        shutil.rmtree(src)
+        return True
+    except Exception:
+        return False
 
 
 # ── Visibility helper used by GET /api/results/branches ─────────────────────
@@ -294,17 +369,18 @@ def _set_public_in_index_file(
     public: bool,
     *,
     run_id_filter: Optional[set[str]] = None,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], dict[str, bool]]:
     """Flip ``public`` on entries in *index_path* under an exclusive lock.
 
     Mirrors :func:`_set_archived_in_index_file` but for the ``public`` key.
     No ``protect_run_ids`` check because publishing or unpublishing does not
     interact with the run-slot / machine-busy state.
 
-    Returns ``(changed_run_ids, not_found_run_ids)``.
+    Returns ``(changed_run_ids, not_found_run_ids, archived_by_id)``.
     """
     changed: list[str] = []
     not_found: list[str] = []
+    archived_by_id: dict[str, bool] = {}
     with locked_index(index_path):
         entries = _read_index(index_path)
         seen_ids: set[str] = set()
@@ -320,15 +396,17 @@ def _set_public_in_index_file(
                 continue
             entry["public"] = public
             changed.append(rid)
+            archived_by_id[rid] = bool(entry.get("archived", False))
         if changed:
             _write_index(index_path, entries)
         if run_id_filter is not None:
             not_found = sorted(run_id_filter - seen_ids)
-    return changed, not_found
+    return changed, not_found, archived_by_id
 
 
 def _set_public_for_index(
     data_root: Path,
+    archive_root: Optional[Path],
     branch: str,
     arch: str,
     public: bool,
@@ -340,39 +418,125 @@ def _set_public_for_index(
     Returns ``(changed_count, not_found_run_ids)``.
     """
     index_path = runs_index_path(data_root, branch, arch)
-    changed_ids, not_found_ids = _set_public_in_index_file(
+    changed_ids, not_found_ids, archived_by_id = _set_public_in_index_file(
         index_path,
         public,
         run_id_filter=run_id_filter,
     )
     for rid in changed_ids:
-        _patch_run_meta_public(data_root, branch, arch, rid, public)
+        root = (
+            archive_root
+            if archive_root is not None and archived_by_id.get(rid, False)
+            else data_root
+        )
+        _patch_run_meta_public(root, branch, arch, rid, public)
     return len(changed_ids), not_found_ids
 
 
 def _set_archived_for_index(
     data_root: Path,
+    archive_root: Optional[Path],
     branch: str,
     arch: str,
     archived: bool,
     *,
     run_id_filter: Optional[set[str]],
     protect_run_ids: set[str],
-) -> tuple[int, list[str], list[str]]:
+) -> tuple[int, list[str], list[str], list[str]]:
     """Update one branch+arch index file plus each affected run-meta.json.
 
-    Returns ``(changed_count, skipped_run_ids, not_found_run_ids)``.
+    Returns ``(changed_count, skipped_run_ids, not_found_run_ids, failed_move_run_ids)``.
     """
     index_path = runs_index_path(data_root, branch, arch)
-    changed_ids, skipped_ids, not_found_ids = _set_archived_in_index_file(
-        index_path,
-        archived,
-        run_id_filter=run_id_filter,
-        protect_run_ids=protect_run_ids,
-    )
-    for rid in changed_ids:
-        _patch_run_meta_archived(data_root, branch, arch, rid, archived)
-    return len(changed_ids), skipped_ids, not_found_ids
+    if archive_root is None:
+        changed_ids, skipped_ids, not_found_ids = _set_archived_in_index_file(
+            index_path,
+            archived,
+            run_id_filter=run_id_filter,
+            protect_run_ids=protect_run_ids,
+        )
+        for rid in changed_ids:
+            _patch_run_meta_archived(data_root, branch, arch, rid, archived)
+        return len(changed_ids), skipped_ids, not_found_ids, []
+
+    candidate_ids: list[str] = []
+    skipped_ids: list[str] = []
+    not_found_ids: list[str] = []
+    failed_move_ids: list[str] = []
+    changed_total = 0
+
+    with locked_index(index_path):
+        entries = _read_index(index_path)
+        seen_ids: set[str] = set()
+        for entry in entries:
+            rid = entry.get("run_id")
+            if not isinstance(rid, str):
+                continue
+            seen_ids.add(rid)
+            if run_id_filter is not None and rid not in run_id_filter:
+                continue
+            if rid in protect_run_ids:
+                skipped_ids.append(rid)
+                continue
+            if bool(entry.get("archived", False)) == archived:
+                continue
+            candidate_ids.append(rid)
+        if run_id_filter is not None:
+            not_found_ids = sorted(run_id_filter - seen_ids)
+
+    skipped_seen = set(skipped_ids)
+    not_found_seen = set(not_found_ids)
+    for rid in candidate_ids:
+        with _run_move_lock(data_root, branch, arch, rid):
+            with locked_index(index_path):
+                entries = _read_index(index_path)
+                matching = next(
+                    (
+                        entry
+                        for entry in entries
+                        if isinstance(entry.get("run_id"), str)
+                        and entry.get("run_id") == rid
+                    ),
+                    None,
+                )
+                if matching is None:
+                    if run_id_filter is not None and rid not in not_found_seen:
+                        not_found_ids.append(rid)
+                        not_found_seen.add(rid)
+                    continue
+                if rid in protect_run_ids:
+                    if rid not in skipped_seen:
+                        skipped_ids.append(rid)
+                        skipped_seen.add(rid)
+                    continue
+                if bool(matching.get("archived", False)) == archived:
+                    continue
+
+            src_root = data_root if archived else archive_root
+            dst_root = archive_root if archived else data_root
+            if not _move_run_dir(src_root, dst_root, branch, arch, rid):
+                failed_move_ids.append(rid)
+                continue
+
+            new_root = archive_root if archived else data_root
+            _patch_run_meta_archived(new_root, branch, arch, rid, archived)
+            changed_ids, skipped, not_found = _set_archived_in_index_file(
+                index_path,
+                archived,
+                run_id_filter={rid},
+                protect_run_ids=protect_run_ids,
+            )
+            changed_total += len(changed_ids)
+            for sid in skipped:
+                if sid not in skipped_seen:
+                    skipped_ids.append(sid)
+                    skipped_seen.add(sid)
+            for nid in not_found:
+                if run_id_filter is not None and nid not in not_found_seen:
+                    not_found_ids.append(nid)
+                    not_found_seen.add(nid)
+
+    return changed_total, skipped_ids, sorted(not_found_ids), failed_move_ids
 
 
 def _list_archs_for_branch(data_root: Path, branch: str) -> list[str]:
@@ -397,6 +561,7 @@ def set_archived_for_branch(
     branch: str,
     archived: bool,
     protect_run_ids: Iterable[str] = (),
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Archive or unarchive every run for *branch* (across all archs).
 
@@ -409,9 +574,11 @@ def set_archived_for_branch(
     protect = set(protect_run_ids)
     total_changed = 0
     skipped: list[str] = []
+    failed_move: list[str] = []
     for arch in _list_archs_for_branch(data_root, branch):
-        changed, sk, _ = _set_archived_for_index(
+        changed, sk, _, failed = _set_archived_for_index(
             data_root,
+            archive_root,
             branch,
             arch,
             archived,
@@ -420,7 +587,12 @@ def set_archived_for_branch(
         )
         total_changed += changed
         skipped.extend(sk)
-    return ArchiveResult(changed=total_changed, skipped_active=skipped)
+        failed_move.extend(failed)
+    return ArchiveResult(
+        changed=total_changed,
+        skipped_active=skipped,
+        failed_move=failed_move,
+    )
 
 
 def set_archived_for_arch(
@@ -429,6 +601,7 @@ def set_archived_for_arch(
     arch: str,
     archived: bool,
     protect_run_ids: Iterable[str] = (),
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Archive or unarchive every run for *branch* + *arch*.
 
@@ -438,15 +611,20 @@ def set_archived_for_arch(
     if archived and branch == PROTECTED_BRANCH:
         raise ProtectedBranchError(branch)
     protect = set(protect_run_ids)
-    changed, skipped, _ = _set_archived_for_index(
+    changed, skipped, _, failed_move = _set_archived_for_index(
         data_root,
+        archive_root,
         branch,
         arch,
         archived,
         run_id_filter=None,
         protect_run_ids=protect,
     )
-    return ArchiveResult(changed=changed, skipped_active=skipped)
+    return ArchiveResult(
+        changed=changed,
+        skipped_active=skipped,
+        failed_move=failed_move,
+    )
 
 
 def set_archived_for_runs(
@@ -456,6 +634,7 @@ def set_archived_for_runs(
     run_ids: Iterable[str],
     archived: bool,
     protect_run_ids: Iterable[str] = (),
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Archive or unarchive an explicit list of run ids in one branch+arch.
 
@@ -467,8 +646,9 @@ def set_archived_for_runs(
     if not requested:
         return ArchiveResult()
     protect = set(protect_run_ids)
-    changed, skipped, not_found = _set_archived_for_index(
+    changed, skipped, not_found, failed_move = _set_archived_for_index(
         data_root,
+        archive_root,
         branch,
         arch,
         archived,
@@ -479,6 +659,7 @@ def set_archived_for_runs(
         changed=changed,
         skipped_active=skipped,
         not_found=not_found,
+        failed_move=failed_move,
     )
 
 
@@ -488,6 +669,7 @@ def set_public_for_runs(
     arch: str,
     run_ids: Iterable[str],
     public: bool,
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Publish or unpublish an explicit list of run ids in one branch+arch.
 
@@ -500,6 +682,7 @@ def set_public_for_runs(
         return ArchiveResult()
     changed, not_found = _set_public_for_index(
         data_root,
+        archive_root,
         branch,
         arch,
         public,
@@ -513,10 +696,12 @@ def set_public_for_branch_arch(
     branch: str,
     arch: str,
     public: bool,
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Publish or unpublish every run for *branch* + *arch* (used by the CLI)."""
     changed, _ = _set_public_for_index(
         data_root,
+        archive_root,
         branch,
         arch,
         public,
@@ -531,6 +716,7 @@ def hard_delete_runs(
     arch: str,
     run_ids: Iterable[str],
     protect_run_ids: Iterable[str] = (),
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Permanently delete runs from disk and from the index file.
 
@@ -565,7 +751,14 @@ def hard_delete_runs(
                 skipped.append(rid)
                 kept.append(entry)
                 continue
-            rdir = run_dir(data_root, branch, arch, rid)
+            rdir = resolve_run_dir(
+                data_root,
+                archive_root,
+                branch,
+                arch,
+                rid,
+                bool(entry.get("archived", False)),
+            )
             if rdir.is_dir():
                 shutil.rmtree(rdir)
             deleted.append(rid)
@@ -586,6 +779,7 @@ def hard_delete_arch_archived(
     branch: str,
     arch: str,
     protect_run_ids: Iterable[str] = (),
+    archive_root: Optional[Path] = None,
 ) -> ArchiveResult:
     """Permanently delete every *archived* run for one (branch, arch) cell.
 
@@ -615,7 +809,14 @@ def hard_delete_arch_archived(
                 skipped.append(rid)
                 kept.append(entry)
                 continue
-            rdir = run_dir(data_root, branch, arch, rid)
+            rdir = resolve_run_dir(
+                data_root,
+                archive_root,
+                branch,
+                arch,
+                rid,
+                is_archived,
+            )
             if rdir.is_dir():
                 shutil.rmtree(rdir)
             deleted.append(rid)

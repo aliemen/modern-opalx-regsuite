@@ -2,7 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Archive, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Globe2, Lock, Trash2 } from "lucide-react";
-import { archiveRun, deleteRun, getRunDetail, setRunVisibility, type RegressionSimulation } from "../../api/results";
+import { archiveRun, deleteRun, getRunDetail, restoreRun, setRunVisibility, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Breadcrumb } from "../../components/Breadcrumb";
 
@@ -320,12 +320,49 @@ export function RunDetailPage() {
     },
   });
 
+  const [archiveNotice, setArchiveNotice] = useState<string | null>(null);
   const archiveMutation = useMutation({
     mutationFn: (archived: boolean) => archiveRun(branch!, arch!, runId!, archived),
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["run-detail", branch, arch, runId] });
+      queryClient.invalidateQueries({ queryKey: ["all-runs"] });
       queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
+      if (result.failed_move.length > 0) {
+        setArchiveNotice("Could not move this run between storage roots.");
+      } else if (result.skipped_active.length > 0) {
+        setArchiveNotice("This run is currently active and was skipped.");
+      } else if (result.not_found.length > 0) {
+        setArchiveNotice("This run is missing from the index.");
+      } else {
+        setArchiveNotice(null);
+      }
+      if (
+        result.failed_move.length > 0 ||
+        result.skipped_active.length > 0 ||
+        result.not_found.length > 0
+      ) {
+        setTimeout(() => setArchiveNotice(null), 5000);
+      }
+    },
+  });
+
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
+  const restoreMutation = useMutation({
+    mutationFn: () => restoreRun(branch!, arch!, runId!),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["run-detail", branch, arch, runId] });
+      queryClient.invalidateQueries({ queryKey: ["all-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["runs"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["branches"] });
+      if (result.failed_move.length > 0) {
+        setRestoreNotice("Could not move this run from archive storage.");
+        setTimeout(() => setRestoreNotice(null), 5000);
+      } else {
+        setRestoreNotice(null);
+      }
     },
   });
 
@@ -366,6 +403,7 @@ export function RunDetailPage() {
   const qs = searchParams.toString();
   const listHref = `/results/${branch}/${arch}${qs ? `?${qs}` : ""}`;
   const regtestLabel = meta.regtest_branch ?? "\u2014";
+  const isColdStored = meta.archived && data.archived_on_cold_storage;
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -433,13 +471,15 @@ export function RunDetailPage() {
                 ? "Unpublish"
                 : "Publish"}
             </button>
-            <button
-              onClick={() => setConfirmArchive(true)}
-              className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
-              title={meta.archived ? "Unarchive run" : "Archive run"}
-            >
-              <Archive size={14} /> {meta.archived ? "Unarchive run" : "Archive run"}
-            </button>
+            {!isColdStored && (
+              <button
+                onClick={() => setConfirmArchive(true)}
+                className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
+                title={meta.archived ? "Unarchive run" : "Archive run"}
+              >
+                <Archive size={14} /> {meta.archived ? "Unarchive run" : "Archive run"}
+              </button>
+            )}
             <button
               onClick={() => setConfirmDelete(true)}
               className="flex items-center gap-1.5 text-muted hover:text-failed text-sm transition-colors"
@@ -454,6 +494,39 @@ export function RunDetailPage() {
       {publishNotice && (
         <div className="bg-accent/10 border border-accent/40 text-accent text-sm rounded-lg px-4 py-2">
           {publishNotice}
+        </div>
+      )}
+
+      {archiveNotice && (
+        <div className="bg-failed/10 border border-failed/40 text-failed text-sm rounded-lg px-4 py-2">
+          {archiveNotice}
+        </div>
+      )}
+
+      {isColdStored && (
+        <div className="bg-surface border border-accent/40 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex items-start gap-3 flex-1">
+            <Archive size={18} className="text-accent mt-0.5 shrink-0" />
+            <div>
+              <h2 className="text-fg font-medium">Cold storage</h2>
+              <p className="text-muted text-sm mt-1">
+                This run lives on archive storage. De-archive to view its plots, logs, and per-test details.
+              </p>
+              {(restoreNotice || restoreMutation.isError) && (
+                <p className="text-failed text-sm mt-2">
+                  {restoreNotice ?? "Could not restore this run."}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => restoreMutation.mutate()}
+            disabled={restoreMutation.isPending}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded border border-accent/40 bg-accent/10 text-accent text-sm hover:bg-accent/20 transition-colors disabled:opacity-50"
+          >
+            <Archive size={14} />
+            {restoreMutation.isPending ? "Restoring…" : "De-archive to view"}
+          </button>
         </div>
       )}
 
@@ -531,20 +604,22 @@ export function RunDetailPage() {
             </p>
           </div>
         </div>
-        <div className="sm:col-span-2">
-          <a
-            href={`/data/${runPath}/logs/pipeline.log`}
-            target="_blank"
-            rel="noopener"
-            className="flex items-center gap-1 text-accent text-xs hover:underline"
-          >
-            <ExternalLink size={11} /> pipeline.log
-          </a>
-        </div>
+        {!isColdStored && (
+          <div className="sm:col-span-2">
+            <a
+              href={`/data/${runPath}/logs/pipeline.log`}
+              target="_blank"
+              rel="noopener"
+              className="flex items-center gap-1 text-accent text-xs hover:underline"
+            >
+              <ExternalLink size={11} /> pipeline.log
+            </a>
+          </div>
+        )}
       </div>
 
       {/* Unit tests */}
-      {unit.tests.length > 0 && (
+      {!isColdStored && unit.tests.length > 0 && (
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <button
             onClick={() => setShowUnitDetails(!showUnitDetails)}
@@ -589,7 +664,7 @@ export function RunDetailPage() {
       )}
 
       {/* Regression tests */}
-      {regression.simulations.length > 0 && (
+      {!isColdStored && regression.simulations.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-fg font-medium">
             Regression Tests

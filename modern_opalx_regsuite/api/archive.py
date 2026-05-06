@@ -73,6 +73,7 @@ def archive_branch(
             branch,
             archived=True,
             protect_run_ids=_protected_run_ids(),
+            archive_root=cfg.resolved_archive_root,
         )
     except ProtectedBranchError as exc:
         raise _conflict_for_protected_branch(exc) from exc
@@ -90,6 +91,7 @@ def unarchive_branch(
         branch,
         archived=False,
         protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
     )
 
 
@@ -110,6 +112,7 @@ def archive_arch(
             arch,
             archived=True,
             protect_run_ids=_protected_run_ids(),
+            archive_root=cfg.resolved_archive_root,
         )
     except ProtectedBranchError as exc:
         raise _conflict_for_protected_branch(exc) from exc
@@ -128,6 +131,7 @@ def unarchive_arch(
         arch,
         archived=False,
         protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
     )
 
 
@@ -149,6 +153,7 @@ def archive_runs(
         payload.run_ids,
         archived=True,
         protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
     )
 
 
@@ -167,6 +172,29 @@ def unarchive_runs(
         payload.run_ids,
         archived=False,
         protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
+    )
+
+
+@router.post(
+    "/branches/{branch}/archs/{arch}/runs/{run_id}/restore",
+    response_model=ArchiveResult,
+)
+def restore_run(
+    branch: str,
+    arch: str,
+    run_id: str,
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> ArchiveResult:
+    return set_archived_for_runs(
+        cfg.resolved_data_root,
+        branch,
+        arch,
+        [run_id],
+        archived=False,
+        protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
     )
 
 
@@ -197,6 +225,7 @@ def hard_delete(
             arch,
             payload.run_ids,
             protect_run_ids=_protected_run_ids(),
+            archive_root=cfg.resolved_archive_root,
         )
     except ProtectedBranchError as exc:
         raise _conflict_for_protected_branch(exc) from exc
@@ -224,6 +253,7 @@ def hard_delete_archived_cell(
             branch,
             arch,
             protect_run_ids=_protected_run_ids(),
+            archive_root=cfg.resolved_archive_root,
         )
     except ProtectedBranchError as exc:
         raise _conflict_for_protected_branch(exc) from exc

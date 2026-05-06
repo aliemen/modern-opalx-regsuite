@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 DEFAULT_CONFIG_PATH = Path("config.toml")
 CONFIG_ENV_VAR = "OPALX_REGSUITE_CONFIG"
 DATA_ROOT_ENV_VAR = "OPALX_DATA_ROOT"
+ARCHIVE_ROOT_ENV_VAR = "OPALX_ARCHIVE_ROOT"
 SECRET_KEY_ENV_VAR = "OPALX_SECRET_KEY"
 
 
@@ -201,6 +202,13 @@ class SuiteConfig(BaseModel):
     data_root: Path = Field(
         ..., description="Root directory for regression and unit-test data."
     )
+    archive_root: Optional[Path] = Field(
+        None,
+        description=(
+            "Optional cold-storage root for archived run directories. Index files "
+            "remain under data_root; only run directories move here."
+        ),
+    )
 
     regtests_repo_root: Path = Field(
         ...,
@@ -375,6 +383,19 @@ class SuiteConfig(BaseModel):
         return self.data_root.expanduser().resolve()
 
     @property
+    def resolved_archive_root(self) -> Optional[Path]:
+        env_override = os.environ.get(ARCHIVE_ROOT_ENV_VAR)
+        if env_override:
+            return Path(env_override).expanduser().resolve()
+        if self.archive_root is None:
+            return None
+        return self.archive_root.expanduser().resolve()
+
+    @property
+    def archive_enabled(self) -> bool:
+        return self.resolved_archive_root is not None
+
+    @property
     def resolved_regtests_repo_root(self) -> Path:
         return self.regtests_repo_root.expanduser().resolve()
 
@@ -457,6 +478,8 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     add_kv("opalx_repo_root", str(data["opalx_repo_root"]))
     add_kv("builds_root", str(data["builds_root"]))
     add_kv("data_root", str(data["data_root"]))
+    if data.get("archive_root"):
+        add_kv("archive_root", str(data["archive_root"]))
     add_kv("regtests_repo_root", str(data["regtests_repo_root"]))
     add_kv("regtests_branch", data.get("regtests_branch", "master"))
     add_kv("regtests_subdir", data.get("regtests_subdir", "RegressionTests"))

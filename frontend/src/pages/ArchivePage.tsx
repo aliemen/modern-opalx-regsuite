@@ -42,18 +42,29 @@ export function ArchivePage() {
     const branch = pendingBranchUnarchive;
     setPendingBranchUnarchive(null);
     if (!branch) return;
-    await mutations.archiveBranch.mutateAsync({ branch, archived: false });
+    const result = await mutations.archiveBranch.mutateAsync({ branch, archived: false });
+    if (result.failed_move.length > 0) {
+      setSkippedToast(
+        `${result.failed_move.length} run${result.failed_move.length !== 1 ? "s" : ""} failed to move`
+      );
+    }
   }
 
   async function confirmBulkUnarchive() {
     setPendingBulkUnarchive(false);
     const cellRefs = selection.selectedCells();
     if (cellRefs.length === 0) return;
-    await mutations.archiveCells.mutateAsync({
+    const results = await mutations.archiveCells.mutateAsync({
       cells: cellRefs,
       archived: false,
     });
     selection.clear();
+    const failed = mutations.collectFailedMove(results);
+    if (failed.length > 0) {
+      setSkippedToast(
+        `${failed.length} run${failed.length !== 1 ? "s" : ""} failed to move`
+      );
+    }
   }
 
   async function confirmBulkHardDelete() {
@@ -65,10 +76,20 @@ export function ArchivePage() {
     });
     selection.clear();
     const skipped = mutations.collectSkippedActive(results);
+    const failed = mutations.collectFailedMove(results);
+    const messages: string[] = [];
     if (skipped.length > 0) {
-      setSkippedToast(
+      messages.push(
         `${skipped.length} run${skipped.length !== 1 ? "s" : ""} skipped (currently running)`
       );
+    }
+    if (failed.length > 0) {
+      messages.push(
+        `${failed.length} run${failed.length !== 1 ? "s" : ""} failed to move`
+      );
+    }
+    if (messages.length > 0) {
+      setSkippedToast(messages.join("; "));
     }
   }
 

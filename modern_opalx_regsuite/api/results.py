@@ -46,6 +46,12 @@ class PaginatedRuns(BaseModel):
     total: int
 
 
+class ArchiveSummary(BaseModel):
+    total: int = 0
+    by_branch: dict[str, int] = {}
+    by_regtest_branch: dict[str, int] = {}
+
+
 class VisibilityBody(BaseModel):
     public: bool
 
@@ -85,6 +91,49 @@ def list_branches(
     """
     return list_visible_branches(
         cfg.resolved_data_root, view, triggered_by=triggered_by
+    )
+
+
+@router.get("/archive-summary", response_model=ArchiveSummary)
+def archive_summary(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> ArchiveSummary:
+    data_root = cfg.resolved_data_root
+    index_root = data_root / "runs-index"
+    if not index_root.is_dir():
+        return ArchiveSummary()
+
+    total = 0
+    by_branch: dict[str, int] = {}
+    by_regtest_branch: dict[str, int] = {}
+    for idx_path in sorted(index_root.glob("*/*.json")):
+        branch = idx_path.parent.name
+        if not branch:
+            continue
+        try:
+            with idx_path.open("r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not bool(entry.get("archived", False)):
+                continue
+            reg_branch = entry.get("regtest_branch") or "(unknown)"
+            if not isinstance(reg_branch, str):
+                reg_branch = "(unknown)"
+            total += 1
+            by_branch[branch] = by_branch.get(branch, 0) + 1
+            by_regtest_branch[reg_branch] = (
+                by_regtest_branch.get(reg_branch, 0) + 1
+            )
+
+    return ArchiveSummary(
+        total=total,
+        by_branch=by_branch,
+        by_regtest_branch=by_regtest_branch,
     )
 
 

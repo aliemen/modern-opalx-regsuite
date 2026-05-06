@@ -46,6 +46,7 @@ export function useArchiveMutations() {
     qc.invalidateQueries({ queryKey: ["branches"] });
     qc.invalidateQueries({ queryKey: ["runs"] });
     qc.invalidateQueries({ queryKey: ["all-runs"] });
+    qc.invalidateQueries({ queryKey: ["archive-summary"] });
     qc.invalidateQueries({ queryKey: ["dashboard-stats"] });
     qc.invalidateQueries({ queryKey: ["trend-runs"] });
   }, [qc]);

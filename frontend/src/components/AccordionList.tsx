@@ -20,6 +20,7 @@ interface AccordionListProps {
   /** If provided, drill-down links from each card append ``?group=<this>``
    *  so the downstream pages can build breadcrumbs back to the same view. */
   fromGroup?: GroupBy;
+  exactRunCounts?: Record<string, number>;
 }
 
 function loadOpenGroups(key: string): Set<string> {
@@ -58,6 +59,7 @@ export function AccordionList({
   selection,
   groupAction,
   fromGroup,
+  exactRunCounts,
 }: AccordionListProps) {
   const storageKey = `${storageNamespace}:${groupBy}`;
 
@@ -118,6 +120,7 @@ export function AccordionList({
           selection={selection}
           headerAction={groupAction?.(group)}
           fromGroup={fromGroup}
+          exactRunCount={exactRunCounts?.[group.label]}
         />
       ))}
     </div>

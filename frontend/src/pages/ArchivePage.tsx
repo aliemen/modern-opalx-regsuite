@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Archive } from "lucide-react";
+import { getArchiveSummary } from "../api/results";
 import { useLatestRuns } from "../hooks/useLatestRuns";
 import { useRunSelection } from "../hooks/useRunSelection";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
@@ -11,6 +13,11 @@ import type { Group, GroupBy } from "../lib/grouping";
 
 export function ArchivePage() {
   const { cells, branches, isLoading } = useLatestRuns("archived");
+  const { data: summary } = useQuery({
+    queryKey: ["archive-summary"],
+    queryFn: getArchiveSummary,
+    refetchInterval: 60_000,
+  });
   const selection = useRunSelection();
   const mutations = useArchiveMutations();
 
@@ -37,6 +44,10 @@ export function ArchivePage() {
   }
 
   const ARCHIVE_GROUP_OPTIONS: GroupBy[] = ["branch", "regtest-branch"];
+  const exactRunCounts =
+    groupBy === "branch"
+      ? summary?.by_branch
+      : summary?.by_regtest_branch;
 
   async function confirmBranchUnarchive() {
     const branch = pendingBranchUnarchive;
@@ -103,6 +114,12 @@ export function ArchivePage() {
         <Archive size={22} className="text-muted" />
         Archive
       </h1>
+      <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm">
+        <span className="text-muted">Total archived runs</span>
+        <span className="text-fg font-semibold tabular-nums">
+          {summary?.total ?? "—"}
+        </span>
+      </div>
       <p className="text-muted text-sm mb-6">
         Archived runs are hidden from the dashboard but still browsable here.
         Unarchive to restore a cell, or hard-delete to permanently remove its
@@ -133,6 +150,7 @@ export function ArchivePage() {
             storageNamespace="opalx-archive-open"
             selection={selection}
             groupAction={groupAction}
+            exactRunCounts={exactRunCounts}
           />
         </>
       )}

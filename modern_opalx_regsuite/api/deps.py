@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -22,10 +23,24 @@ def get_config() -> SuiteConfig:
     return load_config()
 
 
+def user_exists(cfg: SuiteConfig, username: str) -> bool:
+    """Return True if *username* exists in users.json."""
+    path = cfg.resolved_users_file
+    if not path.is_file():
+        return False
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            users = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return False
+    return isinstance(users, dict) and username in users
+
+
 def require_auth(
     credentials: Annotated[
         HTTPAuthorizationCredentials | None, Depends(_bearer)
     ],
+    cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> str:
     """Return the username from a valid JWT Bearer token, or raise 401.
 
@@ -54,7 +69,7 @@ def require_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
     username = verify_access_token(token)
-    if username is None:
+    if username is None or not user_exists(cfg, username):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -126,7 +141,7 @@ def require_scoped(*required_scopes: ApiKeyScope) -> Callable[..., str]:
             return username
         # Fall through: JWT. JWTs implicitly carry every scope.
         username = verify_access_token(token)
-        if username is None:
+        if username is None or not user_exists(cfg, username):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token",

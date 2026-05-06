@@ -227,6 +227,20 @@ def get_all_active_runs() -> list[ActiveRun]:
     ]
 
 
+def user_has_active_run(username: str) -> bool:
+    """Return True if *username* currently owns any running run."""
+    return any(r.triggered_by == username for r in get_all_active_runs())
+
+
+def user_has_queued_run(username: str) -> bool:
+    """Return True if *username* currently owns any queued run."""
+    for mq in _machines.values():
+        for qr in mq.queue:
+            if qr.triggered_by == username:
+                return True
+    return False
+
+
 def get_active_run_by_id(run_id: str) -> Optional[ActiveRun]:
     """Find an active run by *run_id* across all machines."""
     for mq in _machines.values():

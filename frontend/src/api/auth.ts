@@ -34,3 +34,24 @@ export async function changePassword(
     new_password: newPassword,
   });
 }
+
+export interface UsernameChangeResult {
+  old_username: string;
+  new_username: string;
+  run_index_entries_changed: number;
+  run_meta_files_changed: number;
+  user_dir_moved: boolean;
+}
+
+export async function changeUsername(
+  currentPassword: string,
+  newUsername: string,
+  confirmUsername: string
+): Promise<UsernameChangeResult> {
+  const res = await api.post<UsernameChangeResult>("/api/auth/change-username", {
+    current_password: currentPassword,
+    new_username: newUsername,
+    confirm_username: confirmUsername,
+  });
+  return res.data;
+}

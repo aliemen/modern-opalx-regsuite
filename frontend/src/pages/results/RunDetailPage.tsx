@@ -316,6 +316,7 @@ export function RunDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
+      queryClient.invalidateQueries({ queryKey: ["archive-summary"] });
       navigate(`/results/${branch}/${arch}`);
     },
   });
@@ -329,6 +330,7 @@ export function RunDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
+      queryClient.invalidateQueries({ queryKey: ["archive-summary"] });
       if (result.failed_move.length > 0) {
         setArchiveNotice("Could not move this run between storage roots.");
       } else if (result.skipped_active.length > 0) {
@@ -357,6 +359,7 @@ export function RunDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["runs"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
+      queryClient.invalidateQueries({ queryKey: ["archive-summary"] });
       if (result.failed_move.length > 0) {
         setRestoreNotice("Could not move this run from archive storage.");
         setTimeout(() => setRestoreNotice(null), 5000);

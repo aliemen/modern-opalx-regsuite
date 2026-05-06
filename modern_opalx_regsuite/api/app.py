@@ -23,6 +23,7 @@ from .archive import router as archive_router
 from .auth import REFRESH_COOKIE_NAME, TokenResponse, login_limiter
 from .tokens import create_access_token, validate_secret_configuration, verify_refresh_token
 from .branches import router as branches_router
+from .deps import user_exists
 from .public import router as public_router
 from .results import router as results_router
 from .runs import router as runs_router
@@ -324,6 +325,15 @@ def create_app() -> FastAPI:
             )
         username = verify_refresh_token(token)
         if username is None:
+            return JSONResponse(
+                {"detail": "Invalid or expired refresh token."},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = None
+        if cfg is None or not user_exists(cfg, username):
             return JSONResponse(
                 {"detail": "Invalid or expired refresh token."},
                 status_code=status.HTTP_401_UNAUTHORIZED,

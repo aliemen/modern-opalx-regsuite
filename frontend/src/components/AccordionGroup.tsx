@@ -52,6 +52,7 @@ interface AccordionGroupProps {
   /** Passed down to each child card so drill-down links can carry the
    *  dashboard grouping axis as a query param. */
   fromGroup?: GroupBy;
+  exactRunCount?: number;
 }
 
 /** One accordion section: header + grid of LatestCard when open. */
@@ -62,6 +63,7 @@ export function AccordionGroup({
   selection,
   headerAction,
   fromGroup,
+  exactRunCount,
 }: AccordionGroupProps) {
   const counts = summaryCounts(group.cells);
   const allSelected = selection ? selection.areAllSelected(group.cells) : false;
@@ -107,6 +109,11 @@ export function AccordionGroup({
           )}
           <GroupIcon kind={group.kind} />
           <span className="text-fg font-medium text-sm">{group.label}</span>
+          {exactRunCount !== undefined && (
+            <span className="text-accent text-xs ml-1">
+              {exactRunCount} archived run{exactRunCount !== 1 ? "s" : ""}
+            </span>
+          )}
           <span className="text-muted text-xs ml-1">
             {group.cells.length} {group.kind === "arch" ? "branch" : "arch"}
             {group.cells.length !== 1 ? (group.kind === "arch" ? "es" : "s") : ""}

@@ -125,6 +125,17 @@ export interface PaginatedRuns {
   total: number;
 }
 
+export interface ArchiveSummary {
+  total: number;
+  by_branch: Record<string, number>;
+  by_regtest_branch: Record<string, number>;
+}
+
+export async function getArchiveSummary(): Promise<ArchiveSummary> {
+  const res = await api.get<ArchiveSummary>("/api/results/archive-summary");
+  return res.data;
+}
+
 export async function getRuns(
   branch: string,
   arch: string,

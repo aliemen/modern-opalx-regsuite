@@ -11,9 +11,12 @@ from typing import Optional
 
 from ..archive_service import locked_index
 from ..config import Connection, SuiteConfig
+from ..artifacts import write_artifact_manifest
 from ..data_model import (
+    RerunReference,
     RunIndexEntry,
     RunMeta,
+    RunOptions,
     UnitTestsReport,
     RegressionTestsReport,
     branches_index_path,
@@ -40,6 +43,7 @@ def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:
     meta.status = "cancelled"
     meta.finished_at = datetime.now(timezone.utc)
     _write_json(paths.meta_path, meta.model_dump())
+    write_artifact_manifest(paths.root)
     _update_indexes(data_root, meta)
     return meta
 
@@ -74,6 +78,8 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
             regression_broken=meta.regression_broken,
             archived=meta.archived,
             public=meta.public,
+            run_options=meta.run_options,
+            rerun_of=meta.rerun_of,
         )
         entries.append(entry)
         entries.sort(key=lambda e: e.started_at, reverse=True)
@@ -106,6 +112,7 @@ def run_pipeline(
     repo_locks: Optional[dict[str, threading.Lock]] = None,
     triggered_by: str = "",
     public: bool = False,
+    rerun_of: Optional[RerunReference] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -147,6 +154,12 @@ def run_pipeline(
         connection_name=connection_name,
         triggered_by=triggered_by or None,
         public=public,
+        run_options=RunOptions(
+            skip_unit=skip_unit,
+            skip_regression=skip_regression,
+            clean_build=clean_build,
+        ),
+        rerun_of=rerun_of,
     )
     meta.regtest_branch = cfg.regtests_branch
     _write_json(paths.meta_path, meta.model_dump())
@@ -232,6 +245,7 @@ def run_pipeline(
                 meta.status = "failed"
                 meta.finished_at = datetime.now(timezone.utc)
                 _write_json(paths.meta_path, meta.model_dump())
+                write_artifact_manifest(paths.root)
                 _update_indexes(data_root, meta)
                 raise RuntimeError(f"Slurm allocation failed: {exc}") from exc
 
@@ -357,6 +371,7 @@ def run_pipeline(
             meta.finished_at = datetime.now(timezone.utc)
             _phase(paths.pipeline_log_path, "done status=failed")
             _write_json(paths.meta_path, meta.model_dump())
+            write_artifact_manifest(paths.root)
             _update_indexes(data_root, meta)
             return meta
 
@@ -559,6 +574,7 @@ def run_pipeline(
         meta.finished_at = datetime.now(timezone.utc)
         _phase(paths.pipeline_log_path, f"done status={meta.status}")
         _write_json(paths.meta_path, meta.model_dump())
+        write_artifact_manifest(paths.root)
         _update_indexes(data_root, meta)
         return meta
 

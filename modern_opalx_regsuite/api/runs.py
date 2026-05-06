@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..config import SuiteConfig
+from ..data_model import RerunReference
 from ..user_store import get_connection
 from .deps import get_config, require_auth
 from .runs_core import start_run
@@ -40,6 +41,8 @@ class TriggerRequest(BaseModel):
     # uses auth_method="interactive".  Held in memory only; never persisted.
     gateway_password: Optional[str] = None
     gateway_otp: Optional[str] = None
+    # Optional source run pointer for "Run again" workflows.
+    rerun_of: Optional[RerunReference] = None
 
 
 class TriggerResponse(BaseModel):
@@ -200,6 +203,7 @@ async def trigger_run(
         skip_regression=body.skip_regression,
         clean_build=body.clean_build,
         connection_name=body.connection_name,
+        rerun_of=body.rerun_of,
         gateway_password=body.gateway_password,
         gateway_otp=body.gateway_otp,
     )

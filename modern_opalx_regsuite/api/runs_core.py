@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import Connection, SuiteConfig
+from ..data_model import RerunReference
 from ..user_store import get_connection, resolve_connection_key_paths
 from .coordinator import get_coordinator
 from .state import (
@@ -110,6 +111,7 @@ async def start_run(
     connection_name: Optional[str],
     public: bool = False,
     clean_build: bool = False,
+    rerun_of: Optional[RerunReference] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> StartRunResult:
@@ -208,6 +210,7 @@ async def start_run(
         log_path=log_path,
         triggered_by=triggered_by,
         public=public,
+        rerun_of=rerun_of,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -252,6 +255,7 @@ async def start_run(
         connection_name=resolved_conn_name,
         triggered_by=triggered_by,
         public=public,
+        rerun_of=rerun_of,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,

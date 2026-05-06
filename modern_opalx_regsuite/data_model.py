@@ -113,6 +113,22 @@ class RegressionTestsReport(BaseModel):
         return sum(1 for m in self.all_metrics if m.state.lower() == "crashed")
 
 
+class RunOptions(BaseModel):
+    """User-visible switches that affect what the runner executes."""
+
+    skip_unit: bool = False
+    skip_regression: bool = False
+    clean_build: bool = False
+
+
+class RerunReference(BaseModel):
+    """Pointer to the source run when a run is created via "Run again"."""
+
+    branch: str
+    arch: str
+    run_id: str
+
+
 class RunMeta(BaseModel):
     """Per-run metadata stored at ``runs/<branch>/<arch>/<run_id>/run-meta.json``.
 
@@ -164,6 +180,13 @@ class RunMeta(BaseModel):
     # public=True.
     public: bool = False
 
+    # Persisted execution options. Historical runs default to all False so
+    # "Run again" can still prefill a sensible request from legacy metadata.
+    run_options: RunOptions = Field(default_factory=RunOptions)
+
+    # Optional source run when this run was triggered from an existing result.
+    rerun_of: Optional[RerunReference] = None
+
     @property
     def duration_seconds(self) -> Optional[float]:
         if self.finished_at is None:
@@ -193,6 +216,8 @@ class RunIndexEntry(BaseModel):
     regression_broken: int = 0
     archived: bool = False
     public: bool = False
+    run_options: RunOptions = Field(default_factory=RunOptions)
+    rerun_of: Optional[RerunReference] = None
 
 
 class BranchIndex(BaseModel):

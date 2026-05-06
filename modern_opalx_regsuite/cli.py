@@ -10,6 +10,7 @@ import typer
 
 from . import config as config_mod
 from . import archive_service
+from .artifacts import check_run_integrity, write_artifact_manifest
 from .config import SuiteConfig
 from .data_model import (
     RunIndexEntry,
@@ -31,6 +32,50 @@ def _resolve_path(p: str) -> Path:
 
 def _load_config_option(config_path: Optional[Path]) -> SuiteConfig:
     return config_mod.load_config(config_path)
+
+
+def _iter_index_entries(
+    cfg: SuiteConfig,
+    *,
+    branch: Optional[str] = None,
+    arch: Optional[str] = None,
+    run_id: Optional[str] = None,
+) -> list[tuple[str, str, dict]]:
+    data_root = cfg.resolved_data_root
+    branches_path = branches_index_path(data_root)
+    if not branches_path.is_file():
+        return []
+    try:
+        with branches_path.open("r", encoding="utf-8") as f:
+            branches = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    out: list[tuple[str, str, dict]] = []
+    for current_branch, archs in branches.items():
+        if branch is not None and current_branch != branch:
+            continue
+        if not isinstance(archs, list):
+            continue
+        for current_arch in archs:
+            if arch is not None and current_arch != arch:
+                continue
+            idx_path = runs_index_path(data_root, current_branch, current_arch)
+            if not idx_path.is_file():
+                continue
+            try:
+                with idx_path.open("r", encoding="utf-8") as f:
+                    entries = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if run_id is not None and entry.get("run_id") != run_id:
+                    continue
+                out.append((current_branch, current_arch, entry))
+    return out
 
 
 @app.command()
@@ -492,6 +537,94 @@ def patch_visibility(
         typer.echo("Not found in index: " + ", ".join(sorted(result.not_found)))
 
 
+@app.command("check-artifacts")
+def check_artifacts(
+    branch: Optional[str] = typer.Option(None, "--branch", "-b"),
+    arch: Optional[str] = typer.Option(None, "--arch", "-a"),
+    run_id: Optional[str] = typer.Option(None, "--run-id"),
+    as_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON."),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Check run artifacts against JSON reports and artifact manifests."""
+    cfg = _load_config_option(config)
+    results = []
+    for current_branch, current_arch, entry in _iter_index_entries(
+        cfg, branch=branch, arch=arch, run_id=run_id
+    ):
+        rid = entry.get("run_id")
+        if not isinstance(rid, str):
+            continue
+        run_path = resolve_run_dir(
+            cfg.resolved_data_root,
+            cfg.resolved_archive_root,
+            current_branch,
+            current_arch,
+            rid,
+            bool(entry.get("archived", False)),
+        )
+        report = check_run_integrity(run_path)
+        results.append(
+            {
+                "branch": current_branch,
+                "arch": current_arch,
+                "run_id": rid,
+                "status": report.status,
+                "issues": [i.model_dump() for i in report.issues],
+            }
+        )
+
+    if as_json:
+        typer.echo(json.dumps(results, indent=2, default=str))
+    else:
+        for item in results:
+            typer.echo(
+                f"{item['status']:7} {item['branch']}/{item['arch']}/{item['run_id']} "
+                f"({len(item['issues'])} issue(s))"
+            )
+            for issue in item["issues"]:
+                path = f" {issue['path']}:" if issue.get("path") else ""
+                typer.echo(
+                    f"  {issue['severity']} {issue['code']}:{path} {issue['message']}"
+                )
+    if any(item["status"] == "error" for item in results):
+        raise typer.Exit(code=1)
+
+
+@app.command("rebuild-artifact-manifests")
+def rebuild_artifact_manifests(
+    branch: Optional[str] = typer.Option(None, "--branch", "-b"),
+    arch: Optional[str] = typer.Option(None, "--arch", "-a"),
+    run_id: Optional[str] = typer.Option(None, "--run-id"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Generate artifact-manifest.json for indexed runs."""
+    cfg = _load_config_option(config)
+    written = 0
+    for current_branch, current_arch, entry in _iter_index_entries(
+        cfg, branch=branch, arch=arch, run_id=run_id
+    ):
+        rid = entry.get("run_id")
+        if not isinstance(rid, str):
+            continue
+        run_path = resolve_run_dir(
+            cfg.resolved_data_root,
+            cfg.resolved_archive_root,
+            current_branch,
+            current_arch,
+            rid,
+            bool(entry.get("archived", False)),
+        )
+        if not run_path.is_dir():
+            typer.echo(f"skip missing {current_branch}/{current_arch}/{rid}")
+            continue
+        manifest = write_artifact_manifest(run_path)
+        written += 1
+        typer.echo(
+            f"wrote {current_branch}/{current_arch}/{rid} ({len(manifest.files)} files)"
+        )
+    typer.echo(f"Artifact manifests written: {written}")
+
+
 @app.command()
 def serve(
     host: str = typer.Option(None, "--host", help="Bind host (overrides config)."),
@@ -700,6 +833,8 @@ def rebuild_indexes(
                 regression_broken=m.regression_broken,
                 archived=archived,
                 public=m.public,
+                run_options=m.run_options,
+                rerun_of=m.rerun_of,
             )
             for m, archived in metas
         ]

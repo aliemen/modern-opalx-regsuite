@@ -31,6 +31,7 @@ from ..data_model import (
     run_dir,
     runs_index_path,
 )
+from ..flakiness import FlakinessReport, compute_flakiness
 from .deps import get_config, require_auth
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -452,4 +453,24 @@ def users_leaderboard(
     sorted_users = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return UsersLeaderboard(
         users=[UserRunCount(username=u, count=c) for u, c in sorted_users]
+    )
+
+
+@router.get("/flakiness", response_model=FlakinessReport)
+def flakiness(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+    branch: str = Query("master"),
+    arch: str = Query("cpu-serial"),
+    regtests_branch: str = Query("master"),
+    limit: int = Query(20, ge=3, le=100),
+    min_observations: int = Query(3, ge=2, le=20),
+) -> FlakinessReport:
+    return compute_flakiness(
+        cfg.resolved_data_root,
+        branch,
+        arch,
+        regtests_branch,
+        limit=limit,
+        min_observations=min_observations,
     )

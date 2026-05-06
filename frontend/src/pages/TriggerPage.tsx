@@ -11,6 +11,13 @@ import {
 } from "../api/runs";
 import { listConnections, LOCAL_CONNECTION } from "../api/connections";
 
+const MAX_BRANCH_LABEL_CHARS = 56;
+
+function truncateBranchLabel(branch: string): string {
+  if (branch.length <= MAX_BRANCH_LABEL_CHARS) return branch;
+  return `${branch.slice(0, MAX_BRANCH_LABEL_CHARS - 3)}...`;
+}
+
 export function TriggerPage() {
   const navigate = useNavigate();
 
@@ -121,17 +128,20 @@ export function TriggerPage() {
             <select
               value={opalxBranch}
               onChange={(e) => setOpalxBranch(e.target.value)}
-              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+              title={opalxBranch}
+              className="flex-1 min-w-0 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
               disabled={loadingOpalx}
             >
               {(opalxBranches ?? ["master"]).map((b) => (
-                <option key={b}>{b}</option>
+                <option key={b} value={b} title={b}>
+                  {truncateBranchLabel(b)}
+                </option>
               ))}
             </select>
             <button
               onClick={() => refetchOpalx()}
               disabled={fetchingOpalx}
-              className="p-2 text-muted hover:text-fg border border-border rounded-md transition disabled:opacity-50"
+              className="shrink-0 p-2 text-muted hover:text-fg border border-border rounded-md transition disabled:opacity-50"
               title="Refresh branches"
             >
               <RefreshCw size={15} className={fetchingOpalx ? "animate-spin" : ""} />
@@ -146,17 +156,20 @@ export function TriggerPage() {
             <select
               value={regtestsBranch}
               onChange={(e) => setRegtestsBranch(e.target.value)}
-              className="flex-1 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+              title={regtestsBranch}
+              className="flex-1 min-w-0 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
               disabled={loadingRegtests}
             >
               {(regtestsBranches ?? ["master"]).map((b) => (
-                <option key={b}>{b}</option>
+                <option key={b} value={b} title={b}>
+                  {truncateBranchLabel(b)}
+                </option>
               ))}
             </select>
             <button
               onClick={() => refetchRegtests()}
               disabled={fetchingRegtests}
-              className="p-2 text-muted hover:text-fg border border-border rounded-md transition disabled:opacity-50"
+              className="shrink-0 p-2 text-muted hover:text-fg border border-border rounded-md transition disabled:opacity-50"
               title="Refresh branches"
             >
               <RefreshCw size={15} className={fetchingRegtests ? "animate-spin" : ""} />

@@ -119,6 +119,7 @@ class RunOptions(BaseModel):
     skip_unit: bool = False
     skip_regression: bool = False
     clean_build: bool = False
+    custom_cmake_args: List[str] = Field(default_factory=list)
 
 
 class RerunReference(BaseModel):

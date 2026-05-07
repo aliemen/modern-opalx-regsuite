@@ -45,6 +45,7 @@ class ActiveRun:
     # from the schedule's public option; HTTP trigger leaves it False.
     public: bool = False
     rerun_of: Optional["RerunReference"] = None
+    custom_cmake_args: list[str] = field(default_factory=list)
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -71,6 +72,7 @@ class QueuedRun:
     triggered_by: str = ""  # username that triggered the run
     public: bool = False
     rerun_of: Optional["RerunReference"] = None
+    custom_cmake_args: list[str] = field(default_factory=list)
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -139,6 +141,7 @@ async def acquire_run_slot(
     triggered_by: str = "",
     public: bool = False,
     rerun_of: Optional["RerunReference"] = None,
+    custom_cmake_args: Optional[list[str]] = None,
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -164,6 +167,7 @@ async def acquire_run_slot(
             triggered_by=triggered_by,
             public=public,
             rerun_of=rerun_of,
+            custom_cmake_args=list(custom_cmake_args or []),
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

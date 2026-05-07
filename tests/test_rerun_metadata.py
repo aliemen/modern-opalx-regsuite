@@ -17,6 +17,7 @@ def test_legacy_run_meta_defaults_run_options() -> None:
     assert meta.run_options.skip_unit is False
     assert meta.run_options.skip_regression is False
     assert meta.run_options.clean_build is False
+    assert meta.run_options.custom_cmake_args == []
     assert meta.rerun_of is None
 
 
@@ -33,6 +34,7 @@ def test_run_index_entry_accepts_rerun_reference() -> None:
                 "skip_unit": True,
                 "skip_regression": False,
                 "clean_build": True,
+                "custom_cmake_args": ["-DIPPL_GIT_TAG=master"],
             },
             "rerun_of": {
                 "branch": "master",
@@ -43,5 +45,6 @@ def test_run_index_entry_accepts_rerun_reference() -> None:
     )
     assert entry.run_options.skip_unit is True
     assert entry.run_options.clean_build is True
+    assert entry.run_options.custom_cmake_args == ["-DIPPL_GIT_TAG=master"]
     assert entry.rerun_of is not None
     assert entry.rerun_of.run_id == "source"

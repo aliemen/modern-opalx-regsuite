@@ -72,6 +72,7 @@ class RunCoordinator:
         skip_unit: bool,
         skip_regression: bool,
         clean_build: bool = False,
+        custom_cmake_args: Optional[list[str]] = None,
     ) -> None:
         """Execute the pipeline in the dedicated thread pool.
 
@@ -90,6 +91,7 @@ class RunCoordinator:
                 skip_unit=skip_unit,
                 skip_regression=skip_regression,
                 clean_build=clean_build,
+                custom_cmake_args=custom_cmake_args or active.custom_cmake_args,
                 cancel_event=active.cancel_event,
                 connection=active.connection,
                 target_key_path=active.target_key_path,
@@ -164,6 +166,7 @@ class RunCoordinator:
             triggered_by=queued.triggered_by,
             public=queued.public,
             rerun_of=queued.rerun_of,
+            custom_cmake_args=queued.custom_cmake_args,
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,
@@ -179,6 +182,7 @@ class RunCoordinator:
                     queued.skip_unit,
                     queued.skip_regression,
                     queued.clean_build,
+                    queued.custom_cmake_args,
                 )
             )
 

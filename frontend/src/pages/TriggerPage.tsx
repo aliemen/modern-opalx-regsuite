@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable react-hooks/set-state-in-effect, react-refresh/only-export-components */
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ import {
 import { listConnections, LOCAL_CONNECTION } from "../api/connections";
 
 const MAX_BRANCH_LABEL_CHARS = 56;
+type TriggerTab = "basic" | "advanced";
 
 function truncateBranchLabel(branch: string): string {
   if (branch.length <= MAX_BRANCH_LABEL_CHARS) return branch;
@@ -22,6 +23,13 @@ function truncateBranchLabel(branch: string): string {
 function fallbackBranch(branches: string[] | undefined): string {
   if (!branches || branches.length === 0) return "master";
   return branches.includes("master") ? "master" : branches[0];
+}
+
+export function parseCustomCmakeArgs(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
 }
 
 export function TriggerPage() {
@@ -45,6 +53,8 @@ export function TriggerPage() {
   const [cleanBuild, setCleanBuild] = useState(
     searchParams.get("clean_build") === "true"
   );
+  const [activeTab, setActiveTab] = useState<TriggerTab>("basic");
+  const [customCmakeText, setCustomCmakeText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [queuedInfo, setQueuedInfo] = useState<{ runId: string; position: number } | null>(null);
 
@@ -93,6 +103,9 @@ export function TriggerPage() {
     connectionName !== LOCAL_CONNECTION &&
     !loadingConnections &&
     selectedConnection === null;
+  const customCmakeArgs = parseCustomCmakeArgs(customCmakeText);
+  const hasCustomCmakeArgs = customCmakeArgs.length > 0;
+  const effectiveCleanBuild = cleanBuild || hasCustomCmakeArgs;
   const needsInteractiveCredentials =
     selectedConnection !== null &&
     selectedConnection.gateway != null &&
@@ -125,7 +138,8 @@ export function TriggerPage() {
         regtests_branch: regtestsBranch,
         skip_unit: skipUnit,
         skip_regression: skipRegression,
-        clean_build: cleanBuild,
+        clean_build: effectiveCleanBuild,
+        custom_cmake_args: customCmakeArgs,
         connection_name: connectionName,
       };
       const rerunBranch = searchParams.get("rerun_branch");
@@ -167,6 +181,33 @@ export function TriggerPage() {
       <h1 className="text-fg text-2xl font-semibold mb-6">Start a Run</h1>
 
       <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-5 sm:p-6">
+        <div className="grid grid-cols-2 rounded-md border border-border bg-bg p-1 text-sm">
+          <button
+            type="button"
+            onClick={() => setActiveTab("basic")}
+            className={`rounded px-3 py-1.5 transition ${
+              activeTab === "basic"
+                ? "bg-border/70 text-fg"
+                : "text-muted hover:text-fg"
+            }`}
+          >
+            Basic
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("advanced")}
+            className={`rounded px-3 py-1.5 transition ${
+              activeTab === "advanced"
+                ? "bg-border/70 text-fg"
+                : "text-muted hover:text-fg"
+            }`}
+          >
+            Advanced
+          </button>
+        </div>
+
+        {activeTab === "basic" ? (
+          <>
         {/* OPALX branch */}
         <div>
           <label className="block text-sm text-muted mb-1">OPALX branch</label>
@@ -356,13 +397,52 @@ export function TriggerPage() {
           >
             <input
               type="checkbox"
-              checked={cleanBuild}
+              checked={effectiveCleanBuild}
               onChange={(e) => setCleanBuild(e.target.checked)}
+              disabled={hasCustomCmakeArgs}
               className="accent-accent"
             />
             Clean build
           </label>
+          {hasCustomCmakeArgs && (
+            <span className="text-xs text-accent">
+              Required by custom CMake args.
+            </span>
+          )}
         </div>
+          </>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div>
+              <label htmlFor="custom-cmake-args" className="block text-sm text-muted mb-1">
+                Custom CMake args
+              </label>
+              <textarea
+                id="custom-cmake-args"
+                value={customCmakeText}
+                onChange={(e) => setCustomCmakeText(e.target.value)}
+                rows={8}
+                spellCheck={false}
+                placeholder={[
+                  "-DIPPL_GIT_TAG=master",
+                  "-DHeffte_VERSION=git.v2.4.1",
+                  "-DKokkos_VERSION=git.4.7.01",
+                ].join("\n")}
+                className="w-full resize-y bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm font-mono focus:outline-none focus:border-accent"
+              />
+              <p className="text-muted text-xs mt-1">
+                One CMake argument per line. Blank lines and lines starting with
+                # are ignored. These args override matching run-config values.
+              </p>
+            </div>
+            {hasCustomCmakeArgs && (
+              <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-accent">
+                This run will use a clean build because custom CMake args are
+                set.
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <p className="text-failed text-sm">{error}</p>}
 

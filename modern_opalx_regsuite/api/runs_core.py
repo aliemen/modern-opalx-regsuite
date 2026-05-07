@@ -111,6 +111,7 @@ async def start_run(
     connection_name: Optional[str],
     public: bool = False,
     clean_build: bool = False,
+    custom_cmake_args: Optional[list[str]] = None,
     rerun_of: Optional[RerunReference] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
@@ -144,6 +145,12 @@ async def start_run(
     """
     data_root = cfg.resolved_data_root
     log_path = data_root / "runs" / branch / arch / run_id / "logs" / "pipeline.log"
+    effective_custom_cmake_args = [
+        arg.strip()
+        for arg in (custom_cmake_args or [])
+        if arg.strip() and not arg.strip().startswith("#")
+    ]
+    effective_clean_build = clean_build or bool(effective_custom_cmake_args)
 
     # Override regtests_branch if provided (model_copy keeps caller's cfg intact).
     effective_cfg = cfg
@@ -211,6 +218,7 @@ async def start_run(
         triggered_by=triggered_by,
         public=public,
         rerun_of=rerun_of,
+        custom_cmake_args=effective_custom_cmake_args,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -221,7 +229,12 @@ async def start_run(
         coordinator = get_coordinator()
         asyncio.create_task(
             coordinator.run_pipeline_async(
-                effective_cfg, active, skip_unit, skip_regression, clean_build
+                effective_cfg,
+                active,
+                skip_unit,
+                skip_regression,
+                effective_clean_build,
+                effective_custom_cmake_args,
             )
         )
         return StartRunResult(
@@ -256,6 +269,7 @@ async def start_run(
         triggered_by=triggered_by,
         public=public,
         rerun_of=rerun_of,
+        custom_cmake_args=effective_custom_cmake_args,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -264,7 +278,7 @@ async def start_run(
         cfg=effective_cfg,
         skip_unit=skip_unit,
         skip_regression=skip_regression,
-        clean_build=clean_build,
+        clean_build=effective_clean_build,
         log_path=log_path,
     )
     position = await enqueue_run(queued)

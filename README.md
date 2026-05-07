@@ -9,6 +9,7 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 - **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), results browsing, dashboard statistics, and live queue display.
 - **Test catalog**: Browse the local `regression-tests-x` clone by branch without checking it out. The catalog shows enabled/disabled tests, `.rt` metric checks, reference data, multi-container references, last status, and flaky suspects.
 - **Re-run from results**: A run detail page can prefill Start a Run with the original branch, tests branch, architecture, connection, and run options.
+- **Advanced CMake overrides**: Manual triggers can add one-off CMake arguments such as `-DIPPL_GIT_TAG=master`; custom args force a clean build and override matching configured `-D` values.
 - **Artifact integrity checks**: Runs carry an `artifact-manifest.json`; CLI and API checks verify required JSON, logs, plots, hashes, and referenced artifacts.
 - **Flakiness signals**: Dashboard and catalog surfaces flag simulations with mixed pass/fail outcomes in the recent history for the same OPALX branch, regression-tests branch, and architecture.
 - **Per-machine run queuing**: Runs are queued per machine instead of rejected. Local and remote machines can run in parallel; only one run per physical host at a time.
@@ -214,11 +215,19 @@ chain (gateway included) and run `whoami` as a smoke test.
 
 Go to **Start a Run**, pick:
 - **OPALX branch**
+- **Regression-tests branch**
 - **Run config** (the architecture / build recipe from `config.toml`)
 - **Connection** (your named connection, or `Local`)
 
 The combination is independent: the same arch can be run on Local *or* on
 any remote target, depending on which connection you pick.
+
+The **Advanced** tab accepts one custom CMake argument per line for manual
+runs. Empty lines and lines starting with `#` are ignored. Custom `-DKEY=...`
+or `-DKEY:type=...` values replace matching values from `cmake_args` or the
+selected `[[arch_configs]]`; other custom arguments are appended. Any custom
+CMake argument forces a clean build so dependency tag changes cannot reuse a
+stale build tree.
 
 #### Equivalent SSH config
 

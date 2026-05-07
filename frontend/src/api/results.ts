@@ -101,6 +101,7 @@ export interface RunOptions {
   skip_unit: boolean;
   skip_regression: boolean;
   clean_build: boolean;
+  custom_cmake_args: string[];
 }
 
 export interface RerunReference {

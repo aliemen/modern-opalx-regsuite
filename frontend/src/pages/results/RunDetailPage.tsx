@@ -660,6 +660,14 @@ export function RunDetailPage() {
             </p>
           </div>
         </div>
+        {(meta.run_options?.custom_cmake_args?.length ?? 0) > 0 && (
+          <div className="space-y-1 sm:col-span-2">
+            <p className="text-muted text-xs">Custom CMake Args</p>
+            <pre className="rounded-md border border-border bg-bg px-3 py-2 text-xs text-fg overflow-x-auto">
+              {meta.run_options.custom_cmake_args.join("\n")}
+            </pre>
+          </div>
+        )}
         {!isColdStored && (
           <div className="sm:col-span-2">
             <a

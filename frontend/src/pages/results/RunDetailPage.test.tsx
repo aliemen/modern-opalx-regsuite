@@ -73,6 +73,7 @@ describe("RunDetailPage", () => {
           skip_unit: true,
           skip_regression: false,
           clean_build: true,
+          custom_cmake_args: ["-DIPPL_GIT_TAG=master"],
         },
         rerun_of: null,
       },
@@ -96,5 +97,8 @@ describe("RunDetailPage", () => {
     expect(href).toContain("skip_unit=true");
     expect(href).toContain("clean_build=true");
     expect(href).toContain("rerun_id=source");
+    expect(href).not.toContain("custom_cmake_args");
+    expect(await screen.findByText("Custom CMake Args")).toBeInTheDocument();
+    expect(screen.getByText("-DIPPL_GIT_TAG=master")).toBeInTheDocument();
   });
 });

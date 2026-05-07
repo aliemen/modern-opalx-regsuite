@@ -23,6 +23,7 @@ export interface TriggerRequest {
    * reconfigure + recompile; leaves source checkouts and run data intact.
    */
   clean_build?: boolean;
+  custom_cmake_args?: string[];
   /**
    * Name of the per-user Connection to run on. Use `null` or `"local"` for
    * local execution. Connections are managed in Settings.

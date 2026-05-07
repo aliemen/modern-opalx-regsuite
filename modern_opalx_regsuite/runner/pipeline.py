@@ -37,6 +37,57 @@ from .parsing.unit import _parse_unit_output
 from .regression_runner import _run_regression_suite, _run_regression_suite_remote
 
 
+def _cmake_define_key(arg: str) -> Optional[str]:
+    """Return the CMake ``-D`` variable key for ``-DKEY=`` or ``-DKEY:type=``."""
+    if not arg.startswith("-D"):
+        return None
+    body = arg[2:]
+    if "=" not in body:
+        return None
+    key_part = body.split("=", 1)[0]
+    key = key_part.split(":", 1)[0]
+    return key or None
+
+
+def normalize_custom_cmake_args(args: Optional[list[str]]) -> list[str]:
+    """Trim custom CMake args and drop blank/comment lines from the trigger UI."""
+    return [
+        arg.strip()
+        for arg in (args or [])
+        if arg.strip() and not arg.strip().startswith("#")
+    ]
+
+
+def merge_cmake_args(base_args: list[str], custom_args: list[str]) -> list[str]:
+    """Merge run-level custom CMake args over configured base args.
+
+    Custom ``-DKEY=...`` arguments replace configured ``-DKEY=...`` or
+    ``-DKEY:type=...`` arguments for the same key. Duplicate custom keys keep
+    only the last occurrence. Non-``-D`` custom args are appended as-is.
+    """
+    custom_args = normalize_custom_cmake_args(custom_args)
+    last_custom_index_by_key: dict[str, int] = {}
+    for idx, arg in enumerate(custom_args):
+        key = _cmake_define_key(arg)
+        if key is not None:
+            last_custom_index_by_key[key] = idx
+
+    custom_keys = set(last_custom_index_by_key)
+    merged = [
+        arg for arg in base_args if (_cmake_define_key(arg) not in custom_keys)
+    ]
+    for idx, arg in enumerate(custom_args):
+        key = _cmake_define_key(arg)
+        if key is None or last_custom_index_by_key[key] == idx:
+            merged.append(arg)
+    return merged
+
+
+def build_cmake_command(cmake_args: list[str], source_dir: str) -> str:
+    """Build a shell-safe CMake command string for local and remote executors."""
+    return " ".join(["cmake", *(shlex.quote(a) for a in cmake_args), shlex.quote(source_dir)])
+
+
 def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:
     """Finalise a cancelled run and persist it."""
     _append_pipeline_line(paths.pipeline_log_path, "== PHASE: done status=cancelled ==")
@@ -113,6 +164,7 @@ def run_pipeline(
     triggered_by: str = "",
     public: bool = False,
     rerun_of: Optional[RerunReference] = None,
+    custom_cmake_args: Optional[list[str]] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -142,6 +194,8 @@ def run_pipeline(
 
     is_remote = connection is not None
     connection_name = connection.name if connection is not None else "local"
+    effective_custom_cmake_args = normalize_custom_cmake_args(custom_cmake_args)
+    effective_clean_build = clean_build or bool(effective_custom_cmake_args)
 
     # SENSITIVE-DATA RULE: only ``connection_name`` (user-chosen) lands in
     # run-meta.json. Never write the underlying SSH host/user/work_dir here.
@@ -157,7 +211,8 @@ def run_pipeline(
         run_options=RunOptions(
             skip_unit=skip_unit,
             skip_regression=skip_regression,
-            clean_build=clean_build,
+            clean_build=effective_clean_build,
+            custom_cmake_args=effective_custom_cmake_args,
         ),
         rerun_of=rerun_of,
     )
@@ -166,7 +221,8 @@ def run_pipeline(
 
     # Resolve arch-specific overrides.
     ac = cfg.get_arch_config(arch)
-    effective_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
+    base_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
+    effective_cmake_args = merge_cmake_args(base_cmake_args, effective_custom_cmake_args)
     build_cmd = f"make -j{ac.build_jobs}"
 
     # ── Remote executor setup ────────────────────────────────────────────────
@@ -378,7 +434,7 @@ def run_pipeline(
         # ── Clean build (optional) ───────────────────────────────────────────
         # User-requested full reconfigure: wipe the per-branch/arch build dir
         # before cmake. Source checkouts and run data are untouched.
-        if clean_build:
+        if effective_clean_build:
             if is_remote and remote is not None:
                 _append_pipeline_line(
                     paths.pipeline_log_path,
@@ -400,8 +456,8 @@ def run_pipeline(
             # NB: cmake_cmd contains the remote work_dir; pass it to the
             # executor (which never logs the wrapped command), and only log a
             # sanitized line under data_root.
-            cmake_cmd = " ".join(
-                ["cmake", *effective_cmake_args, shlex.quote(f"{remote_base}/opalx-src")]
+            cmake_cmd = build_cmake_command(
+                effective_cmake_args, f"{remote_base}/opalx-src"
             )
             _append_pipeline_line(
                 paths.pipeline_log_path,
@@ -414,7 +470,7 @@ def run_pipeline(
                 cancel_event=cancel_event,
             )
         else:
-            cmake_cmd = " ".join(["cmake", *effective_cmake_args, str(opalx_repo)])
+            cmake_cmd = build_cmake_command(effective_cmake_args, str(opalx_repo))
             _append_pipeline_line(
                 paths.pipeline_log_path, f"Configuring build: {cmake_cmd}"
             )

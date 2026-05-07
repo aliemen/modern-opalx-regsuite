@@ -74,13 +74,13 @@ function LastRunTile() {
  * endpoint via React Query so the cards are independently shippable and
  * any single-card failure doesn't take down the whole panel.
  */
-export function StatsPanel() {
+export function StatsPanel({ flakinessArchs }: { flakinessArchs?: string[] }) {
   return (
     <div className="space-y-4">
       <LastRunTile />
       <LatestMasterMatrix />
       <NewlyBrokenCard />
-      <FlakinessCard />
+      <FlakinessCard archs={flakinessArchs} />
       <SuiteDurationCard />
       <ActivitySparkline />
       <UsersLeaderboardCard />

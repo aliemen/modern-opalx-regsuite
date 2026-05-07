@@ -26,12 +26,14 @@ class CatalogTestEntry(BaseModel):
     multi_container_refs: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     last_status: Optional[str] = None
+    last_run_id: Optional[str] = None
     flaky: bool = False
 
 
 class CatalogReport(BaseModel):
     branch: str
     commit: Optional[str] = None
+    commit_url: Optional[str] = None
     tests: list[CatalogTestEntry] = Field(default_factory=list)
 
 
@@ -76,6 +78,28 @@ def _show_text(repo: Path, ref: str, path: str) -> Optional[str]:
     return result.stdout
 
 
+def _repo_remote_url(repo: Path) -> Optional[str]:
+    result = _git(repo, ["remote", "get-url", "origin"], timeout=5)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def github_commit_url(repo_url: Optional[str], commit: Optional[str]) -> Optional[str]:
+    if not repo_url or not commit:
+        return None
+    url = repo_url.strip()
+    if url.startswith("git@github.com:"):
+        url = "https://github.com/" + url[len("git@github.com:") :]
+    elif url.startswith("ssh://git@github.com/"):
+        url = "https://github.com/" + url[len("ssh://git@github.com/") :]
+    if url.endswith(".git"):
+        url = url[:-4]
+    if not url.startswith("https://github.com/"):
+        return None
+    return f"{url}/commit/{commit}"
+
+
 def _parse_rt_text(text: Optional[str]) -> tuple[Optional[str], list[CatalogMetricCheck]]:
     if not text:
         return None, []
@@ -108,7 +132,9 @@ def list_catalog_tests(
     *,
     include_disabled: bool = True,
     last_status_by_name: Optional[dict[str, str]] = None,
+    last_run_by_name: Optional[dict[str, str]] = None,
     flaky_names: Optional[set[str]] = None,
+    repo_url: Optional[str] = None,
 ) -> CatalogReport:
     ref = resolve_git_ref(repo, branch)
     if ref is None:
@@ -116,6 +142,7 @@ def list_catalog_tests(
 
     commit_result = _git(repo, ["rev-parse", ref])
     commit = commit_result.stdout.strip() if commit_result.returncode == 0 else None
+    commit_url = github_commit_url(repo_url or _repo_remote_url(repo), commit)
     paths = _list_tree(repo, ref)
     roots: dict[str, list[str]] = {}
     for path in paths:
@@ -170,8 +197,9 @@ def list_catalog_tests(
                 multi_container_refs=multi_refs,
                 warnings=warnings,
                 last_status=(last_status_by_name or {}).get(name),
+                last_run_id=(last_run_by_name or {}).get(name),
                 flaky=name in (flaky_names or set()),
             )
         )
 
-    return CatalogReport(branch=branch, commit=commit, tests=out)
+    return CatalogReport(branch=branch, commit=commit, commit_url=commit_url, tests=out)

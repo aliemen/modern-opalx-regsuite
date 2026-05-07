@@ -1,4 +1,5 @@
-import { useState } from "react";
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Play, Info, ShieldAlert } from "lucide-react";
@@ -16,6 +17,11 @@ const MAX_BRANCH_LABEL_CHARS = 56;
 function truncateBranchLabel(branch: string): string {
   if (branch.length <= MAX_BRANCH_LABEL_CHARS) return branch;
   return `${branch.slice(0, MAX_BRANCH_LABEL_CHARS - 3)}...`;
+}
+
+function fallbackBranch(branches: string[] | undefined): string {
+  if (!branches || branches.length === 0) return "master";
+  return branches.includes("master") ? "master" : branches[0];
 }
 
 export function TriggerPage() {
@@ -69,6 +75,16 @@ export function TriggerPage() {
     queryKey: ["connections"],
     queryFn: listConnections,
   });
+
+  useEffect(() => {
+    if (!opalxBranches || opalxBranches.includes(opalxBranch)) return;
+    setOpalxBranch(fallbackBranch(opalxBranches));
+  }, [opalxBranches, opalxBranch]);
+
+  useEffect(() => {
+    if (!regtestsBranches || regtestsBranches.includes(regtestsBranch)) return;
+    setRegtestsBranch(fallbackBranch(regtestsBranches));
+  }, [regtestsBranches, regtestsBranch]);
 
   // Detect if the selected connection uses an interactive gateway.
   const selectedConnection =

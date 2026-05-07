@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CatalogPage } from "./CatalogPage";
 import { getCatalogTests } from "../api/catalog";
@@ -21,7 +22,9 @@ function renderPage() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <CatalogPage />
+      <MemoryRouter>
+        <CatalogPage />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -35,6 +38,7 @@ describe("CatalogPage", () => {
     vi.mocked(getCatalogTests).mockResolvedValue({
       branch: "master",
       commit: "abcdef123456",
+      commit_url: "https://github.com/OPALX-project/regression-tests-x/commit/abcdef123456",
       tests: [
         {
           name: "Dist-flattop",
@@ -48,6 +52,7 @@ describe("CatalogPage", () => {
           multi_container_refs: [],
           warnings: [],
           last_status: "failed",
+          last_run_id: "run-failed",
           flaky: true,
         },
         {
@@ -62,6 +67,7 @@ describe("CatalogPage", () => {
           multi_container_refs: [],
           warnings: [],
           last_status: "passed",
+          last_run_id: "run-passed",
           flaky: false,
         },
       ],
@@ -70,6 +76,15 @@ describe("CatalogPage", () => {
     renderPage();
     expect(await screen.findByText("Dist-flattop")).toBeInTheDocument();
     expect(screen.getByText("RFCavity")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Enabled filter/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "abcdef1234" })).toHaveAttribute(
+      "href",
+      "https://github.com/OPALX-project/regression-tests-x/commit/abcdef123456"
+    );
+    expect(screen.getByRole("link", { name: "Dist-flattop" })).toHaveAttribute(
+      "href",
+      "/results/master/cpu-serial/run-failed"
+    );
 
     await userEvent.type(screen.getByPlaceholderText("Search tests or metrics"), "rms_s");
 

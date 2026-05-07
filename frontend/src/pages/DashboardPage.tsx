@@ -193,7 +193,7 @@ export function DashboardPage() {
           {/* Right: trends + stats + queue */}
           <div className="lg:col-span-2 space-y-4">
             {masterArchs.length > 0 && <TrendsPanel archs={masterArchs} />}
-            <StatsPanel />
+            <StatsPanel flakinessArchs={masterArchs} />
             <QueuePanel />
           </div>
         </div>

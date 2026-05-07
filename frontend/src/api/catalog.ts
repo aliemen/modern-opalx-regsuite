@@ -18,18 +18,20 @@ export interface CatalogTestEntry {
   multi_container_refs: string[];
   warnings: string[];
   last_status: string | null;
+  last_run_id: string | null;
   flaky: boolean;
 }
 
 export interface CatalogReport {
   branch: string;
   commit: string | null;
+  commit_url: string | null;
   tests: CatalogTestEntry[];
 }
 
 export async function getCatalogTests(
   branch = "master",
-  includeDisabled = true,
+  includeDisabled = false,
   opalxBranch: string | null = "master",
   arch: string | null = "cpu-serial"
 ): Promise<CatalogReport> {

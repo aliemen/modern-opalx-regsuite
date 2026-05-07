@@ -99,12 +99,12 @@ def simulation_outcome(sim: RegressionSimulation) -> str:
     return "passed" if seen_good else (state or "unknown")
 
 
-def latest_simulation_statuses(
+def latest_simulation_results(
     data_root: Path,
     branch: str,
     arch: str,
     regtests_branch: str,
-) -> dict[str, str]:
+) -> dict[str, tuple[str, str]]:
     entries = _load_index(data_root, branch, arch, regtests_branch, 1)
     if not entries:
         return {}
@@ -114,7 +114,24 @@ def latest_simulation_statuses(
     report = _load_report(data_root, branch, arch, run_id)
     if report is None:
         return {}
-    return {sim.name: simulation_outcome(sim) for sim in report.simulations}
+    return {sim.name: (simulation_outcome(sim), run_id) for sim in report.simulations}
+
+
+def latest_simulation_statuses(
+    data_root: Path,
+    branch: str,
+    arch: str,
+    regtests_branch: str,
+) -> dict[str, str]:
+    return {
+        name: status
+        for name, (status, _run_id) in latest_simulation_results(
+            data_root,
+            branch,
+            arch,
+            regtests_branch,
+        ).items()
+    }
 
 
 def compute_flakiness(

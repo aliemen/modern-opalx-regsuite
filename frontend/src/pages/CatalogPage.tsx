@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { ListFilter, Search } from "lucide-react";
 import { getCatalogTests } from "../api/catalog";
 import {
@@ -9,13 +10,10 @@ import {
 } from "../api/runs";
 import { StatusBadge } from "../components/StatusBadge";
 
-type EnabledFilter = "all" | "enabled" | "disabled";
-
 export function CatalogPage() {
   const [regtestsBranch, setRegtestsBranch] = useState("master");
   const [opalxBranch, setOpalxBranch] = useState("master");
   const [arch, setArch] = useState("cpu-serial");
-  const [enabledFilter, setEnabledFilter] = useState<EnabledFilter>("all");
   const [search, setSearch] = useState("");
 
   const { data: regBranches } = useQuery({
@@ -32,14 +30,12 @@ export function CatalogPage() {
   });
   const { data, isLoading } = useQuery({
     queryKey: ["catalog-tests", regtestsBranch, opalxBranch, arch],
-    queryFn: () => getCatalogTests(regtestsBranch, true, opalxBranch, arch),
+    queryFn: () => getCatalogTests(regtestsBranch, false, opalxBranch, arch),
   });
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (data?.tests ?? []).filter((test) => {
-      if (enabledFilter === "enabled" && !test.enabled) return false;
-      if (enabledFilter === "disabled" && test.enabled) return false;
       if (!q) return true;
       return (
         test.name.toLowerCase().includes(q) ||
@@ -47,18 +43,36 @@ export function CatalogPage() {
         test.metrics.some((m) => m.metric.toLowerCase().includes(q))
       );
     });
-  }, [data?.tests, enabledFilter, search]);
+  }, [data?.tests, search]);
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-1 mb-6">
         <h1 className="text-fg text-2xl font-semibold">Test Catalog</h1>
         <p className="text-muted text-sm">
-          {data?.commit ? `regression-tests-x ${data.commit.slice(0, 10)}` : "Local regression-tests-x clone"}
+          {data?.commit ? (
+            <>
+              regression-tests-x{" "}
+              {data.commit_url ? (
+                <a
+                  href={data.commit_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  {data.commit.slice(0, 10)}
+                </a>
+              ) : (
+                <span>{data.commit.slice(0, 10)}</span>
+              )}
+            </>
+          ) : (
+            "Local regression-tests-x clone"
+          )}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 mb-5 md:grid-cols-[1fr_1fr_1fr_1.2fr_auto]">
+      <div className="grid grid-cols-1 gap-3 mb-5 md:grid-cols-[1fr_1fr_1fr_2fr]">
         <select
           value={regtestsBranch}
           onChange={(e) => setRegtestsBranch(e.target.value)}
@@ -104,16 +118,6 @@ export function CatalogPage() {
             className="w-full bg-surface border border-border rounded-lg pl-9 pr-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
           />
         </div>
-        <select
-          value={enabledFilter}
-          onChange={(e) => setEnabledFilter(e.target.value as EnabledFilter)}
-          className="bg-surface border border-border rounded-lg px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-          title="Enabled filter"
-        >
-          <option value="all">All tests</option>
-          <option value="enabled">Enabled</option>
-          <option value="disabled">Disabled</option>
-        </select>
       </div>
 
       <div className="flex items-center gap-2 text-muted text-xs mb-3">
@@ -145,7 +149,17 @@ export function CatalogPage() {
                   className={`border-t border-border ${i % 2 ? "bg-surface/20" : ""}`}
                 >
                   <td className="px-4 py-3 min-w-0">
-                    <p className="font-mono text-fg text-xs">{test.name}</p>
+                    {test.last_run_id ? (
+                      <Link
+                        to={`/results/${encodeURIComponent(opalxBranch)}/${encodeURIComponent(arch)}/${encodeURIComponent(test.last_run_id)}`}
+                        className="font-mono text-accent text-xs hover:underline"
+                        title="Open newest active run containing this test"
+                      >
+                        {test.name}
+                      </Link>
+                    ) : (
+                      <p className="font-mono text-fg text-xs">{test.name}</p>
+                    )}
                     {test.description && (
                       <p className="text-muted text-xs mt-1 line-clamp-2">
                         {test.description}

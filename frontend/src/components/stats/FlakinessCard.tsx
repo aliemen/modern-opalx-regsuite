@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Shuffle } from "lucide-react";
 import { getFlakiness, getLatestMaster } from "../../api/stats";
 
-export function FlakinessCard() {
+export function FlakinessCard({ archs: sortedArchs }: { archs?: string[] }) {
   const [selectedArch, setSelectedArch] = useState<string | null>(null);
   const { data: master } = useQuery({
     queryKey: ["dashboard-stats", "latest-master", "flakiness-archs"],
@@ -11,10 +11,12 @@ export function FlakinessCard() {
     refetchInterval: 60_000,
   });
 
-  const archs = useMemo(
-    () => (master?.cells ?? []).map((cell) => cell.arch).sort(),
-    [master]
-  );
+  const archs = useMemo(() => {
+    if (sortedArchs && sortedArchs.length > 0) return sortedArchs;
+    return [...(master?.cells ?? [])]
+      .sort((a, b) => b.regression_total - a.regression_total || a.arch.localeCompare(b.arch))
+      .map((cell) => cell.arch);
+  }, [master, sortedArchs]);
   const arch = selectedArch && archs.includes(selectedArch) ? selectedArch : archs[0] ?? "";
 
   const { data, isLoading } = useQuery({

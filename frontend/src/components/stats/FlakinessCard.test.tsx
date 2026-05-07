@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FlakinessCard } from "./FlakinessCard";
 import { getFlakiness, getLatestMaster } from "../../api/stats";
@@ -42,11 +42,25 @@ describe("FlakinessCard", () => {
           regression_failed: 0,
           regression_broken: 0,
         },
+        {
+          arch: "gpu",
+          run_id: "demo-gpu",
+          status: "passed",
+          started_at: "2026-04-01T00:00:00+00:00",
+          finished_at: "2026-04-01T00:01:00+00:00",
+          duration_seconds: 60,
+          unit_total: 1,
+          unit_failed: 0,
+          regression_total: 5,
+          regression_passed: 5,
+          regression_failed: 0,
+          regression_broken: 0,
+        },
       ],
     });
     vi.mocked(getFlakiness).mockResolvedValue({
       branch: "master",
-      arch: "cpu-serial",
+      arch: "gpu",
       regtests_branch: "master",
       limit: 20,
       min_observations: 3,
@@ -69,5 +83,8 @@ describe("FlakinessCard", () => {
 
     expect(await screen.findByText("SometimesBad")).toBeInTheDocument();
     expect(screen.getByText("2 pass / 1 bad")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getFlakiness).toHaveBeenCalledWith("master", "gpu", "master", 20);
+    });
   });
 });

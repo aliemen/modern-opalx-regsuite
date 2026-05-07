@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TriggerPage } from "./TriggerPage";
+import { getOpalxBranches, getRegtestsBranches } from "../api/runs";
 
 vi.mock("../api/runs", async () => {
   const actual = await vi.importActual<typeof import("../api/runs")>("../api/runs");
@@ -53,5 +54,20 @@ describe("TriggerPage rerun prefill", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Start Run/i })).toBeDisabled();
     expect(screen.getByLabelText("Clean build")).toBeChecked();
+  });
+
+  it("falls back removed prefilled branches to master", async () => {
+    vi.mocked(getOpalxBranches).mockResolvedValue(["feature/current", "master"]);
+    vi.mocked(getRegtestsBranches).mockResolvedValue(["master", "rt/current"]);
+
+    renderPage(
+      "/trigger?branch=deleted-opalx&regtests_branch=deleted-regtests&arch=cpu-serial"
+    );
+
+    await waitFor(() => {
+      const [opalxSelect, regtestsSelect] = screen.getAllByRole("combobox");
+      expect(opalxSelect).toHaveValue("master");
+      expect(regtestsSelect).toHaveValue("master");
+    });
   });
 });

@@ -177,7 +177,7 @@ class SlurmConfig(SlurmResources):
             args.append(f"--gpus={self.gpus}")
         elif self.gpus_per_task is not None:
             args.append(f"--gpus={mpi_ranks * self.gpus_per_task}")
-        if self.gpus_per_task is not None:
+        if self.gpus is None and self.gpus_per_task is not None:
             args.append(f"--gpus-per-task={self.gpus_per_task}")
         if self.cpus_per_task is not None:
             args.append(f"--cpus-per-task={self.cpus_per_task}")
@@ -206,7 +206,7 @@ class SlurmConfig(SlurmResources):
             args.append(f"--gpus={self.gpus}")
         elif self.gpus_per_task is not None:
             args.append(f"--gpus={mpi_ranks * self.gpus_per_task}")
-        if self.gpus_per_task is not None:
+        if self.gpus is None and self.gpus_per_task is not None:
             args.append(f"--gpus-per-task={self.gpus_per_task}")
         if self.cpus_per_task is not None:
             args.append(f"--cpus-per-task={self.cpus_per_task}")

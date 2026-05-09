@@ -60,6 +60,34 @@ def test_typed_slurm_scales_tasks_nodes_and_gpus(tmp_path: Path) -> None:
     ]
 
 
+def test_fixed_total_gpus_suppresses_gpu_per_task_flag(tmp_path: Path) -> None:
+    cfg = SuiteConfig.model_validate(
+        {
+            **_base_config(tmp_path),
+            "arch_configs": [
+                {
+                    "arch": "cuda-daint",
+                    "mpi_ranks": 1,
+                    "slurm": {
+                        "nodes": 1,
+                        "tasks_per_node": 4,
+                        "gpus": 4,
+                        "gpus_per_task": 1,
+                        "cpus_per_task": 4,
+                    },
+                }
+            ],
+        }
+    )
+
+    ac = cfg.get_arch_config("cuda-daint")
+
+    assert "--gpus=4" in ac.slurm_allocation_args(1)
+    assert "--gpus-per-task=1" not in ac.slurm_allocation_args(1)
+    assert "--gpus=4" in ac.slurm_step_args(1)
+    assert "--gpus-per-task=1" not in ac.slurm_step_args(1)
+
+
 def test_typed_slurm_fixed_nodes_support_two_ranks_on_one_node(
     tmp_path: Path,
 ) -> None:

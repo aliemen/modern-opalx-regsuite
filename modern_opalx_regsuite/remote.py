@@ -1015,6 +1015,9 @@ class RemoteExecutor:
         if cancel_event is not None and cancel_event.is_set():
             return -1
 
+        use_slurm_step = (
+            self._allocation_id is not None and slurm_step_ranks is not None
+        )
         prefix_parts = self._build_env_preamble()
 
         # Inline shell env-var assignment, e.g. ``OMP_NUM_THREADS=4 cmd``.
@@ -1033,10 +1036,10 @@ class RemoteExecutor:
         # uenv style: wrap the whole thing (including env vars) with uenv run.
         # uenv run uses execve, not a shell — VAR=value cmd shell syntax does not
         # work.  Use env(1) to carry the variable assignments instead.
-        # Exception: when a Slurm allocation is active, uenv activation is passed
+        # Exception: when a Slurm job step is requested, uenv activation is passed
         # as srun --uenv/--view flags (see below) — running "uenv run" inside an
         # srun step can interfere with namespace setup on CSCS Alps.
-        if self._is_uenv() and self._env and self._env.prologue and self._allocation_id is None:
+        if self._is_uenv() and self._env and self._env.prologue and not use_slurm_step:
             inner = (f"env {env_prefix}{cmd}") if env_prefix else cmd
             full_cmd = self._wrap_with_uenv(inner)
 
@@ -1058,24 +1061,24 @@ class RemoteExecutor:
             f"cd {shlex.quote(remote_cwd)} && {full_cmd}"
         )
 
-        # When a Slurm allocation is active, run every command as a job step
-        # so that MPI-linked test executables can see the allocated host list.
+        # When explicitly requested, run the command as a Slurm job step so
+        # that MPI-linked test executables can see the allocated host list.
+        # Git/cmake/build orchestration deliberately stays outside srun even
+        # while an allocation is being held.
         # srun calls execve, not a shell, so we use bash -c to preserve the
         # &&-chain (cd, module loads, env preamble) around the real command.
         # When uenv style is configured, pass the image/view as srun --uenv/--view
         # flags instead of calling "uenv run" inside bash — this is the correct
         # way to activate a uenv on CSCS Alps compute nodes, equivalent to
         # #SBATCH --uenv / #SBATCH --view.
-        if self._allocation_id is not None:
+        if use_slurm_step:
             uenv_flags = ""
             if self._is_uenv() and self._env and self._env.prologue:
                 uenv_flags = " " + self._uenv_srun_flags()
             cluster_flag = ""
             if self._slurm_cluster:
                 cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
-            rank_flag = ""
-            if slurm_step_ranks is not None:
-                rank_flag = f" -n {int(slurm_step_ranks)}"
+            rank_flag = f" -n {int(slurm_step_ranks)}"
             wrapped = (
                 f"srun --jobid={shlex.quote(self._allocation_id)}"
                 f"{rank_flag} --overlap{cluster_flag}{uenv_flags}"
@@ -1085,7 +1088,7 @@ class RemoteExecutor:
         # Apply per-command timeout (shell-level).  Skipped for srun commands
         # because Slurm's --time flag is the proper timeout mechanism there.
         effective_timeout = timeout if timeout is not None else self._command_timeout
-        if effective_timeout > 0 and self._allocation_id is None:
+        if effective_timeout > 0 and not use_slurm_step:
             wrapped = (
                 f"timeout --signal=TERM --kill-after=30 {effective_timeout} "
                 f"bash -c {shlex.quote(wrapped)}"

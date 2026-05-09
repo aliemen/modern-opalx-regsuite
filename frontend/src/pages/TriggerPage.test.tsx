@@ -140,7 +140,8 @@ describe("TriggerPage rerun prefill", () => {
       "/trigger?branch=master&regtests_branch=master&arch=cpu-serial&mpi_ranks=2&opalx_info_level=4"
     );
 
-    await screen.findByDisplayValue("2");
+    await screen.findByDisplayValue("4");
+    expect(screen.queryByLabelText("MPI ranks")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Start Run/i }));
 
     await waitFor(() => {

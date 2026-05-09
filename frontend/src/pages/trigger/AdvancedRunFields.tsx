@@ -3,13 +3,18 @@ import {
   SlurmResourceFields,
   type SlurmResourceForm,
 } from "./SlurmResourceFields";
+import { RuntimeFields } from "./RuntimeFields";
 
 interface AdvancedRunFieldsProps {
   customCmakeText: string;
   hasCustomCmakeArgs: boolean;
   selectedRunConfig: RunConfigSummary | null;
+  mpiRanks: number;
+  opalxInfoLevel: number;
   slurmForm: SlurmResourceForm;
   slurmOverrideDirty: boolean;
+  onMpiRanksChange: (value: number) => void;
+  onOpalxInfoLevelChange: (value: number) => void;
   onCustomCmakeTextChange: (value: string) => void;
   onSlurmFormChange: (value: SlurmResourceForm) => void;
   onSlurmReset: () => void;
@@ -19,14 +24,27 @@ export function AdvancedRunFields({
   customCmakeText,
   hasCustomCmakeArgs,
   selectedRunConfig,
+  mpiRanks,
+  opalxInfoLevel,
   slurmForm,
   slurmOverrideDirty,
+  onMpiRanksChange,
+  onOpalxInfoLevelChange,
   onCustomCmakeTextChange,
   onSlurmFormChange,
   onSlurmReset,
 }: AdvancedRunFieldsProps) {
   return (
     <div className="flex flex-col gap-3">
+      <RuntimeFields
+        selectedRunConfig={selectedRunConfig}
+        mpiRanks={mpiRanks}
+        opalxInfoLevel={opalxInfoLevel}
+        showMpiRanks
+        showOpalxInfoLevel={false}
+        onMpiRanksChange={onMpiRanksChange}
+        onOpalxInfoLevelChange={onOpalxInfoLevelChange}
+      />
       <div>
         <label htmlFor="custom-cmake-args" className="block text-sm text-muted mb-1">
           Custom CMake args

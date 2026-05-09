@@ -357,6 +357,8 @@ export function TriggerPage() {
           selectedRunConfig={selectedRunConfig}
           mpiRanks={mpiRanks}
           opalxInfoLevel={opalxInfoLevel}
+          showMpiRanks={false}
+          showOpalxInfoLevel
           onMpiRanksChange={setMpiRanks}
           onOpalxInfoLevelChange={setOpalxInfoLevel}
         />
@@ -455,8 +457,12 @@ export function TriggerPage() {
             customCmakeText={customCmakeText}
             hasCustomCmakeArgs={hasCustomCmakeArgs}
             selectedRunConfig={selectedRunConfig}
+            mpiRanks={mpiRanks}
+            opalxInfoLevel={opalxInfoLevel}
             slurmForm={slurmForm}
             slurmOverrideDirty={slurmOverrideDirty}
+            onMpiRanksChange={setMpiRanks}
+            onOpalxInfoLevelChange={setOpalxInfoLevel}
             onCustomCmakeTextChange={setCustomCmakeText}
             onSlurmFormChange={updateSlurmForm}
             onSlurmReset={resetSlurmForm}

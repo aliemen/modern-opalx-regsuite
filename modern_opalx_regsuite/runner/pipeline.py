@@ -166,6 +166,11 @@ def run_pipeline(
         # ── Phase: slurm-alloc (optional) ────────────────────────────────────
         if is_remote and remote is not None and slurm_allocation_args:
             _phase(paths.pipeline_log_path, "slurm-alloc")
+            _append_pipeline_line(
+                paths.pipeline_log_path,
+                f"[{connection_name}] Slurm allocation request: "
+                f"salloc --no-shell {' '.join(slurm_allocation_args)}",
+            )
             try:
                 job_id = remote.allocate_slurm_job(slurm_allocation_args)
                 _append_pipeline_line(

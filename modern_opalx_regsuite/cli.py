@@ -171,6 +171,14 @@ def run(
         False,
         help="Skip regression tests.",
     ),
+    mpi_ranks: Optional[int] = typer.Option(
+        None,
+        help="MPI ranks for generated regression commands (defaults to arch config).",
+    ),
+    opalx_info_level: Optional[int] = typer.Option(
+        None,
+        help="OPALX --info level for generated regression commands (defaults to config).",
+    ),
     config: Optional[Path] = typer.Option(
         None,
         "--config",
@@ -191,6 +199,8 @@ def run(
         run_id=run_id,
         skip_unit=skip_unit,
         skip_regression=skip_regression,
+        mpi_ranks=mpi_ranks,
+        opalx_info_level=opalx_info_level,
     )
     typer.echo(f"Run {meta.run_id} finished with status={meta.status}")
 

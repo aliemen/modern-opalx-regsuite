@@ -21,7 +21,6 @@ def test_catalog_parses_branch_tree_without_checkout(tmp_path: Path) -> None:
     test_root = repo / "RegressionTests" / "Multi"
     (test_root / "reference").mkdir(parents=True)
     (test_root / "Multi.in").write_text("OPTION;\n", encoding="utf-8")
-    (test_root / "Multi.local").write_text("#!/bin/sh\n", encoding="utf-8")
     (test_root / "Multi.rt").write_text(
         '"Multi container test."\nstat "rms_x" avg 1E-5\n',
         encoding="utf-8",
@@ -52,6 +51,8 @@ def test_catalog_parses_branch_tree_without_checkout(tmp_path: Path) -> None:
     assert by_name["Multi"].metrics[0].metric == "rms_x"
     assert by_name["Multi"].reference_stat_count == 2
     assert by_name["Multi"].multi_container_refs == ["Multi_c0.stat", "Multi_c1.stat"]
+    assert by_name["Multi"].has_local is False
+    assert "missing .local runner" not in by_name["Multi"].warnings
     assert by_name["Multi"].last_status == "passed"
     assert by_name["Multi"].last_run_id == "run-1"
     assert by_name["Disabled"].enabled is False

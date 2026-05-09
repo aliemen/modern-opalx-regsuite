@@ -13,6 +13,7 @@ unit_test_command = "ctest --output-on-failure"
 # build_command = "make -j8"
 # build_jobs = 8
 # mpi_ranks = 1
+opalx_info_level = 2
 opalx_executable_relpath = "src/opalx"
 opalx_args = []
 keep_work_dirs = false
@@ -60,6 +61,13 @@ arch = "cuda-daint"
 cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=CUDA", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DARCH=HOPPER90", "-DHeffte_VERSION=git.v2.4.1", "-DCMAKE_TEST_LAUNCHER=\"srun;-n;1;--overlap\"", "-DKokkos_VERSION=git.4.7.01"]
 build_jobs = 16
 mpi_ranks = 1
-slurm_args = ["--nodes=1", "--ntasks-per-node=1", "--gpus=1", "--time=00:30:00", "--partition=debug", "--cpus-per-task=16", "--gpus-per-task=1", "--account=c41"]
+
+[arch_configs.slurm]
+partition = "debug"
+account = "c41"
+time = "00:30:00"
+tasks_per_node = 1
+cpus_per_task = 16
+gpus_per_task = 1
 # No [arch_configs.env] — environment activation is defined in the "daint-gh200" Connection
 # (Settings → Connections), using uenv style.

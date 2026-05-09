@@ -100,7 +100,7 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
 
     run_id = _run_id_from_time(now)
     log.info(
-        "Schedule %s (%s): firing now=%s branch=%s arch=%s connection=%s clean_build=%s",
+        "Schedule %s (%s): firing now=%s branch=%s arch=%s connection=%s clean_build=%s mpi_ranks=%s opalx_info_level=%s",
         schedule.id,
         schedule.name,
         now.isoformat(timespec="seconds"),
@@ -108,6 +108,8 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
         schedule.arch,
         schedule.connection_name,
         schedule.clean_build,
+        schedule.mpi_ranks,
+        schedule.opalx_info_level,
     )
     try:
         result = await start_run(
@@ -121,6 +123,8 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
             skip_unit=schedule.skip_unit,
             skip_regression=schedule.skip_regression,
             clean_build=schedule.clean_build,
+            mpi_ranks=schedule.mpi_ranks,
+            opalx_info_level=schedule.opalx_info_level,
             connection_name=schedule.connection_name,
             public=schedule.public,
         )

@@ -120,6 +120,8 @@ class RunOptions(BaseModel):
     skip_regression: bool = False
     clean_build: bool = False
     custom_cmake_args: List[str] = Field(default_factory=list)
+    mpi_ranks: int = Field(1, ge=1)
+    opalx_info_level: int = Field(2, ge=0)
 
 
 class RerunReference(BaseModel):

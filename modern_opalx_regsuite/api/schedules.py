@@ -89,6 +89,20 @@ def _validate_connection_for_owner(
         ) from exc
 
 
+def _validate_schedule_run_options(
+    cfg: SuiteConfig, arch: str, mpi_ranks: int
+) -> None:
+    ac = cfg.get_arch_config(arch)
+    if ac.max_mpi_ranks is not None and mpi_ranks > ac.max_mpi_ranks:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"mpi_ranks={mpi_ranks} exceeds max_mpi_ranks="
+                f"{ac.max_mpi_ranks} for arch '{arch}'."
+            ),
+        )
+
+
 @router.get("", response_model=list[Schedule])
 async def list_all_schedules(
     _user: Annotated[str, Depends(require_auth)],
@@ -106,6 +120,7 @@ async def create_schedule_endpoint(
     cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> Schedule:
     _validate_connection_for_owner(cfg, username, body.connection_name)
+    _validate_schedule_run_options(cfg, body.arch, body.mpi_ranks)
     return await create_schedule(cfg, owner=username, body=body)
 
 
@@ -145,6 +160,7 @@ async def update_schedule_endpoint(
             ),
         )
     _validate_connection_for_owner(cfg, username, body.connection_name)
+    _validate_schedule_run_options(cfg, body.arch, body.mpi_ranks)
     updated = await update_schedule(cfg, schedule_id, body)
     if updated is None:
         raise HTTPException(
@@ -185,11 +201,14 @@ async def toggle_schedule_endpoint(
         skip_unit=existing.skip_unit,
         skip_regression=existing.skip_regression,
         clean_build=existing.clean_build,
+        mpi_ranks=existing.mpi_ranks,
+        opalx_info_level=existing.opalx_info_level,
         public=existing.public,
     )
     # Re-validate the connection on enable in case it has since gained 2FA.
     if body.enabled:
         _validate_connection_for_owner(cfg, username, body.connection_name)
+        _validate_schedule_run_options(cfg, body.arch, body.mpi_ranks)
     updated = await update_schedule(cfg, schedule_id, body)
     assert updated is not None  # existence confirmed above
     return updated

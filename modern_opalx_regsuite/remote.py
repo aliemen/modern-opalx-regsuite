@@ -999,6 +999,7 @@ class RemoteExecutor:
         append_log: bool = False,
         timeout: Optional[int] = None,
         cancel_event: Optional[threading.Event] = None,
+        slurm_step_ranks: Optional[int] = None,
     ) -> int:
         """Execute *cmd* on the remote host inside *remote_cwd*.
 
@@ -1044,8 +1045,7 @@ class RemoteExecutor:
         # login profile (lmod exports it via BASH_FUNC_module%%). srun rejects
         # multiline function exports with "Improperly formed environment
         # variable", which corrupts the log output of any command that calls
-        # srun internally (e.g. regression test .local scripts that launch
-        # OPAL-X via srun/mpirun).
+        # srun internally.
         #
         # Note: `unset -f module` alone is not enough — bash only removes the
         # function from the current shell but keeps BASH_FUNC_module%% in its
@@ -1073,9 +1073,12 @@ class RemoteExecutor:
             cluster_flag = ""
             if self._slurm_cluster:
                 cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
+            rank_flag = ""
+            if slurm_step_ranks is not None:
+                rank_flag = f" -n {int(slurm_step_ranks)}"
             wrapped = (
                 f"srun --jobid={shlex.quote(self._allocation_id)}"
-                f" --overlap{cluster_flag}{uenv_flags}"
+                f"{rank_flag} --overlap{cluster_flag}{uenv_flags}"
                 f" -- bash -c {shlex.quote(wrapped)}"
             )
 

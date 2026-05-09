@@ -102,6 +102,8 @@ class RunCoordinator:
                 rerun_of=active.rerun_of,
                 gateway_password=active.gateway_password,
                 gateway_otp=active.gateway_otp,
+                mpi_ranks=active.mpi_ranks,
+                opalx_info_level=active.opalx_info_level,
             )
 
         tailer_task = asyncio.create_task(self._log_tailer(active))
@@ -167,6 +169,8 @@ class RunCoordinator:
             public=queued.public,
             rerun_of=queued.rerun_of,
             custom_cmake_args=queued.custom_cmake_args,
+            mpi_ranks=queued.mpi_ranks,
+            opalx_info_level=queued.opalx_info_level,
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,

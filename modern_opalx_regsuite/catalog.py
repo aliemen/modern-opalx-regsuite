@@ -181,9 +181,6 @@ def list_catalog_tests(
             warnings.append("missing .rt file")
         if not reference_stats:
             warnings.append("missing reference .stat file")
-        if enabled and not has_local:
-            warnings.append("missing .local runner")
-
         out.append(
             CatalogTestEntry(
                 name=name,

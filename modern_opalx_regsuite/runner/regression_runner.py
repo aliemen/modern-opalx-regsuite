@@ -8,31 +8,19 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import signal as _signal
 import time
 import threading
 from pathlib import Path
 from typing import Optional
 
 from ..config import Connection, SuiteConfig
-from ..data_model import (
-    RegressionContainer,
-    RegressionMetric,
-    RegressionSimulation,
-    RegressionTestsReport,
-)
+from ..data_model import RegressionTestsReport
 from .execution import RunPaths, _append_pipeline_line, _run_command
 from .parsing.regression import (
-    _compute_delta,
     _discover_regression_tests,
     _discover_regression_tests_remote,
-    _enumerate_stat_containers,
-    _extract_local_run_command,
-    _parse_rt_file,
-    _read_stat_data,
 )
-from .plotting import _write_stat_plot
-from ..beamline_viz import extract_beamline_json, generate_beamline_svg
+from .regression_results import _build_simulation
 
 
 def _find_opalx_executable(build_dir: Path, relpath: str) -> Optional[Path]:
@@ -48,358 +36,34 @@ def _find_opalx_executable(build_dir: Path, relpath: str) -> Optional[Path]:
     return None
 
 
-def _classify_crash(rc: int, log_path: Path) -> tuple[Optional[str], Optional[str]]:
-    """Return (signal_name, crash_summary) when *rc* indicates a signal kill.
+def _build_opalx_run_command(
+    *,
+    opalx_exe: str,
+    input_name: str,
+    mpi_ranks: int,
+    opalx_info_level: int,
+    opalx_args: list[str],
+    launcher: str,
+) -> str:
+    """Build the generated OPALX regression command.
 
-    On POSIX, Python's subprocess sets returncode to ``-N`` when the child was
-    killed by signal N.  We extract the signal name and, if present, the MPI
-    signal-fault block from the log file.
+    ``launcher`` is ``"mpirun"`` for local/non-Slurm execution and ``"none"``
+    for Slurm allocations, where :class:`RemoteExecutor` supplies the outer
+    ``srun -n`` job step.
     """
-    if rc >= 0:
-        return None, None
-    try:
-        sig_name = _signal.Signals(abs(rc)).name   # e.g. "SIGSEGV"
-    except ValueError:
-        sig_name = f"SIG{abs(rc)}"
-    crash_summary: Optional[str] = None
-    if log_path.exists():
-        try:
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            start = text.find("*** Process received signal ***")
-            end   = text.find("*** End of error message ***")
-            if start != -1:
-                end_idx = (end + len("*** End of error message ***")) if end != -1 else start + 2000
-                crash_summary = text[start:end_idx].strip()
-        except OSError:
-            pass
-    return sig_name, crash_summary
-
-
-def _wrap_command_with_mpirun_srun_shim(cmd: str) -> str:
-    """Wrap *cmd* so legacy ``mpirun`` calls transparently map to ``srun``.
-
-    Some cluster environments (for example CSCS uenv setups) provide ``srun``
-    in Slurm allocations but no ``mpirun``. Legacy regression ``*.local``
-    scripts still call ``mpirun`` directly, so we synthesize a tiny local
-    ``mpirun`` shim in the test work dir and prepend ``$PWD`` to ``PATH``.
-    """
-    shim_script = (
-        "cat > mpirun <<'OPALX_MPIRUN_SHIM'\n"
-        "#!/usr/bin/env bash\n"
-        "if [[ \"${1:-}\" == \"-np\" || \"${1:-}\" == \"-n\" || \"${1:-}\" == \"--np\" ]]; then\n"
-        "  ranks=\"${2:-1}\"\n"
-        "  shift 2\n"
-        "  exec srun -n \"$ranks\" \"$@\"\n"
-        "fi\n"
-        "exec srun \"$@\"\n"
-        "OPALX_MPIRUN_SHIM\n"
-        "chmod +x mpirun\n"
-        "PATH=\"$PWD:$PATH\"\n"
-        f"{cmd}\n"
-    )
-    return f"bash -lc {shlex.quote(shim_script)}"
-
-
-def _plot_basename(test_name: str, container_id: Optional[str], var_name: str) -> str:
-    """Generate plot filename. Single-beam keeps the legacy name unchanged so
-    existing runs still render; multi-beam adds the container id."""
-    if container_id is None:
-        return f"{test_name}_{var_name}.svg"
-    return f"{test_name}_{container_id}_{var_name}.svg"
-
-
-def _build_container(
-    test_name: str,
-    container_id: Optional[str],
-    rc: int,
-    checks: list[tuple[str, str, float]],
-    generated_stat: Path,
-    reference_stat: Optional[Path],
-    plots_dir: Path,
-    pipeline_log_path: Path,
-) -> tuple[RegressionContainer, bool]:
-    """Build one RegressionContainer from a single stat file pair.
-
-    Returns ``(container, any_stat_plots)``. ``any_stat_plots`` tells the
-    caller whether at least one metric produced a comparison plot (used to
-    gate beamline diagram generation).
-    """
-    metrics: list[RegressionMetric] = []
-    any_stat_plots = False
-    revision: Optional[str] = None
-
-    if checks:
-        for var_name, mode, eps in checks:
-            rev, s_vals, values, unit = (
-                _read_stat_data(generated_stat, var_name)
-                if generated_stat.exists()
-                else (None, [], [], None)
-            )
-            if rev and not revision:
-                revision = rev
-            _ref_rev, ref_s_vals, ref_values, _ = (
-                _read_stat_data(reference_stat, var_name)
-                if reference_stat is not None and reference_stat.exists()
-                else (None, [], [], None)
-            )
-            delta = _compute_delta(mode, values, ref_values)
-
-            state = "broken"
-            if delta is not None:
-                state = "passed" if delta < eps else "failed"
-            elif rc < 0:
-                state = "crashed"
-            elif rc != 0:
-                state = "failed"
-
-            plot_rel: Optional[str] = None
-            can_plot = (
-                s_vals
-                and values
-                and ref_s_vals
-                and ref_values
-                and len(s_vals) == len(values)
-                and len(ref_s_vals) == len(ref_values)
-                and min(len(values), len(ref_values)) > 1
-            )
-            if can_plot:
-                any_stat_plots = True
-                plot_name = _plot_basename(test_name, container_id, var_name)
-                plot_path = plots_dir / plot_name
-                try:
-                    _write_stat_plot(
-                        s_vals=s_vals,
-                        values=values,
-                        ref_s_vals=ref_s_vals,
-                        ref_values=ref_values,
-                        out_path=plot_path,
-                        test_name=test_name,
-                        var_name=var_name,
-                        var_unit=unit or "",
-                    )
-                    plot_rel = f"plots/{plot_name}"
-                except Exception as exc:
-                    tag = f"{test_name}:{var_name}" if container_id is None else f"{test_name}[{container_id}]:{var_name}"
-                    _append_pipeline_line(
-                        pipeline_log_path,
-                        f"[regression] plot failed for {tag}: {exc}",
-                    )
-
-            current_value = values[-1] if values else None
-            reference_value = ref_values[-1] if ref_values else None
-            metrics.append(
-                RegressionMetric(
-                    metric=var_name,
-                    mode=mode,
-                    eps=eps,
-                    delta=delta,
-                    state=state,
-                    reference_value=reference_value,
-                    current_value=current_value,
-                    plot=plot_rel,
-                )
-            )
-    else:
-        # Legacy: no .rt file — presence of stat file is the only check.
-        has_stat = generated_stat.exists()
-        if rc == 0 and has_stat:
-            state = "passed"
-        elif rc < 0:
-            state = "crashed"
-        elif rc != 0:
-            state = "failed"
-        else:
-            state = "broken"
-        metrics.append(
-            RegressionMetric(
-                metric="run",
-                mode="presence",
-                eps=None,
-                delta=None,
-                state=state,
-                reference_value=None,
-                current_value=None,
-                plot=None,
-            )
-        )
-
-    container_state = "passed"
-    if any(m.state == "failed" for m in metrics):
-        container_state = "failed"
-    elif any(m.state == "crashed" for m in metrics):
-        container_state = "crashed"
-    elif any(m.state == "broken" for m in metrics):
-        container_state = "broken"
-
-    return (
-        RegressionContainer(
-            id=container_id,
-            state=container_state,
-            metrics=metrics,
-            revision=revision,
-        ),
-        any_stat_plots,
-    )
-
-
-def _build_simulation(
-    test_name: str,
-    rc: int,
-    rt_file: Path,
-    work_test_dir: Path,
-    reference_dir: Path,
-    plots_dir: Path,
-    pipeline_log_path: Path,
-    test_start: float,
-    input_file: Optional[Path] = None,
-    log_path: Optional[Path] = None,
-    transport_errors: Optional[list[str]] = None,
-) -> RegressionSimulation:
-    """Shared post-processing: parse .rt, discover per-container stat files,
-    build one RegressionContainer per (generated, reference) pair, and roll
-    up simulation-level state.
-
-    For single-beam runs, ``containers`` is exactly one entry with ``id=None``
-    so the frontend can trivially detect "render like before".
-    """
-    crash_signal, crash_summary = _classify_crash(
-        rc, log_path or work_test_dir / f"{test_name}-RT.log"
-    )
-
-    description, checks = _parse_rt_file(rt_file)
-
-    generated_pairs = _enumerate_stat_containers(work_test_dir, test_name)
-    reference_pairs = _enumerate_stat_containers(reference_dir, test_name)
-    ref_by_id: dict[Optional[str], Path] = {cid: p for cid, p in reference_pairs}
-
-    containers: list[RegressionContainer] = []
-    any_stat_plots = False
-
-    if generated_pairs:
-        # Normal path: at least one stat file was produced.
-        pairs = generated_pairs
-    elif reference_pairs:
-        # Run crashed/failed and produced no stat files, but we know which
-        # containers were expected from the reference side. Fabricate empty
-        # generated paths so `_build_container` still marks metrics broken /
-        # crashed with the right container ids.
-        pairs = [(cid, work_test_dir / p.name) for cid, p in reference_pairs]
-    else:
-        # No stat files anywhere — fall back to a single legacy container so
-        # the simulation row still shows up (with broken/crashed state).
-        legacy = work_test_dir / f"{test_name}.stat"
-        pairs = [(None, legacy)]
-
-    for container_id, generated_stat in pairs:
-        reference_stat = ref_by_id.get(container_id)
-        if reference_stat is None and container_id is None and reference_pairs:
-            # Generated side has no container suffix but reference side does
-            # (unusual): pick the first reference so we don't silently lose data.
-            reference_stat = reference_pairs[0][1]
-        container, had_plots = _build_container(
-            test_name=test_name,
-            container_id=container_id,
-            rc=rc,
-            checks=checks,
-            generated_stat=generated_stat,
-            reference_stat=reference_stat,
-            plots_dir=plots_dir,
-            pipeline_log_path=pipeline_log_path,
-        )
-        containers.append(container)
-        any_stat_plots = any_stat_plots or had_plots
-
-    # Simulation-level rollup: worst-wins across every container's metrics.
-    sim_state = "passed"
-    all_metric_states = [m.state for c in containers for m in c.metrics]
-    if any(s == "failed" for s in all_metric_states):
-        sim_state = "failed"
-    elif any(s == "crashed" for s in all_metric_states):
-        sim_state = "crashed"
-    elif any(s == "broken" for s in all_metric_states):
-        sim_state = "broken"
-
-    # Transport-level failures during metadata/stat fetch must not be silently
-    # labelled "broken" — that reads like a test problem when it is really an
-    # infrastructure problem. If the remote fetch step reported any errors and
-    # the current rollup state is the quietest side of the spectrum, escalate
-    # to "failed" and record the cause in crash_summary so the frontend shows
-    # it next to the test row.
-    if transport_errors:
-        if sim_state in ("passed", "broken"):
-            sim_state = "failed"
-        combined = "SSH transport error(s) while fetching test outputs:\n  - " + \
-            "\n  - ".join(transport_errors)
-        crash_summary = (
-            f"{crash_summary}\n\n{combined}" if crash_summary else combined
-        )
-
-    # --- Beamline visualization -------------------------------------------
-    # Look for the ElementPositions.txt file that OPALX writes to a data/
-    # subdirectory in the work dir. Multi-beam runs may emit per-container
-    # variants (e.g. *_c0_ElementPositions.txt); we pick the first sorted
-    # match since the beamline geometry is shared across containers.
-    beamline_plot: Optional[str] = None
-    data_dir = work_test_dir / "data"
-    positions_file: Optional[Path] = next(
-        iter(sorted(data_dir.glob("*_ElementPositions.txt"))), None
-    ) if data_dir.is_dir() else None
-    if positions_file is None:
-        positions_file = next(
-            iter(sorted(work_test_dir.glob("*_ElementPositions.txt"))), None
-        )
-
-    if positions_file is not None and any_stat_plots:
-        beamline_out = plots_dir / f"{test_name}_beamline.svg"
-        try:
-            generate_beamline_svg(positions_file, input_file, beamline_out)
-            beamline_plot = f"plots/{test_name}_beamline.svg"
-        except Exception as exc:
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] beamline SVG failed for {test_name}: {exc}",
-            )
-
-    # --- Interactive 3D beamline mesh -------------------------------------
-    # Newer OPALX runs emit a self-contained `*_ElementPositions.py` next
-    # to the `.txt` in `data/`.  We import it (side-effect-free at module
-    # load) and emit a compact JSON that the React three.js viewer renders.
-    beamline_3d_data: Optional[str] = None
-    positions_script: Optional[Path] = next(
-        iter(sorted(data_dir.glob("*_ElementPositions.py"))), None
-    ) if data_dir.is_dir() else None
-    if positions_script is None:
-        positions_script = next(
-            iter(sorted(work_test_dir.glob("*_ElementPositions.py"))), None
-        )
-
-    if positions_script is not None and any_stat_plots:
-        mesh_out = plots_dir / f"{test_name}_beamline.json"
-        try:
-            extract_beamline_json(positions_script, mesh_out)
-            beamline_3d_data = f"plots/{test_name}_beamline.json"
-        except Exception as exc:
-            _append_pipeline_line(
-                pipeline_log_path,
-                f"[regression] beamline mesh JSON failed for {test_name}: {exc}",
-            )
-
-    return RegressionSimulation(
-        name=test_name,
-        description=description,
-        state=sim_state,
-        # `.log` (not `.o`) so editors auto-open the file when downloaded.
-        # The on-disk filenames in `_run_regression_suite[_remote]` use the
-        # same suffix; if you change one, change the other.
-        log_file=f"logs/{test_name}-RT.log",
-        containers=containers,
-        duration_seconds=time.monotonic() - test_start,
-        beamline_plot=beamline_plot,
-        beamline_3d_data=beamline_3d_data,
-        exit_code=rc,
-        crash_signal=crash_signal,
-        crash_summary=crash_summary,
-    )
+    args = [
+        shlex.quote(opalx_exe),
+        shlex.quote(input_name),
+        "--info",
+        str(opalx_info_level),
+        *(shlex.quote(a) for a in opalx_args),
+    ]
+    cmd = " ".join(args)
+    if launcher == "mpirun":
+        return f"mpirun -np {mpi_ranks} {cmd}"
+    if launcher == "none":
+        return cmd
+    raise ValueError(f"Unknown OPALX launcher: {launcher}")
 
 
 def _run_regression_suite(
@@ -408,6 +72,7 @@ def _run_regression_suite(
     build_dir: Path,
     pipeline_log_path: Path,
     mpi_ranks: int = 1,
+    opalx_info_level: int = 2,
     cancel_event: Optional[threading.Event] = None,
     base_env: Optional[dict[str, str]] = None,
 ) -> RegressionTestsReport:
@@ -427,6 +92,8 @@ def _run_regression_suite(
     reg_lines: list[str] = [
         f"Running {len(tests)} regression tests from {tests_root}",
         f"OPALX executable: {opalx_exe}",
+        f"MPI ranks: {mpi_ranks}",
+        f"OPALX --info: {opalx_info_level}",
     ]
 
     for test_name in tests:
@@ -443,7 +110,6 @@ def _run_regression_suite(
             shutil.rmtree(work_test_dir)
         shutil.copytree(src_test_dir, work_test_dir)
 
-        local_script = work_test_dir / f"{test_name}.local"
         test_input = work_test_dir / f"{test_name}.in"
         rt_file = work_test_dir / f"{test_name}.rt"
         reference_dir = src_test_dir / "reference"
@@ -451,27 +117,18 @@ def _run_regression_suite(
         test_log_local = work_test_dir / f"{test_name}-RT.log"
         test_log_run = paths.logs_dir / f"{test_name}-RT.log"
         env = (base_env or os.environ).copy()
-        env["OPALX_EXE_PATH"] = str(opalx_exe.parent)
-
-        if local_script.is_file():
-            os.chmod(local_script, 0o755)
-            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
-            local_cmd = _extract_local_run_command(local_script)
-            if local_cmd:
-                _append_pipeline_line(
-                    pipeline_log_path,
-                    f"[regression] {test_name} local command: {local_cmd}",
-                )
-            cmd = f"bash {shlex.quote(local_script.name)}" + (
-                f" {extra_args}" if extra_args else ""
-            )
-        else:
-            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
-            mpi_prefix = f"mpirun -np {mpi_ranks} " if mpi_ranks > 1 else ""
-            cmd = (
-                f"{mpi_prefix}{shlex.quote(str(opalx_exe))} "
-                f"{extra_args} {shlex.quote(test_input.name)}"
-            ).strip()
+        cmd = _build_opalx_run_command(
+            opalx_exe=str(opalx_exe),
+            input_name=test_input.name,
+            mpi_ranks=mpi_ranks,
+            opalx_info_level=opalx_info_level,
+            opalx_args=cfg.opalx_args,
+            launcher="mpirun",
+        )
+        _append_pipeline_line(
+            pipeline_log_path,
+            f"[regression] {test_name} generated command: {cmd}",
+        )
 
         _append_pipeline_line(pipeline_log_path, f"[regression] START {test_name}")
         test_start = time.monotonic()
@@ -490,7 +147,7 @@ def _run_regression_suite(
                 shutil.copy2(test_log_local, out_file)
 
         # Resolve the input file path so _build_simulation can look up element types
-        in_file = test_input if test_input.exists() else (local_script if local_script.is_file() else None)
+        in_file = test_input if test_input.exists() else None
         sim = _build_simulation(
             test_name=test_name,
             rc=rc,
@@ -526,6 +183,8 @@ def _run_regression_suite_remote(
     paths: RunPaths,
     connection: Connection,
     mpi_ranks: int,
+    opalx_info_level: int,
+    use_slurm: bool,
     remote: "RemoteExecutor",  # type: ignore[name-defined]
     remote_base: str,
     remote_build: str,
@@ -548,7 +207,6 @@ def _run_regression_suite_remote(
     # an arbitrary commit; reading from it would silently miss tests added
     # on the branch the user picked.
     remote_opalx_exe = f"{remote_build}/{cfg.opalx_executable_relpath}"
-    remote_opalx_dir = str(Path(remote_opalx_exe).parent)
     remote_tests_root = f"{remote_base}/regtests/{cfg.regtests_subdir}"
 
     tests = _discover_regression_tests_remote(remote, remote_tests_root)
@@ -561,41 +219,27 @@ def _run_regression_suite_remote(
     meta_root.mkdir(parents=True, exist_ok=True)
 
     reg_lines: list[str] = [
-        f"Running {len(tests)} regression tests remotely via [{connection.name}]"
+        f"Running {len(tests)} regression tests remotely via [{connection.name}]",
+        f"MPI ranks: {mpi_ranks}",
+        f"OPALX --info: {opalx_info_level}",
     ]
 
     # Ensure the per-run work directory exists on the remote before any cp -r calls.
     remote_run_work_dir = f"{remote_base}/work/{run_id}"
     remote.ensure_dir(remote_run_work_dir)
 
-    has_mpirun = (
+    if not use_slurm and (
         remote.run_command(
             "command -v mpirun >/dev/null 2>&1",
             remote_cwd=remote_run_work_dir,
             log_path=pipeline_log_path,
             append_log=True,
         )
-        == 0
-    )
-    has_srun = (
-        remote.run_command(
-            "command -v srun >/dev/null 2>&1",
-            remote_cwd=remote_run_work_dir,
-            log_path=pipeline_log_path,
-            append_log=True,
-        )
-        == 0
-    )
-    use_mpirun_shim = (not has_mpirun) and has_srun
-    if use_mpirun_shim:
+        != 0
+    ):
         _append_pipeline_line(
             pipeline_log_path,
-            "[regression] mpirun not found on remote; using an srun-backed mpirun shim for legacy .local scripts.",
-        )
-    elif not has_mpirun:
-        _append_pipeline_line(
-            pipeline_log_path,
-            "[regression] WARNING: neither mpirun nor srun detected on remote; regression runs may fail.",
+            "[regression] WARNING: mpirun not detected on remote; non-Slurm regression runs may fail.",
         )
 
     for test_name in tests:
@@ -620,14 +264,11 @@ def _run_regression_suite_remote(
             append_log=True,
         )
 
-        # Fetch metadata files from the remote checkout.  These drive command
-        # selection (.local presence), check definitions (.rt), and element
-        # type resolution (.in).  None of them should ever be read from the
-        # local regtests working tree.
+        # Fetch metadata files from the remote checkout. These drive check
+        # definitions (.rt) and element type resolution (.in). None of them
+        # should ever be read from the local regtests working tree.
         meta_dir = meta_root / test_name
         meta_dir.mkdir(parents=True, exist_ok=True)
-
-        has_local_script = remote.path_exists(f"{remote_test_src}/{test_name}.local")
 
         # Accumulates per-test SSH/SFTP failures so _build_simulation can
         # distinguish transport flakes from genuinely broken metrics.
@@ -667,27 +308,18 @@ def _run_regression_suite_remote(
         test_log_local = work_test_dir / f"{test_name}-RT.log"
         test_log_run = paths.logs_dir / f"{test_name}-RT.log"
 
-        env = {"OPALX_EXE_PATH": remote_opalx_dir}
-
-        if has_local_script:
-            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
-            cmd = f"bash {shlex.quote(test_name + '.local')}"
-            if extra_args:
-                cmd += f" {extra_args}"
-            if use_mpirun_shim:
-                cmd = _wrap_command_with_mpirun_srun_shim(cmd)
-        else:
-            extra_args = " ".join(shlex.quote(a) for a in cfg.opalx_args)
-            if mpi_ranks > 1:
-                mpi_prefix = (
-                    f"srun -n {mpi_ranks} " if use_mpirun_shim else f"mpirun -np {mpi_ranks} "
-                )
-            else:
-                mpi_prefix = ""
-            cmd = (
-                f"{mpi_prefix}{shlex.quote(remote_opalx_exe)} "
-                f"{extra_args} {shlex.quote(test_name + '.in')}"
-            ).strip()
+        cmd = _build_opalx_run_command(
+            opalx_exe=remote_opalx_exe,
+            input_name=f"{test_name}.in",
+            mpi_ranks=mpi_ranks,
+            opalx_info_level=opalx_info_level,
+            opalx_args=cfg.opalx_args,
+            launcher="none" if use_slurm else "mpirun",
+        )
+        _append_pipeline_line(
+            pipeline_log_path,
+            f"[regression] {test_name} generated command: {cmd}",
+        )
 
         _append_pipeline_line(pipeline_log_path, f"[regression] START {test_name}")
         test_start = time.monotonic()
@@ -696,8 +328,8 @@ def _run_regression_suite_remote(
             cmd,
             remote_cwd=remote_test_work,
             log_path=test_log_local,
-            env_vars=env,
             cancel_event=cancel_event,
+            slurm_step_ranks=mpi_ranks if use_slurm else None,
         )
 
         if test_log_local.exists():

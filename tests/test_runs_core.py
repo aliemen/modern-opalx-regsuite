@@ -22,6 +22,8 @@ def test_start_run_forces_clean_build_for_custom_cmake_args(
 
     async def fake_acquire_run_slot(**kwargs):
         captured["active_custom_cmake_args"] = kwargs["custom_cmake_args"]
+        captured["active_mpi_ranks"] = kwargs["mpi_ranks"]
+        captured["active_opalx_info_level"] = kwargs["opalx_info_level"]
         active_kwargs = {
             k: v for k, v in kwargs.items() if k != "custom_cmake_args"
         }
@@ -59,6 +61,8 @@ def test_start_run_forces_clean_build_for_custom_cmake_args(
             skip_regression=False,
             clean_build=False,
             custom_cmake_args=["", "# comment", " -DIPPL_GIT_TAG=master "],
+            mpi_ranks=2,
+            opalx_info_level=4,
             connection_name="local",
         )
         await asyncio.sleep(0)
@@ -66,5 +70,54 @@ def test_start_run_forces_clean_build_for_custom_cmake_args(
     asyncio.run(run())
 
     assert captured["active_custom_cmake_args"] == ["-DIPPL_GIT_TAG=master"]
+    assert captured["active_mpi_ranks"] == 2
+    assert captured["active_opalx_info_level"] == 4
     assert captured["clean_build"] is True
     assert captured["custom_cmake_args"] == ["-DIPPL_GIT_TAG=master"]
+
+
+def test_start_run_preserves_rank_options_when_queued(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    cfg = SuiteConfig(
+        opalx_repo_root=tmp_path / "opalx",
+        builds_root=tmp_path / "builds",
+        data_root=tmp_path / "data",
+        regtests_repo_root=tmp_path / "regtests",
+    )
+
+    async def fake_acquire_run_slot(**_kwargs):
+        return None
+
+    async def fake_enqueue_run(queued):
+        captured["queued_mpi_ranks"] = queued.mpi_ranks
+        captured["queued_opalx_info_level"] = queued.opalx_info_level
+        return 1
+
+    monkeypatch.setattr(runs_core, "acquire_run_slot", fake_acquire_run_slot)
+    monkeypatch.setattr(runs_core, "enqueue_run", fake_enqueue_run)
+
+    async def run() -> None:
+        await runs_core.start_run(
+            cfg,
+            run_id="queued",
+            triggered_by="demo-user",
+            owner_for_connection="demo-user",
+            branch="master",
+            arch="cpu-serial",
+            regtests_branch=None,
+            skip_unit=False,
+            skip_regression=False,
+            clean_build=False,
+            custom_cmake_args=None,
+            mpi_ranks=3,
+            opalx_info_level=5,
+            connection_name="local",
+        )
+
+    asyncio.run(run())
+
+    assert captured["queued_mpi_ranks"] == 3
+    assert captured["queued_opalx_info_level"] == 5

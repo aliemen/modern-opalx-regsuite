@@ -199,21 +199,6 @@ def _parse_rt_file(rt_path: Path) -> tuple[Optional[str], list[tuple[str, str, f
     return description, checks
 
 
-def _extract_local_run_command(local_script: Path) -> Optional[str]:
-    """Extract the effective run command from a legacy *.local script."""
-    if not local_script.is_file():
-        return None
-    lines = local_script.read_text(encoding="utf-8", errors="replace").splitlines()
-    for raw in reversed(lines):
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("cd "):
-            continue
-        return line
-    return None
-
-
 def _parse_sdds_kv(block: str, key: str) -> Optional[str]:
     m = re.search(rf"{key}=([^,]+)", block)
     if not m:

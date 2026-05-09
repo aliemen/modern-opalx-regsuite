@@ -35,6 +35,8 @@ class TriggerRequest(BaseModel):
     # reconfigure + recompile; leaves source checkouts and run data intact.
     clean_build: bool = False
     custom_cmake_args: list[str] = Field(default_factory=list)
+    mpi_ranks: Optional[int] = Field(default=None, ge=1)
+    opalx_info_level: Optional[int] = Field(default=None, ge=0)
     # None or "local" → local execution. Otherwise → load the calling user's
     # named connection from <users_root>/<username>/connections.json.
     connection_name: Optional[str] = None
@@ -51,6 +53,14 @@ class TriggerResponse(BaseModel):
     queued: bool = False
     queue_id: Optional[str] = None
     position: Optional[int] = None
+
+
+class RunConfigSummary(BaseModel):
+    arch: str
+    default_mpi_ranks: int
+    max_mpi_ranks: Optional[int] = None
+    default_opalx_info_level: int
+    slurm_enabled: bool
 
 
 class CurrentRunStatus(BaseModel):
@@ -89,6 +99,35 @@ def _run_id_from_time() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _configured_arch_names(cfg: SuiteConfig) -> list[str]:
+    names = list(cfg.default_architectures)
+    for ac in cfg.arch_configs:
+        if ac.arch not in names:
+            names.append(ac.arch)
+    return names
+
+
+def _validate_run_option_overrides(
+    cfg: SuiteConfig,
+    arch: str,
+    *,
+    mpi_ranks: Optional[int],
+) -> None:
+    ac = cfg.get_arch_config(arch)
+    if (
+        mpi_ranks is not None
+        and ac.max_mpi_ranks is not None
+        and mpi_ranks > ac.max_mpi_ranks
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"mpi_ranks={mpi_ranks} exceeds max_mpi_ranks="
+                f"{ac.max_mpi_ranks} for arch '{arch}'."
+            ),
+        )
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/archs", response_model=list[str])
@@ -97,11 +136,32 @@ def list_archs(
     cfg: SuiteConfig = Depends(get_config),
 ):
     """Return all configured architecture identifiers."""
-    names = list(cfg.default_architectures)
-    for ac in cfg.arch_configs:
-        if ac.arch not in names:
-            names.append(ac.arch)
-    return names
+    return _configured_arch_names(cfg)
+
+
+@router.get("/run-configs", response_model=list[RunConfigSummary])
+def list_run_configs(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+):
+    """Return configured run defaults for each architecture."""
+    out: list[RunConfigSummary] = []
+    for arch in _configured_arch_names(cfg):
+        ac = cfg.get_arch_config(arch)
+        out.append(
+            RunConfigSummary(
+                arch=arch,
+                default_mpi_ranks=ac.mpi_ranks,
+                max_mpi_ranks=ac.max_mpi_ranks,
+                default_opalx_info_level=(
+                    ac.opalx_info_level
+                    if ac.opalx_info_level is not None
+                    else cfg.opalx_info_level
+                ),
+                slurm_enabled=bool(ac.slurm is not None or ac.slurm_args),
+            )
+        )
+    return out
 
 
 @router.get("/current", response_model=Optional[CurrentRunStatus])
@@ -165,6 +225,11 @@ async def trigger_run(
     cfg: SuiteConfig = Depends(get_config),
 ):
     run_id = _run_id_from_time()
+    _validate_run_option_overrides(
+        cfg,
+        body.arch,
+        mpi_ranks=body.mpi_ranks,
+    )
 
     # HTTP-specific pre-validation: interactive 2FA gateways must receive
     # credentials in the request body. start_run() doesn't know about the
@@ -204,6 +269,8 @@ async def trigger_run(
         skip_regression=body.skip_regression,
         clean_build=body.clean_build,
         custom_cmake_args=body.custom_cmake_args,
+        mpi_ranks=body.mpi_ranks,
+        opalx_info_level=body.opalx_info_level,
         connection_name=body.connection_name,
         rerun_of=body.rerun_of,
         gateway_password=body.gateway_password,

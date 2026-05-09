@@ -46,6 +46,8 @@ class ActiveRun:
     public: bool = False
     rerun_of: Optional["RerunReference"] = None
     custom_cmake_args: list[str] = field(default_factory=list)
+    mpi_ranks: Optional[int] = None
+    opalx_info_level: Optional[int] = None
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -73,6 +75,8 @@ class QueuedRun:
     public: bool = False
     rerun_of: Optional["RerunReference"] = None
     custom_cmake_args: list[str] = field(default_factory=list)
+    mpi_ranks: Optional[int] = None
+    opalx_info_level: Optional[int] = None
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -142,6 +146,8 @@ async def acquire_run_slot(
     public: bool = False,
     rerun_of: Optional["RerunReference"] = None,
     custom_cmake_args: Optional[list[str]] = None,
+    mpi_ranks: Optional[int] = None,
+    opalx_info_level: Optional[int] = None,
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -168,6 +174,8 @@ async def acquire_run_slot(
             public=public,
             rerun_of=rerun_of,
             custom_cmake_args=list(custom_cmake_args or []),
+            mpi_ranks=mpi_ranks,
+            opalx_info_level=opalx_info_level,
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

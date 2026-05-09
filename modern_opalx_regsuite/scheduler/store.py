@@ -89,6 +89,8 @@ async def create_schedule(
         skip_unit=body.skip_unit,
         skip_regression=body.skip_regression,
         clean_build=body.clean_build,
+        mpi_ranks=body.mpi_ranks,
+        opalx_info_level=body.opalx_info_level,
         public=body.public,
         owner=owner,
         created_at=now,
@@ -125,6 +127,8 @@ async def update_schedule(
                         "skip_unit": body.skip_unit,
                         "skip_regression": body.skip_regression,
                         "clean_build": body.clean_build,
+                        "mpi_ranks": body.mpi_ranks,
+                        "opalx_info_level": body.opalx_info_level,
                         "public": body.public,
                         "modified_at": now,
                     }

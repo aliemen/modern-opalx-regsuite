@@ -62,6 +62,8 @@ class Schedule(BaseModel):
     # Forces a full reconfigure + recompile; source checkouts and run data
     # are untouched. Default False so existing schedules keep fast builds.
     clean_build: bool = False
+    mpi_ranks: int = Field(1, ge=1)
+    opalx_info_level: int = Field(2, ge=0)
     # When True, runs produced by this schedule are stamped public=True in
     # their RunMeta / RunIndexEntry and appear on the unauthenticated
     # /api/public/* surface.
@@ -94,6 +96,8 @@ class ScheduleCreateRequest(BaseModel):
     skip_unit: bool = False
     skip_regression: bool = False
     clean_build: bool = False
+    mpi_ranks: int = Field(1, ge=1)
+    opalx_info_level: int = Field(2, ge=0)
     public: bool = False
 
 
@@ -112,4 +116,6 @@ class ScheduleUpdateRequest(BaseModel):
     skip_unit: bool = False
     skip_regression: bool = False
     clean_build: bool = False
+    mpi_ranks: int = Field(1, ge=1)
+    opalx_info_level: int = Field(2, ge=0)
     public: bool = False

@@ -1,29 +1,23 @@
 """Main pipeline orchestration: git → cmake → build → unit → regression."""
 from __future__ import annotations
 
-import json
-import shlex
 import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..archive_service import locked_index
 from ..config import Connection, SuiteConfig
 from ..artifacts import write_artifact_manifest
 from ..data_model import (
     RerunReference,
-    RunIndexEntry,
     RunMeta,
     RunOptions,
     UnitTestsReport,
     RegressionTestsReport,
-    branches_index_path,
-    runs_index_path,
 )
+from .cmake import build_cmake_command, merge_cmake_args, normalize_custom_cmake_args
 from .execution import (
-    RunPaths,
     _append_pipeline_line,
     _build_local_env,
     _ensure_run_paths,
@@ -32,120 +26,12 @@ from .execution import (
     _start_pipeline_log,
     _write_json,
 )
-from .git import _get_repo_url, _git_head_short, _git_update_repo
+from .pipeline_git import sync_repositories
+from .pipeline_indexes import _cancel_run, _update_indexes
+from .pipeline_options import resolve_effective_run_options
 from .parsing.unit import _parse_unit_output
 from .regression_runner import _run_regression_suite, _run_regression_suite_remote
-
-
-def _cmake_define_key(arg: str) -> Optional[str]:
-    """Return the CMake ``-D`` variable key for ``-DKEY=`` or ``-DKEY:type=``."""
-    if not arg.startswith("-D"):
-        return None
-    body = arg[2:]
-    if "=" not in body:
-        return None
-    key_part = body.split("=", 1)[0]
-    key = key_part.split(":", 1)[0]
-    return key or None
-
-
-def normalize_custom_cmake_args(args: Optional[list[str]]) -> list[str]:
-    """Trim custom CMake args and drop blank/comment lines from the trigger UI."""
-    return [
-        arg.strip()
-        for arg in (args or [])
-        if arg.strip() and not arg.strip().startswith("#")
-    ]
-
-
-def merge_cmake_args(base_args: list[str], custom_args: list[str]) -> list[str]:
-    """Merge run-level custom CMake args over configured base args.
-
-    Custom ``-DKEY=...`` arguments replace configured ``-DKEY=...`` or
-    ``-DKEY:type=...`` arguments for the same key. Duplicate custom keys keep
-    only the last occurrence. Non-``-D`` custom args are appended as-is.
-    """
-    custom_args = normalize_custom_cmake_args(custom_args)
-    last_custom_index_by_key: dict[str, int] = {}
-    for idx, arg in enumerate(custom_args):
-        key = _cmake_define_key(arg)
-        if key is not None:
-            last_custom_index_by_key[key] = idx
-
-    custom_keys = set(last_custom_index_by_key)
-    merged = [
-        arg for arg in base_args if (_cmake_define_key(arg) not in custom_keys)
-    ]
-    for idx, arg in enumerate(custom_args):
-        key = _cmake_define_key(arg)
-        if key is None or last_custom_index_by_key[key] == idx:
-            merged.append(arg)
-    return merged
-
-
-def build_cmake_command(cmake_args: list[str], source_dir: str) -> str:
-    """Build a shell-safe CMake command string for local and remote executors."""
-    return " ".join(["cmake", *(shlex.quote(a) for a in cmake_args), shlex.quote(source_dir)])
-
-
-def _cancel_run(meta: RunMeta, paths: RunPaths, data_root: Path) -> RunMeta:
-    """Finalise a cancelled run and persist it."""
-    _append_pipeline_line(paths.pipeline_log_path, "== PHASE: done status=cancelled ==")
-    meta.status = "cancelled"
-    meta.finished_at = datetime.now(timezone.utc)
-    _write_json(paths.meta_path, meta.model_dump())
-    write_artifact_manifest(paths.root)
-    _update_indexes(data_root, meta)
-    return meta
-
-
-def _update_indexes(data_root: Path, meta: RunMeta) -> None:
-    # Update runs index for branch/arch under the same fcntl lock used by the
-    # archive service, so a bulk-archive flip and a pipeline completion can't
-    # clobber each other.
-    index_path = runs_index_path(data_root, meta.branch, meta.arch)
-    with locked_index(index_path):
-        entries: list[RunIndexEntry] = []
-        if index_path.is_file():
-            with index_path.open("r", encoding="utf-8") as f:
-                raw = json.load(f)
-            entries = [RunIndexEntry.model_validate(e) for e in raw]
-
-        entry = RunIndexEntry(
-            branch=meta.branch,
-            arch=meta.arch,
-            run_id=meta.run_id,
-            started_at=meta.started_at,
-            finished_at=meta.finished_at,
-            status=meta.status,
-            connection_name=meta.connection_name,
-            triggered_by=meta.triggered_by,
-            regtest_branch=meta.regtest_branch,
-            unit_tests_total=meta.unit_tests_total,
-            unit_tests_failed=meta.unit_tests_failed,
-            regression_total=meta.regression_total,
-            regression_passed=meta.regression_passed,
-            regression_failed=meta.regression_failed,
-            regression_broken=meta.regression_broken,
-            archived=meta.archived,
-            public=meta.public,
-            run_options=meta.run_options,
-            rerun_of=meta.rerun_of,
-        )
-        entries.append(entry)
-        entries.sort(key=lambda e: e.started_at, reverse=True)
-        _write_json(index_path, [e.model_dump() for e in entries])
-
-    # Update branches index.
-    branches_path = branches_index_path(data_root)
-    branches: dict[str, list[str]] = {}
-    if branches_path.is_file():
-        with branches_path.open("r", encoding="utf-8") as f:
-            branches = json.load(f)
-    archs = set(branches.get(meta.branch, []))
-    archs.add(meta.arch)
-    branches[meta.branch] = sorted(archs)
-    _write_json(branches_path, branches)
+from .remote_setup import create_remote_executor
 
 
 def run_pipeline(
@@ -165,6 +51,8 @@ def run_pipeline(
     public: bool = False,
     rerun_of: Optional[RerunReference] = None,
     custom_cmake_args: Optional[list[str]] = None,
+    mpi_ranks: Optional[int] = None,
+    opalx_info_level: Optional[int] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -194,8 +82,15 @@ def run_pipeline(
 
     is_remote = connection is not None
     connection_name = connection.name if connection is not None else "local"
-    effective_custom_cmake_args = normalize_custom_cmake_args(custom_cmake_args)
-    effective_clean_build = clean_build or bool(effective_custom_cmake_args)
+    run_options = resolve_effective_run_options(
+        cfg=cfg,
+        arch=arch,
+        clean_build=clean_build,
+        custom_cmake_args=custom_cmake_args,
+        mpi_ranks=mpi_ranks,
+        opalx_info_level=opalx_info_level,
+    )
+    ac = run_options.arch_config
 
     # SENSITIVE-DATA RULE: only ``connection_name`` (user-chosen) lands in
     # run-meta.json. Never write the underlying SSH host/user/work_dir here.
@@ -211,19 +106,22 @@ def run_pipeline(
         run_options=RunOptions(
             skip_unit=skip_unit,
             skip_regression=skip_regression,
-            clean_build=effective_clean_build,
-            custom_cmake_args=effective_custom_cmake_args,
+            clean_build=run_options.clean_build,
+            custom_cmake_args=run_options.custom_cmake_args,
+            mpi_ranks=run_options.mpi_ranks,
+            opalx_info_level=run_options.opalx_info_level,
         ),
         rerun_of=rerun_of,
     )
     meta.regtest_branch = cfg.regtests_branch
     _write_json(paths.meta_path, meta.model_dump())
 
-    # Resolve arch-specific overrides.
-    ac = cfg.get_arch_config(arch)
     base_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
-    effective_cmake_args = merge_cmake_args(base_cmake_args, effective_custom_cmake_args)
+    effective_cmake_args = merge_cmake_args(
+        base_cmake_args, run_options.custom_cmake_args
+    )
     build_cmd = f"make -j{ac.build_jobs}"
+    slurm_allocation_args = ac.slurm_allocation_args(run_options.mpi_ranks)
 
     # ── Remote executor setup ────────────────────────────────────────────────
     remote: Optional["RemoteExecutor"] = None  # type: ignore[name-defined]
@@ -231,45 +129,17 @@ def run_pipeline(
     remote_build: Optional[str] = None
 
     if is_remote and connection is not None:
-        from ..remote import RemoteExecutor
-
-        if target_key_path is None:
-            raise ValueError(
-                "run_pipeline: connection is set but target_key_path is None — "
-                "the API layer must pre-resolve key paths."
-            )
-        if not target_key_path.exists():
-            raise FileNotFoundError(f"SSH key not found: {target_key_path}")
-        if (
-            connection.gateway is not None
-            and connection.gateway.auth_method != "interactive"
-        ):
-            if gateway_key_path is None:
-                raise ValueError(
-                    "run_pipeline: connection has a gateway but gateway_key_path is None"
-                )
-            if not gateway_key_path.exists():
-                raise FileNotFoundError(
-                    f"Gateway SSH key not found: {gateway_key_path}"
-                )
-        remote = RemoteExecutor(
-            host=connection.host,
-            user=connection.user,
-            key_path=target_key_path,
-            port=connection.port,
-            connection_name=connection.name,
-            gateway=connection.gateway,
+        remote, remote_base, remote_build = create_remote_executor(
+            connection=connection,
+            target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,
-            env=connection.env,
             pipeline_log_path=paths.pipeline_log_path,
-            keepalive_interval=connection.keepalive_interval,
-            command_timeout=ac.command_timeout,
-            salloc_timeout=ac.salloc_timeout,
+            arch_config=ac,
+            branch=branch,
+            arch=arch,
             gateway_password=gateway_password,
             gateway_otp=gateway_otp,
         )
-        remote_base = connection.work_dir
-        remote_build = f"{remote_base}/builds/{branch}/{arch}/build"
 
     # Build the local environment once for this run (used by cmake, build, tests).
     # Remote runs: env activation happens inline inside RemoteExecutor.
@@ -287,14 +157,14 @@ def run_pipeline(
 
     try:
         # ── Phase: slurm-alloc (optional) ────────────────────────────────────
-        if is_remote and remote is not None and ac.slurm_args:
+        if is_remote and remote is not None and slurm_allocation_args:
             _phase(paths.pipeline_log_path, "slurm-alloc")
             try:
-                job_id = remote.allocate_slurm_job(ac.slurm_args)
+                job_id = remote.allocate_slurm_job(slurm_allocation_args)
                 _append_pipeline_line(
                     paths.pipeline_log_path,
                     f"[{connection_name}] Slurm job {job_id} allocated"
-                    f" ({' '.join(ac.slurm_args)})",
+                    f" ({' '.join(slurm_allocation_args)})",
                 )
             except Exception as exc:
                 _phase(paths.pipeline_log_path, "done status=failed")
@@ -314,103 +184,19 @@ def run_pipeline(
 
         # ── Phase: git ────────────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "git")
-
-        if is_remote and remote is not None:
-            # Remote runs: read-only local operations only.
-            # We never mutate the local working tree so concurrent local
-            # builds are not disturbed.  The real clone/update happens on
-            # the remote machine.
-            meta.opalx_commit = _git_head_short(opalx_repo)
-            meta.tests_repo_commit = _git_head_short(regtests_repo)
-            _write_json(paths.meta_path, meta.model_dump())
-
-            opalx_url = _get_repo_url(opalx_repo, cfg.opalx_repo_url)
-            regtests_url = _get_repo_url(regtests_repo, cfg.regtests_repo_url)
-
-            # Sanitized: connection_name only, no host. The actual git URLs are
-            # public (or at least already in the user's connection config) so
-            # they're acceptable; the SSH host is not.
-            _append_pipeline_line(
-                paths.pipeline_log_path,
-                f"[{connection_name}] Cloning/updating OPALX (branch={branch})",
-            )
-            remote_opalx_ok = remote.git_clone_or_update(
-                opalx_url,
-                f"{remote_base}/opalx-src",
-                branch,
-                log_path=paths.pipeline_log_path,
-                cancel_event=cancel_event,
-            )
-            _append_pipeline_line(
-                paths.pipeline_log_path,
-                f"[{connection_name}] Cloning/updating regression-tests (branch={cfg.regtests_branch})",
-            )
-            remote_regtests_ok = remote.git_clone_or_update(
-                regtests_url,
-                f"{remote_base}/regtests",
-                cfg.regtests_branch,
-                log_path=paths.pipeline_log_path,
-                cancel_event=cancel_event,
-            )
-            opalx_git_ok = remote_opalx_ok and remote_regtests_ok
-            reg_git_ok = True
-            if opalx_git_ok:
-                # Capture actual commit hashes from the remote checkouts now
-                # that git fetch/checkout/pull have completed.  The local repos
-                # may be on different branches, so reading them (lines above)
-                # gives wrong hashes — overwrite with the real remote values.
-                meta.opalx_commit = remote.git_rev_parse_short(
-                    f"{remote_base}/opalx-src"
-                )
-                meta.tests_repo_commit = remote.git_rev_parse_short(
-                    f"{remote_base}/regtests"
-                )
-                _write_json(paths.meta_path, meta.model_dump())
-                _append_pipeline_line(
-                    paths.pipeline_log_path,
-                    f"[{connection_name}] OPALX and regression-tests ready.",
-                )
-        else:
-            # Local runs: full git update under per-repo locks so concurrent
-            # pipelines serialise access to the shared working trees.
-            _opalx_lock = (repo_locks or {}).get(str(opalx_repo))
-            _regtests_lock = (repo_locks or {}).get(str(regtests_repo))
-
-            if _opalx_lock:
-                _opalx_lock.acquire()
-            try:
-                _append_pipeline_line(
-                    paths.pipeline_log_path,
-                    f"Updating OPALX repo at {opalx_repo}",
-                )
-                opalx_git_ok = _git_update_repo(
-                    repo_path=opalx_repo,
-                    branch=branch,
-                    pipeline_log_path=paths.pipeline_log_path,
-                )
-                meta.opalx_commit = _git_head_short(opalx_repo)
-            finally:
-                if _opalx_lock:
-                    _opalx_lock.release()
-
-            if _regtests_lock:
-                _regtests_lock.acquire()
-            try:
-                _append_pipeline_line(
-                    paths.pipeline_log_path,
-                    f"Updating regression-tests repo at {regtests_repo} (branch {cfg.regtests_branch})",
-                )
-                reg_git_ok = _git_update_repo(
-                    repo_path=regtests_repo,
-                    branch=cfg.regtests_branch,
-                    pipeline_log_path=paths.pipeline_log_path,
-                )
-                meta.tests_repo_commit = _git_head_short(regtests_repo)
-            finally:
-                if _regtests_lock:
-                    _regtests_lock.release()
-
-            _write_json(paths.meta_path, meta.model_dump())
+        opalx_git_ok, reg_git_ok = sync_repositories(
+            cfg=cfg,
+            meta=meta,
+            paths=paths,
+            branch=branch,
+            connection_name=connection_name,
+            remote=remote,
+            remote_base=remote_base,
+            opalx_repo=opalx_repo,
+            regtests_repo=regtests_repo,
+            repo_locks=repo_locks,
+            cancel_event=cancel_event,
+        )
 
         if cancel_event is not None and cancel_event.is_set():
             return _cancel_run(meta, paths, data_root)
@@ -434,7 +220,7 @@ def run_pipeline(
         # ── Clean build (optional) ───────────────────────────────────────────
         # User-requested full reconfigure: wipe the per-branch/arch build dir
         # before cmake. Source checkouts and run data are untouched.
-        if effective_clean_build:
+        if run_options.clean_build:
             if is_remote and remote is not None:
                 _append_pipeline_line(
                     paths.pipeline_log_path,
@@ -582,7 +368,9 @@ def run_pipeline(
                     cfg=cfg,
                     paths=paths,
                     connection=connection,
-                    mpi_ranks=ac.mpi_ranks,
+                    mpi_ranks=run_options.mpi_ranks,
+                    opalx_info_level=run_options.opalx_info_level,
+                    use_slurm=bool(slurm_allocation_args),
                     remote=remote,
                     remote_base=remote_base,  # type: ignore[arg-type]
                     remote_build=remote_build,  # type: ignore[arg-type]
@@ -596,7 +384,8 @@ def run_pipeline(
                     paths=paths,
                     build_dir=build_dir,
                     pipeline_log_path=paths.pipeline_log_path,
-                    mpi_ranks=ac.mpi_ranks,
+                    mpi_ranks=run_options.mpi_ranks,
+                    opalx_info_level=run_options.opalx_info_level,
                     cancel_event=cancel_event,
                     base_env=module_env,
                 )

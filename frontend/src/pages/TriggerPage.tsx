@@ -2,15 +2,22 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Play, Info, ShieldAlert } from "lucide-react";
+import { RefreshCw, Play, Info } from "lucide-react";
 import {
-  getArchConfigs,
   getOpalxBranches,
   getRegtestsBranches,
+  getRunConfigs,
   triggerRun,
   type TriggerRequest,
 } from "../api/runs";
 import { listConnections, LOCAL_CONNECTION } from "../api/connections";
+import { InteractiveGatewayFields } from "./trigger/InteractiveGatewayFields";
+import { RuntimeFields } from "./trigger/RuntimeFields";
+import {
+  parseCustomCmakeArgs,
+  parseNonNegativeIntParam,
+  parsePositiveIntParam,
+} from "./trigger/parse";
 
 const MAX_BRANCH_LABEL_CHARS = 56;
 type TriggerTab = "basic" | "advanced";
@@ -25,12 +32,7 @@ function fallbackBranch(branches: string[] | undefined): string {
   return branches.includes("master") ? "master" : branches[0];
 }
 
-export function parseCustomCmakeArgs(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("#"));
-}
+export { parseCustomCmakeArgs };
 
 export function TriggerPage() {
   const navigate = useNavigate();
@@ -52,6 +54,12 @@ export function TriggerPage() {
   );
   const [cleanBuild, setCleanBuild] = useState(
     searchParams.get("clean_build") === "true"
+  );
+  const [mpiRanks, setMpiRanks] = useState(() =>
+    parsePositiveIntParam(searchParams.get("mpi_ranks"), 1)
+  );
+  const [opalxInfoLevel, setOpalxInfoLevel] = useState(() =>
+    parseNonNegativeIntParam(searchParams.get("opalx_info_level"), 2)
   );
   const [activeTab, setActiveTab] = useState<TriggerTab>("basic");
   const [customCmakeText, setCustomCmakeText] = useState("");
@@ -76,9 +84,9 @@ export function TriggerPage() {
     isFetching: fetchingRegtests,
   } = useQuery({ queryKey: ["regtests-branches"], queryFn: getRegtestsBranches });
 
-  const { data: archConfigs, isLoading: loadingArchs } = useQuery({
-    queryKey: ["arch-configs"],
-    queryFn: getArchConfigs,
+  const { data: runConfigs, isLoading: loadingArchs } = useQuery({
+    queryKey: ["run-configs"],
+    queryFn: getRunConfigs,
   });
 
   const { data: connections, isLoading: loadingConnections } = useQuery({
@@ -99,6 +107,9 @@ export function TriggerPage() {
   // Detect if the selected connection uses an interactive gateway.
   const selectedConnection =
     connections?.find((c) => c.name === connectionName) ?? null;
+  const selectedRunConfig =
+    runConfigs?.find((c) => c.arch === arch) ?? null;
+  const archConfigs = runConfigs?.map((c) => c.arch);
   const connectionMissing =
     connectionName !== LOCAL_CONNECTION &&
     !loadingConnections &&
@@ -110,6 +121,25 @@ export function TriggerPage() {
     selectedConnection !== null &&
     selectedConnection.gateway != null &&
     selectedConnection.gateway.auth_method === "interactive";
+
+  useEffect(() => {
+    if (!selectedRunConfig) return;
+    if (!searchParams.has("mpi_ranks")) {
+      setMpiRanks(selectedRunConfig.default_mpi_ranks);
+    }
+    if (!searchParams.has("opalx_info_level")) {
+      setOpalxInfoLevel(selectedRunConfig.default_opalx_info_level);
+    }
+  }, [selectedRunConfig, searchParams]);
+
+  function updateArch(nextArch: string) {
+    setArch(nextArch);
+    const nextConfig = runConfigs?.find((c) => c.arch === nextArch);
+    if (nextConfig) {
+      setMpiRanks(nextConfig.default_mpi_ranks);
+      setOpalxInfoLevel(nextConfig.default_opalx_info_level);
+    }
+  }
 
   async function handleStart() {
     setError(null);
@@ -130,6 +160,21 @@ export function TriggerPage() {
         return;
       }
     }
+    if (!Number.isInteger(mpiRanks) || mpiRanks < 1) {
+      setError("MPI ranks must be at least 1.");
+      return;
+    }
+    if (
+      selectedRunConfig?.max_mpi_ranks != null &&
+      mpiRanks > selectedRunConfig.max_mpi_ranks
+    ) {
+      setError(`MPI ranks cannot exceed ${selectedRunConfig.max_mpi_ranks} for ${arch}.`);
+      return;
+    }
+    if (!Number.isInteger(opalxInfoLevel) || opalxInfoLevel < 0) {
+      setError("OPALX info level must be 0 or greater.");
+      return;
+    }
 
     try {
       const body: TriggerRequest = {
@@ -140,6 +185,8 @@ export function TriggerPage() {
         skip_regression: skipRegression,
         clean_build: effectiveCleanBuild,
         custom_cmake_args: customCmakeArgs,
+        mpi_ranks: mpiRanks,
+        opalx_info_level: opalxInfoLevel,
         connection_name: connectionName,
       };
       const rerunBranch = searchParams.get("rerun_branch");
@@ -269,7 +316,7 @@ export function TriggerPage() {
           <label className="block text-sm text-muted mb-1">Run config</label>
           <select
             value={arch}
-            onChange={(e) => setArch(e.target.value)}
+            onChange={(e) => updateArch(e.target.value)}
             className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
             disabled={loadingArchs}
           >
@@ -281,6 +328,14 @@ export function TriggerPage() {
             ))}
           </select>
         </div>
+
+        <RuntimeFields
+          selectedRunConfig={selectedRunConfig}
+          mpiRanks={mpiRanks}
+          opalxInfoLevel={opalxInfoLevel}
+          onMpiRanksChange={setMpiRanks}
+          onOpalxInfoLevelChange={setOpalxInfoLevel}
+        />
 
         {/* Connection (or local) */}
         <div>
@@ -322,53 +377,13 @@ export function TriggerPage() {
 
         {/* Interactive gateway credentials */}
         {needsInteractiveCredentials && (
-          <div className="border border-border rounded-md p-4 flex flex-col gap-3 bg-bg">
-            <div className="flex items-start gap-2 text-sm text-muted">
-              <ShieldAlert size={16} className="mt-0.5 shrink-0 text-accent" />
-              <p className="text-xs">
-                This connection uses an interactive SSH gateway
-                ({selectedConnection!.gateway!.host}). Enter your password and
-                Microsoft Authenticator OTP code below. Credentials are used for
-                this run only and are never stored.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs text-muted mb-1">
-                  Gateway password
-                </label>
-                <input
-                  type="password"
-                  value={gatewayPassword}
-                  onChange={(e) => setGatewayPassword(e.target.value)}
-                  placeholder="PSI password"
-                  className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-                  autoComplete="off"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-muted mb-1">
-                  Authenticator OTP
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={gatewayOtp}
-                  onChange={(e) => setGatewayOtp(e.target.value)}
-                  placeholder="6-digit code"
-                  className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-                  autoComplete="off"
-                />
-              </div>
-            </div>
-            <p className="text-xs text-muted">
-              Use the OTP code from Microsoft Authenticator (not the push
-              notification). The code is time-limited — enter it just before
-              clicking Start Run. If the target machine is busy, the run cannot
-              be queued (the OTP would expire).
-            </p>
-          </div>
+          <InteractiveGatewayFields
+            connection={selectedConnection!}
+            gatewayPassword={gatewayPassword}
+            gatewayOtp={gatewayOtp}
+            onGatewayPasswordChange={setGatewayPassword}
+            onGatewayOtpChange={setGatewayOtp}
+          />
         )}
 
         {/* Options */}

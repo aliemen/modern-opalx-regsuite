@@ -102,6 +102,8 @@ export interface RunOptions {
   skip_regression: boolean;
   clean_build: boolean;
   custom_cmake_args: string[];
+  mpi_ranks: number;
+  opalx_info_level: number;
 }
 
 export interface RerunReference {

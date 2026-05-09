@@ -13,6 +13,15 @@ vi.mock("../api/runs", async () => {
     getOpalxBranches: vi.fn(async () => ["master"]),
     getRegtestsBranches: vi.fn(async () => ["master"]),
     getArchConfigs: vi.fn(async () => ["cpu-serial"]),
+    getRunConfigs: vi.fn(async () => [
+      {
+        arch: "cpu-serial",
+        default_mpi_ranks: 1,
+        max_mpi_ranks: 4,
+        default_opalx_info_level: 2,
+        slurm_enabled: false,
+      },
+    ]),
     triggerRun: vi.fn(),
   };
 });
@@ -106,6 +115,32 @@ describe("TriggerPage rerun prefill", () => {
             "-DIPPL_GIT_TAG=master",
             "-DKokkos_VERSION=git.4.7.01",
           ],
+        })
+      );
+    });
+  });
+
+  it("sends MPI ranks and OPALX info level overrides", async () => {
+    vi.mocked(triggerRun).mockResolvedValue({
+      run_id: "20260507-120000",
+      queued: true,
+      queue_id: "queue-1",
+      position: 1,
+    });
+    const user = userEvent.setup();
+
+    renderPage(
+      "/trigger?branch=master&regtests_branch=master&arch=cpu-serial&mpi_ranks=2&opalx_info_level=4"
+    );
+
+    await screen.findByDisplayValue("2");
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+
+    await waitFor(() => {
+      expect(triggerRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mpi_ranks: 2,
+          opalx_info_level: 4,
         })
       );
     });

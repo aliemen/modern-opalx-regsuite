@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X, ShieldAlert } from "lucide-react";
 import {
-  getArchConfigs,
   getOpalxBranches,
   getRegtestsBranches,
+  getRunConfigs,
 } from "../../api/runs";
 import { listConnections, LOCAL_CONNECTION } from "../../api/connections";
 import type {
@@ -35,6 +35,8 @@ function defaultBody(): ScheduleWriteBody {
     skip_unit: false,
     skip_regression: false,
     clean_build: false,
+    mpi_ranks: 1,
+    opalx_info_level: 2,
     public: false,
   };
 }
@@ -51,6 +53,8 @@ function scheduleToBody(schedule: Schedule): ScheduleWriteBody {
     skip_unit: schedule.skip_unit,
     skip_regression: schedule.skip_regression,
     clean_build: schedule.clean_build,
+    mpi_ranks: schedule.mpi_ranks ?? 1,
+    opalx_info_level: schedule.opalx_info_level ?? 2,
     public: schedule.public,
   };
 }
@@ -82,9 +86,9 @@ export function ScheduleFormModal({
     queryFn: getRegtestsBranches,
     enabled: open,
   });
-  const { data: archConfigs } = useQuery({
-    queryKey: ["arch-configs"],
-    queryFn: getArchConfigs,
+  const { data: runConfigs } = useQuery({
+    queryKey: ["run-configs"],
+    queryFn: getRunConfigs,
     enabled: open,
   });
   const { data: connections } = useQuery({
@@ -102,6 +106,20 @@ export function ScheduleFormModal({
   );
   const selectedIs2fa =
     selectedConnection?.gateway?.auth_method === "interactive";
+  const selectedRunConfig = useMemo(
+    () => runConfigs?.find((c) => c.arch === form.arch) ?? null,
+    [runConfigs, form.arch],
+  );
+  const archConfigs = runConfigs?.map((c) => c.arch);
+
+  useEffect(() => {
+    if (!open || initial || !selectedRunConfig) return;
+    setForm((prev) => ({
+      ...prev,
+      mpi_ranks: selectedRunConfig.default_mpi_ranks,
+      opalx_info_level: selectedRunConfig.default_opalx_info_level,
+    }));
+  }, [open, initial, selectedRunConfig]);
 
   function updateField<K extends keyof ScheduleWriteBody>(
     key: K,
@@ -116,6 +134,17 @@ export function ScheduleFormModal({
 
   function updateTime(time: string) {
     setForm((prev) => ({ ...prev, spec: { ...prev.spec, time } }));
+  }
+
+  function updateArch(arch: string) {
+    const nextConfig = runConfigs?.find((c) => c.arch === arch);
+    setForm((prev) => ({
+      ...prev,
+      arch,
+      mpi_ranks: nextConfig?.default_mpi_ranks ?? prev.mpi_ranks,
+      opalx_info_level:
+        nextConfig?.default_opalx_info_level ?? prev.opalx_info_level,
+    }));
   }
 
   async function handleSubmit() {
@@ -136,6 +165,23 @@ export function ScheduleFormModal({
       setError(
         "This connection uses a 2FA gateway — scheduled runs cannot supply OTPs.",
       );
+      return;
+    }
+    if (!Number.isInteger(form.mpi_ranks) || form.mpi_ranks < 1) {
+      setError("MPI ranks must be at least 1.");
+      return;
+    }
+    if (
+      selectedRunConfig?.max_mpi_ranks != null &&
+      form.mpi_ranks > selectedRunConfig.max_mpi_ranks
+    ) {
+      setError(
+        `MPI ranks cannot exceed ${selectedRunConfig.max_mpi_ranks} for ${form.arch}.`,
+      );
+      return;
+    }
+    if (!Number.isInteger(form.opalx_info_level) || form.opalx_info_level < 0) {
+      setError("OPALX info level must be 0 or greater.");
       return;
     }
     try {
@@ -239,13 +285,58 @@ export function ScheduleFormModal({
             <label className="block text-sm text-muted mb-1">Run config</label>
             <select
               value={form.arch}
-              onChange={(e) => updateField("arch", e.target.value)}
+              onChange={(e) => updateArch(e.target.value)}
               className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
             >
               {(archConfigs ?? [form.arch]).map((a) => (
                 <option key={a}>{a}</option>
               ))}
             </select>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="schedule-mpi-ranks"
+                className="block text-sm text-muted mb-1"
+              >
+                MPI ranks
+              </label>
+              <input
+                id="schedule-mpi-ranks"
+                type="number"
+                min={1}
+                max={selectedRunConfig?.max_mpi_ranks ?? undefined}
+                step={1}
+                value={form.mpi_ranks}
+                onChange={(e) =>
+                  updateField("mpi_ranks", Number.parseInt(e.target.value, 10) || 1)
+                }
+                className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="schedule-opalx-info-level"
+                className="block text-sm text-muted mb-1"
+              >
+                OPALX info level
+              </label>
+              <input
+                id="schedule-opalx-info-level"
+                type="number"
+                min={0}
+                step={1}
+                value={form.opalx_info_level}
+                onChange={(e) =>
+                  updateField(
+                    "opalx_info_level",
+                    Math.max(0, Number.parseInt(e.target.value, 10) || 0),
+                  )
+                }
+                className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+              />
+            </div>
           </div>
 
           <div>

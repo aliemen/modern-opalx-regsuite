@@ -39,6 +39,8 @@ export interface Schedule {
   skip_unit: boolean;
   skip_regression: boolean;
   clean_build: boolean;
+  mpi_ranks: number;
+  opalx_info_level: number;
   public: boolean;
   owner: string;
   created_at: string;
@@ -60,6 +62,8 @@ export interface ScheduleWriteBody {
   skip_unit: boolean;
   skip_regression: boolean;
   clean_build: boolean;
+  mpi_ranks: number;
+  opalx_info_level: number;
   public: boolean;
 }
 

@@ -164,6 +164,14 @@ export function ScheduleCard({
         <div className="truncate">
           Connection: <span className="text-fg">{schedule.connection_name}</span>
         </div>
+        <div className="truncate">
+          Runtime:{" "}
+          <span className="text-fg">
+            {schedule.mpi_ranks ?? 1} rank
+            {(schedule.mpi_ranks ?? 1) === 1 ? "" : "s"} / info{" "}
+            {schedule.opalx_info_level ?? 2}
+          </span>
+        </div>
       </div>
 
       {(schedule.skip_unit ||

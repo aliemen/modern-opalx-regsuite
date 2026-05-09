@@ -24,6 +24,8 @@ export interface TriggerRequest {
    */
   clean_build?: boolean;
   custom_cmake_args?: string[];
+  mpi_ranks?: number;
+  opalx_info_level?: number;
   /**
    * Name of the per-user Connection to run on. Use `null` or `"local"` for
    * local execution. Connections are managed in Settings.
@@ -58,6 +60,14 @@ export interface MachineStatus {
 
 export interface QueueStateResponse {
   machines: MachineStatus[];
+}
+
+export interface RunConfigSummary {
+  arch: string;
+  default_mpi_ranks: number;
+  max_mpi_ranks: number | null;
+  default_opalx_info_level: number;
+  slurm_enabled: boolean;
 }
 
 export interface DashboardStats {
@@ -112,6 +122,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 
 export async function getArchConfigs(): Promise<string[]> {
   const res = await api.get<string[]>("/api/runs/archs");
+  return res.data;
+}
+
+export async function getRunConfigs(): Promise<RunConfigSummary[]> {
+  const res = await api.get<RunConfigSummary[]>("/api/runs/run-configs");
   return res.data;
 }
 

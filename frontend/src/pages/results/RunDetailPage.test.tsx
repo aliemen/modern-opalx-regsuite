@@ -74,6 +74,8 @@ describe("RunDetailPage", () => {
           skip_regression: false,
           clean_build: true,
           custom_cmake_args: ["-DIPPL_GIT_TAG=master"],
+          mpi_ranks: 2,
+          opalx_info_level: 4,
         },
         rerun_of: null,
       },
@@ -96,6 +98,8 @@ describe("RunDetailPage", () => {
     expect(href).toContain("arch=cpu-serial");
     expect(href).toContain("skip_unit=true");
     expect(href).toContain("clean_build=true");
+    expect(href).toContain("mpi_ranks=2");
+    expect(href).toContain("opalx_info_level=4");
     expect(href).toContain("rerun_id=source");
     expect(href).not.toContain("custom_cmake_args");
     expect(await screen.findByText("Custom CMake Args")).toBeInTheDocument();

@@ -144,12 +144,14 @@ export function TriggerPage() {
     if (!searchParams.has("opalx_info_level")) {
       setOpalxInfoLevel(selectedRunConfig.default_opalx_info_level);
     }
-    if (!slurmOverrideDirty) {
-      setSlurmForm(
-        formFromSlurmDefaults(selectedRunConfig.slurm_defaults, mpiRanks)
-      );
-    }
-  }, [selectedRunConfig, searchParams, slurmOverrideDirty, mpiRanks]);
+  }, [selectedRunConfig, searchParams]);
+
+  useEffect(() => {
+    if (!selectedRunConfig || slurmOverrideDirty) return;
+    setSlurmForm(
+      formFromSlurmDefaults(selectedRunConfig.slurm_defaults, mpiRanks)
+    );
+  }, [selectedRunConfig, slurmOverrideDirty, mpiRanks]);
 
   function updateArch(nextArch: string) {
     setArch(nextArch);

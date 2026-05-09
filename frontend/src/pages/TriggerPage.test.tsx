@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -149,6 +149,35 @@ describe("TriggerPage rerun prefill", () => {
         expect.objectContaining({
           mpi_ranks: 2,
           opalx_info_level: 4,
+        })
+      );
+    });
+  });
+
+  it("keeps manually edited MPI ranks for local runs", async () => {
+    vi.mocked(triggerRun).mockResolvedValue({
+      run_id: "20260507-120000",
+      queued: true,
+      queue_id: "queue-1",
+      position: 1,
+    });
+    const user = userEvent.setup();
+
+    renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial");
+
+    await user.click(await screen.findByRole("button", { name: "Advanced" }));
+    const ranksInput = screen.getByLabelText("MPI ranks");
+    fireEvent.change(ranksInput, { target: { value: "3" } });
+    expect(ranksInput).toHaveValue(3);
+
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+
+    await waitFor(() => {
+      expect(triggerRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          arch: "cpu-serial",
+          connection_name: "local",
+          mpi_ranks: 3,
         })
       );
     });

@@ -1000,6 +1000,7 @@ class RemoteExecutor:
         timeout: Optional[int] = None,
         cancel_event: Optional[threading.Event] = None,
         slurm_step_ranks: Optional[int] = None,
+        slurm_step_args: Optional[list[str]] = None,
     ) -> int:
         """Execute *cmd* on the remote host inside *remote_cwd*.
 
@@ -1079,9 +1080,14 @@ class RemoteExecutor:
             if self._slurm_cluster:
                 cluster_flag = f" --cluster={shlex.quote(self._slurm_cluster)}"
             rank_flag = f" -n {int(slurm_step_ranks)}"
+            resource_flags = ""
+            if slurm_step_args:
+                resource_flags = " " + " ".join(
+                    shlex.quote(arg) for arg in slurm_step_args
+                )
             wrapped = (
                 f"srun --jobid={shlex.quote(self._allocation_id)}"
-                f"{rank_flag} --overlap{cluster_flag}{uenv_flags}"
+                f"{rank_flag}{resource_flags} --overlap{cluster_flag}{uenv_flags}"
                 f" -- bash -c {shlex.quote(wrapped)}"
             )
 

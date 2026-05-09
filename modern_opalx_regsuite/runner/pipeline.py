@@ -329,6 +329,10 @@ def run_pipeline(
                     remote_cwd=remote_build,  # type: ignore[arg-type]
                     log_path=paths.unit_log_path,
                     cancel_event=cancel_event,
+                    slurm_step_ranks=1 if slurm_allocation_args else None,
+                    slurm_step_args=ac.slurm_step_args(1)
+                    if slurm_allocation_args
+                    else None,
                 )
                 output = paths.unit_log_path.read_text(encoding="utf-8", errors="replace")
             else:
@@ -371,6 +375,7 @@ def run_pipeline(
                     mpi_ranks=run_options.mpi_ranks,
                     opalx_info_level=run_options.opalx_info_level,
                     use_slurm=bool(slurm_allocation_args),
+                    slurm_step_args=ac.slurm_step_args(run_options.mpi_ranks),
                     remote=remote,
                     remote_base=remote_base,  # type: ignore[arg-type]
                     remote_build=remote_build,  # type: ignore[arg-type]

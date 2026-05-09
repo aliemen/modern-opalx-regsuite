@@ -49,6 +49,14 @@ def test_typed_slurm_scales_tasks_nodes_and_gpus(tmp_path: Path) -> None:
     assert "--partition=debug" in args
     assert "--account=c41" in args
 
+    step_args = cfg.get_arch_config("cuda-daint").slurm_step_args(2)
+    assert step_args == [
+        "--nodes=2",
+        "--ntasks-per-node=1",
+        "--gpus-per-task=1",
+        "--cpus-per-task=16",
+    ]
+
 
 def test_legacy_slurm_args_still_load(tmp_path: Path) -> None:
     cfg = SuiteConfig.model_validate(
@@ -66,6 +74,31 @@ def test_legacy_slurm_args_still_load(tmp_path: Path) -> None:
     assert cfg.get_arch_config("legacy").slurm_allocation_args(2) == [
         "--nodes=1",
         "--ntasks-per-node=1",
+    ]
+
+    legacy = SuiteConfig.model_validate(
+        {
+            **_base_config(tmp_path),
+            "arch_configs": [
+                {
+                    "arch": "legacy-full",
+                    "slurm_args": [
+                        "--nodes=1",
+                        "--ntasks-per-node=1",
+                        "--gpus=1",
+                        "--gpus-per-task=1",
+                        "--cpus-per-task=16",
+                        "--account=c41",
+                    ],
+                }
+            ],
+        }
+    )
+    assert legacy.get_arch_config("legacy-full").slurm_step_args(2) == [
+        "--nodes=2",
+        "--ntasks-per-node=1",
+        "--gpus-per-task=1",
+        "--cpus-per-task=16",
     ]
 
 

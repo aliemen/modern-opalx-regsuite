@@ -70,12 +70,20 @@ def test_allocated_slurm_step_command_uses_srun_ranks(tmp_path: Path) -> None:
         remote_cwd="/work/Generated",
         log_path=tmp_path / "opalx.log",
         slurm_step_ranks=2,
+        slurm_step_args=[
+            "--nodes=2",
+            "--ntasks-per-node=1",
+            "--gpus-per-task=1",
+            "--cpus-per-task=16",
+        ],
     )
 
     assert rc == 0
     assert len(conn.commands) == 1
     assert conn.commands[0].startswith(
-        "srun --jobid=12345 -n 2 --overlap --uenv=/uenv/image.squashfs --view=develop"
+        "srun --jobid=12345 -n 2 --nodes=2 --ntasks-per-node=1 "
+        "--gpus-per-task=1 --cpus-per-task=16 --overlap "
+        "--uenv=/uenv/image.squashfs --view=develop"
     )
     assert "uenv run" not in conn.commands[0]
     assert "/build/src/opalx Generated.in --info 2" in conn.commands[0]

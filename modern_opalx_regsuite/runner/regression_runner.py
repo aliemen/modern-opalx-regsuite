@@ -185,6 +185,7 @@ def _run_regression_suite_remote(
     mpi_ranks: int,
     opalx_info_level: int,
     use_slurm: bool,
+    slurm_step_args: Optional[list[str]],
     remote: "RemoteExecutor",  # type: ignore[name-defined]
     remote_base: str,
     remote_build: str,
@@ -330,6 +331,7 @@ def _run_regression_suite_remote(
             log_path=test_log_local,
             cancel_event=cancel_event,
             slurm_step_ranks=mpi_ranks if use_slurm else None,
+            slurm_step_args=slurm_step_args if use_slurm else None,
         )
 
         if test_log_local.exists():

@@ -163,6 +163,18 @@ class SlurmConfig(BaseModel):
         args.extend(self.extra_args)
         return args
 
+    def step_args(self, mpi_ranks: int) -> List[str]:
+        """Return concrete ``srun`` step resource arguments for *mpi_ranks*."""
+        args: list[str] = []
+        if self.tasks_per_node is not None:
+            args.append(f"--nodes={math.ceil(mpi_ranks / self.tasks_per_node)}")
+            args.append(f"--ntasks-per-node={self.tasks_per_node}")
+        if self.gpus_per_task is not None:
+            args.append(f"--gpus-per-task={self.gpus_per_task}")
+        if self.cpus_per_task is not None:
+            args.append(f"--cpus-per-task={self.cpus_per_task}")
+        return args
+
 
 class Connection(BaseModel):
     """A named, per-user remote execution target.
@@ -259,8 +271,8 @@ class ArchConfig(BaseModel):
             "salloc arguments for Slurm-managed remote runs, e.g. "
             "['--partition=debug', '--ntasks=4', '--gpus=4', '--time=01:00:00']. "
             "When non-empty the runner allocates a job via 'salloc --parsable --no-shell' "
-            "before starting the pipeline and runs every command as an srun step within "
-            "that job. Leave empty to run all commands directly over SSH (no Slurm)."
+            "before starting the pipeline. Leave empty to run all commands directly "
+            "over SSH (no Slurm)."
         ),
     )
 
@@ -293,3 +305,49 @@ class ArchConfig(BaseModel):
         if self.slurm is not None:
             return self.slurm.allocation_args(mpi_ranks)
         return list(self.slurm_args)
+
+    def slurm_step_args(self, mpi_ranks: int) -> list[str]:
+        if self.slurm is not None:
+            return self.slurm.step_args(mpi_ranks)
+        return _legacy_slurm_step_args(self.slurm_args, mpi_ranks)
+
+
+def _legacy_slurm_step_args(slurm_args: list[str], mpi_ranks: int) -> list[str]:
+    """Derive safe ``srun`` step placement flags from legacy raw ``salloc`` args."""
+    values: dict[str, str] = {}
+    aliases = {
+        "--ntasks-per-node": "--ntasks-per-node",
+        "--gpus-per-task": "--gpus-per-task",
+        "--cpus-per-task": "--cpus-per-task",
+        "-c": "--cpus-per-task",
+    }
+    idx = 0
+    while idx < len(slurm_args):
+        arg = slurm_args[idx]
+        key, sep, value = arg.partition("=")
+        canonical = aliases.get(key)
+        if canonical is not None:
+            if sep:
+                values[canonical] = value
+            elif idx + 1 < len(slurm_args):
+                values[canonical] = slurm_args[idx + 1]
+                idx += 1
+        elif arg.startswith("-c") and len(arg) > 2:
+            values["--cpus-per-task"] = arg[2:]
+        idx += 1
+
+    step_args: list[str] = []
+    tasks_per_node = values.get("--ntasks-per-node")
+    if tasks_per_node:
+        try:
+            step_args.append(
+                f"--nodes={math.ceil(mpi_ranks / int(tasks_per_node))}"
+            )
+        except ValueError:
+            pass
+        step_args.append(f"--ntasks-per-node={tasks_per_node}")
+    if values.get("--gpus-per-task"):
+        step_args.append(f"--gpus-per-task={values['--gpus-per-task']}")
+    if values.get("--cpus-per-task"):
+        step_args.append(f"--cpus-per-task={values['--cpus-per-task']}")
+    return step_args

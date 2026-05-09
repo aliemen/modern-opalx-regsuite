@@ -75,19 +75,22 @@ class GatewayEndpoint(BaseModel):
     )
 
 
-class SlurmConfig(BaseModel):
-    """Typed Slurm allocation recipe for an architecture.
+class SlurmResources(BaseModel):
+    """User-editable Slurm resource placement fields.
 
-    The requested MPI ranks are supplied at run time. This model converts the
-    static per-architecture resource shape into concrete ``salloc`` arguments.
+    This shape is intentionally limited to values that a manual trigger may
+    override. Account, time, cluster, and extra arguments remain operator-owned
+    in :class:`SlurmConfig`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     partition: Optional[str] = Field(None, description="Slurm partition.")
-    account: Optional[str] = Field(None, description="Slurm account/project.")
-    cluster: Optional[str] = Field(None, description="Slurm cluster name.")
-    time: Optional[str] = Field(None, description="Wall-clock limit, e.g. 00:30:00.")
+    nodes: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Fixed node count. If unset, nodes may be derived from ranks.",
+    )
     tasks_per_node: Optional[int] = Field(
         None,
         ge=1,
@@ -98,11 +101,30 @@ class SlurmConfig(BaseModel):
         ge=1,
         description="CPUs assigned to each MPI task.",
     )
+    gpus: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Fixed total GPU count. If unset, GPUs may be derived from ranks.",
+    )
     gpus_per_task: Optional[int] = Field(
         None,
         ge=1,
         description="GPUs assigned to each MPI task. Total --gpus scales with ranks.",
     )
+
+
+class SlurmConfig(SlurmResources):
+    """Typed Slurm allocation recipe for an architecture.
+
+    The requested MPI ranks are supplied at run time. This model converts the
+    static per-architecture resource shape into concrete ``salloc`` arguments.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    account: Optional[str] = Field(None, description="Slurm account/project.")
+    cluster: Optional[str] = Field(None, description="Slurm cluster name.")
+    time: Optional[str] = Field(None, description="Wall-clock limit, e.g. 00:30:00.")
     extra_args: List[str] = Field(
         default_factory=list,
         description="Additional non-resource salloc arguments.",
@@ -143,12 +165,19 @@ class SlurmConfig(BaseModel):
 
     def allocation_args(self, mpi_ranks: int) -> List[str]:
         """Return concrete ``salloc`` arguments for *mpi_ranks*."""
+        self.validate_mpi_ranks(mpi_ranks)
         args: list[str] = [f"--ntasks={mpi_ranks}"]
-        if self.tasks_per_node is not None:
+        if self.nodes is not None:
+            args.append(f"--nodes={self.nodes}")
+        elif self.tasks_per_node is not None:
             args.append(f"--nodes={math.ceil(mpi_ranks / self.tasks_per_node)}")
+        if self.tasks_per_node is not None:
             args.append(f"--ntasks-per-node={self.tasks_per_node}")
-        if self.gpus_per_task is not None:
+        if self.gpus is not None:
+            args.append(f"--gpus={self.gpus}")
+        elif self.gpus_per_task is not None:
             args.append(f"--gpus={mpi_ranks * self.gpus_per_task}")
+        if self.gpus_per_task is not None:
             args.append(f"--gpus-per-task={self.gpus_per_task}")
         if self.cpus_per_task is not None:
             args.append(f"--cpus-per-task={self.cpus_per_task}")
@@ -165,15 +194,53 @@ class SlurmConfig(BaseModel):
 
     def step_args(self, mpi_ranks: int) -> List[str]:
         """Return concrete ``srun`` step resource arguments for *mpi_ranks*."""
+        self.validate_mpi_ranks(mpi_ranks)
         args: list[str] = []
-        if self.tasks_per_node is not None:
+        if self.nodes is not None:
+            args.append(f"--nodes={self.nodes}")
+        elif self.tasks_per_node is not None:
             args.append(f"--nodes={math.ceil(mpi_ranks / self.tasks_per_node)}")
+        if self.tasks_per_node is not None:
             args.append(f"--ntasks-per-node={self.tasks_per_node}")
+        if self.gpus is not None:
+            args.append(f"--gpus={self.gpus}")
+        elif self.gpus_per_task is not None:
+            args.append(f"--gpus={mpi_ranks * self.gpus_per_task}")
         if self.gpus_per_task is not None:
             args.append(f"--gpus-per-task={self.gpus_per_task}")
         if self.cpus_per_task is not None:
             args.append(f"--cpus-per-task={self.cpus_per_task}")
         return args
+
+    def resource_defaults(self) -> SlurmResources:
+        """Return the manual-trigger editable subset of this Slurm config."""
+        return SlurmResources(
+            partition=self.partition,
+            nodes=self.nodes,
+            tasks_per_node=self.tasks_per_node,
+            cpus_per_task=self.cpus_per_task,
+            gpus=self.gpus,
+            gpus_per_task=self.gpus_per_task,
+        )
+
+    def with_resource_overrides(self, overrides: SlurmResources) -> "SlurmConfig":
+        """Apply explicitly-set trigger overrides to this config."""
+        data = self.model_dump()
+        for field in SlurmResources.model_fields:
+            if field in overrides.model_fields_set:
+                data[field] = getattr(overrides, field)
+        return SlurmConfig.model_validate(data)
+
+    def validate_mpi_ranks(self, mpi_ranks: int) -> None:
+        if mpi_ranks < 1:
+            raise ValueError("mpi_ranks must be >= 1")
+        if self.nodes is not None and self.tasks_per_node is not None:
+            capacity = self.nodes * self.tasks_per_node
+            if mpi_ranks > capacity:
+                raise ValueError(
+                    f"mpi_ranks={mpi_ranks} exceeds Slurm capacity "
+                    f"nodes*tasks_per_node={capacity}"
+                )
 
 
 class Connection(BaseModel):

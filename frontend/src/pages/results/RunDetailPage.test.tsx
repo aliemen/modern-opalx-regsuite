@@ -76,6 +76,14 @@ describe("RunDetailPage", () => {
           custom_cmake_args: ["-DIPPL_GIT_TAG=master"],
           mpi_ranks: 2,
           opalx_info_level: 4,
+          slurm_resources: {
+            partition: "debug",
+            nodes: 1,
+            tasks_per_node: 2,
+            cpus_per_task: 16,
+            gpus: 1,
+            gpus_per_task: null,
+          },
         },
         rerun_of: null,
       },
@@ -100,6 +108,10 @@ describe("RunDetailPage", () => {
     expect(href).toContain("clean_build=true");
     expect(href).toContain("mpi_ranks=2");
     expect(href).toContain("opalx_info_level=4");
+    expect(href).toContain("slurm_nodes=1");
+    expect(href).toContain("slurm_tasks_per_node=2");
+    expect(href).toContain("slurm_gpus=1");
+    expect(href).toContain("slurm_gpus_per_task=");
     expect(href).toContain("rerun_id=source");
     expect(href).not.toContain("custom_cmake_args");
     expect(await screen.findByText("Custom CMake Args")).toBeInTheDocument();

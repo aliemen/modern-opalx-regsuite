@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { SlurmResources } from "./runs";
 
 /** "active" hides archived runs (default), "archived" shows only archived,
  *  "all" returns everything. Sent as a `view` query param to the backend. */
@@ -104,6 +105,7 @@ export interface RunOptions {
   custom_cmake_args: string[];
   mpi_ranks: number;
   opalx_info_level: number;
+  slurm_resources: SlurmResources | null;
 }
 
 export interface RerunReference {

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..config import Connection, SuiteConfig
+from ..config import Connection, SlurmResources, SuiteConfig
 from ..artifacts import write_artifact_manifest
 from ..data_model import (
     RerunReference,
@@ -53,6 +53,7 @@ def run_pipeline(
     custom_cmake_args: Optional[list[str]] = None,
     mpi_ranks: Optional[int] = None,
     opalx_info_level: Optional[int] = None,
+    slurm_resources: Optional[SlurmResources] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -89,6 +90,7 @@ def run_pipeline(
         custom_cmake_args=custom_cmake_args,
         mpi_ranks=mpi_ranks,
         opalx_info_level=opalx_info_level,
+        slurm_resources=slurm_resources,
     )
     ac = run_options.arch_config
 
@@ -110,6 +112,7 @@ def run_pipeline(
             custom_cmake_args=run_options.custom_cmake_args,
             mpi_ranks=run_options.mpi_ranks,
             opalx_info_level=run_options.opalx_info_level,
+            slurm_resources=run_options.persisted_slurm_resources,
         ),
         rerun_of=rerun_of,
     )
@@ -121,7 +124,11 @@ def run_pipeline(
         base_cmake_args, run_options.custom_cmake_args
     )
     build_cmd = f"make -j{ac.build_jobs}"
-    slurm_allocation_args = ac.slurm_allocation_args(run_options.mpi_ranks)
+    slurm_allocation_args = (
+        run_options.slurm_config.allocation_args(run_options.mpi_ranks)
+        if run_options.slurm_config is not None
+        else ac.slurm_allocation_args(run_options.mpi_ranks)
+    )
 
     # ── Remote executor setup ────────────────────────────────────────────────
     remote: Optional["RemoteExecutor"] = None  # type: ignore[name-defined]
@@ -330,7 +337,11 @@ def run_pipeline(
                     log_path=paths.unit_log_path,
                     cancel_event=cancel_event,
                     slurm_step_ranks=1 if slurm_allocation_args else None,
-                    slurm_step_args=ac.slurm_step_args(1)
+                    slurm_step_args=(
+                        run_options.slurm_config.step_args(1)
+                        if run_options.slurm_config is not None
+                        else ac.slurm_step_args(1)
+                    )
                     if slurm_allocation_args
                     else None,
                 )
@@ -375,7 +386,11 @@ def run_pipeline(
                     mpi_ranks=run_options.mpi_ranks,
                     opalx_info_level=run_options.opalx_info_level,
                     use_slurm=bool(slurm_allocation_args),
-                    slurm_step_args=ac.slurm_step_args(run_options.mpi_ranks),
+                    slurm_step_args=(
+                        run_options.slurm_config.step_args(run_options.mpi_ranks)
+                        if run_options.slurm_config is not None
+                        else ac.slurm_step_args(run_options.mpi_ranks)
+                    ),
                     remote=remote,
                     remote_base=remote_base,  # type: ignore[arg-type]
                     remote_build=remote_build,  # type: ignore[arg-type]

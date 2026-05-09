@@ -17,6 +17,7 @@ from .config_types import (
     EnvActivation,
     GatewayEndpoint,
     SlurmConfig,
+    SlurmResources,
 )
 
 
@@ -388,11 +389,13 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
         lines.append("[arch_configs.slurm]")
         for key in (
             "partition",
+            "nodes",
             "account",
             "cluster",
             "time",
             "tasks_per_node",
             "cpus_per_task",
+            "gpus",
             "gpus_per_task",
         ):
             if slurm.get(key) is not None:

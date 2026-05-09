@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from ..config import Connection, SuiteConfig
+from ..config import Connection, SlurmResources, SuiteConfig
 from ..data_model import RerunReference
 from ..user_store import get_connection, resolve_connection_key_paths
 from .coordinator import get_coordinator
@@ -114,6 +114,7 @@ async def start_run(
     custom_cmake_args: Optional[list[str]] = None,
     mpi_ranks: Optional[int] = None,
     opalx_info_level: Optional[int] = None,
+    slurm_resources: Optional[SlurmResources] = None,
     rerun_of: Optional[RerunReference] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
@@ -223,6 +224,7 @@ async def start_run(
         custom_cmake_args=effective_custom_cmake_args,
         mpi_ranks=mpi_ranks,
         opalx_info_level=opalx_info_level,
+        slurm_resources=slurm_resources,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -276,6 +278,7 @@ async def start_run(
         custom_cmake_args=effective_custom_cmake_args,
         mpi_ranks=mpi_ranks,
         opalx_info_level=opalx_info_level,
+        slurm_resources=slurm_resources,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,

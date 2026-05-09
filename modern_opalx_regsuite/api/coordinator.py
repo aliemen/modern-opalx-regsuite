@@ -104,6 +104,7 @@ class RunCoordinator:
                 gateway_otp=active.gateway_otp,
                 mpi_ranks=active.mpi_ranks,
                 opalx_info_level=active.opalx_info_level,
+                slurm_resources=active.slurm_resources,
             )
 
         tailer_task = asyncio.create_task(self._log_tailer(active))
@@ -171,6 +172,7 @@ class RunCoordinator:
             custom_cmake_args=queued.custom_cmake_args,
             mpi_ranks=queued.mpi_ranks,
             opalx_info_level=queued.opalx_info_level,
+            slurm_resources=queued.slurm_resources,
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,

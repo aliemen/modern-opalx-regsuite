@@ -14,13 +14,21 @@ import { listConnections, LOCAL_CONNECTION } from "../api/connections";
 import { InteractiveGatewayFields } from "./trigger/InteractiveGatewayFields";
 import { RuntimeFields } from "./trigger/RuntimeFields";
 import {
+  formFromSlurmDefaults,
+  slurmResourcesFromForm,
+  validateSlurmForm,
+  type SlurmResourceForm,
+} from "./trigger/SlurmResourceFields";
+import { AdvancedRunFields } from "./trigger/AdvancedRunFields";
+import { TriggerTabs, type TriggerTab } from "./trigger/TriggerTabs";
+import { hasSlurmQueryParams, slurmFormFromQuery } from "./trigger/slurmQuery";
+import {
   parseCustomCmakeArgs,
   parseNonNegativeIntParam,
   parsePositiveIntParam,
 } from "./trigger/parse";
 
 const MAX_BRANCH_LABEL_CHARS = 56;
-type TriggerTab = "basic" | "advanced";
 
 function truncateBranchLabel(branch: string): string {
   if (branch.length <= MAX_BRANCH_LABEL_CHARS) return branch;
@@ -60,6 +68,12 @@ export function TriggerPage() {
   );
   const [opalxInfoLevel, setOpalxInfoLevel] = useState(() =>
     parseNonNegativeIntParam(searchParams.get("opalx_info_level"), 2)
+  );
+  const [slurmOverrideDirty, setSlurmOverrideDirty] = useState(() =>
+    hasSlurmQueryParams(searchParams)
+  );
+  const [slurmForm, setSlurmForm] = useState<SlurmResourceForm>(() =>
+    slurmFormFromQuery(searchParams)
   );
   const [activeTab, setActiveTab] = useState<TriggerTab>("basic");
   const [customCmakeText, setCustomCmakeText] = useState("");
@@ -130,7 +144,12 @@ export function TriggerPage() {
     if (!searchParams.has("opalx_info_level")) {
       setOpalxInfoLevel(selectedRunConfig.default_opalx_info_level);
     }
-  }, [selectedRunConfig, searchParams]);
+    if (!slurmOverrideDirty) {
+      setSlurmForm(
+        formFromSlurmDefaults(selectedRunConfig.slurm_defaults, mpiRanks)
+      );
+    }
+  }, [selectedRunConfig, searchParams, slurmOverrideDirty, mpiRanks]);
 
   function updateArch(nextArch: string) {
     setArch(nextArch);
@@ -138,7 +157,21 @@ export function TriggerPage() {
     if (nextConfig) {
       setMpiRanks(nextConfig.default_mpi_ranks);
       setOpalxInfoLevel(nextConfig.default_opalx_info_level);
+      setSlurmOverrideDirty(false);
+      setSlurmForm(
+        formFromSlurmDefaults(nextConfig.slurm_defaults, nextConfig.default_mpi_ranks)
+      );
     }
+  }
+
+  function updateSlurmForm(nextForm: SlurmResourceForm) {
+    setSlurmOverrideDirty(true);
+    setSlurmForm(nextForm);
+  }
+
+  function resetSlurmForm() {
+    setSlurmOverrideDirty(false);
+    setSlurmForm(formFromSlurmDefaults(selectedRunConfig?.slurm_defaults, mpiRanks));
   }
 
   async function handleStart() {
@@ -175,6 +208,17 @@ export function TriggerPage() {
       setError("OPALX info level must be 0 or greater.");
       return;
     }
+    if (slurmOverrideDirty) {
+      if (!selectedRunConfig?.slurm_overrides_supported) {
+        setError("This run config does not support manual Slurm overrides.");
+        return;
+      }
+      const slurmError = validateSlurmForm(slurmForm, mpiRanks);
+      if (slurmError) {
+        setError(slurmError);
+        return;
+      }
+    }
 
     try {
       const body: TriggerRequest = {
@@ -189,6 +233,9 @@ export function TriggerPage() {
         opalx_info_level: opalxInfoLevel,
         connection_name: connectionName,
       };
+      if (slurmOverrideDirty) {
+        body.slurm_resources = slurmResourcesFromForm(slurmForm);
+      }
       const rerunBranch = searchParams.get("rerun_branch");
       const rerunArch = searchParams.get("rerun_arch");
       const rerunId = searchParams.get("rerun_id");
@@ -228,30 +275,7 @@ export function TriggerPage() {
       <h1 className="text-fg text-2xl font-semibold mb-6">Start a Run</h1>
 
       <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-5 sm:p-6">
-        <div className="grid grid-cols-2 rounded-md border border-border bg-bg p-1 text-sm">
-          <button
-            type="button"
-            onClick={() => setActiveTab("basic")}
-            className={`rounded px-3 py-1.5 transition ${
-              activeTab === "basic"
-                ? "bg-border/70 text-fg"
-                : "text-muted hover:text-fg"
-            }`}
-          >
-            Basic
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("advanced")}
-            className={`rounded px-3 py-1.5 transition ${
-              activeTab === "advanced"
-                ? "bg-border/70 text-fg"
-                : "text-muted hover:text-fg"
-            }`}
-          >
-            Advanced
-          </button>
-        </div>
+        <TriggerTabs activeTab={activeTab} onChange={setActiveTab} />
 
         {activeTab === "basic" ? (
           <>
@@ -427,36 +451,16 @@ export function TriggerPage() {
         </div>
           </>
         ) : (
-          <div className="flex flex-col gap-3">
-            <div>
-              <label htmlFor="custom-cmake-args" className="block text-sm text-muted mb-1">
-                Custom CMake args
-              </label>
-              <textarea
-                id="custom-cmake-args"
-                value={customCmakeText}
-                onChange={(e) => setCustomCmakeText(e.target.value)}
-                rows={8}
-                spellCheck={false}
-                placeholder={[
-                  "-DIPPL_GIT_TAG=master",
-                  "-DHeffte_VERSION=git.v2.4.1",
-                  "-DKokkos_VERSION=git.4.7.01",
-                ].join("\n")}
-                className="w-full resize-y bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm font-mono focus:outline-none focus:border-accent"
-              />
-              <p className="text-muted text-xs mt-1">
-                One CMake argument per line. Blank lines and lines starting with
-                # are ignored. These args override matching run-config values.
-              </p>
-            </div>
-            {hasCustomCmakeArgs && (
-              <div className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-accent">
-                This run will use a clean build because custom CMake args are
-                set.
-              </div>
-            )}
-          </div>
+          <AdvancedRunFields
+            customCmakeText={customCmakeText}
+            hasCustomCmakeArgs={hasCustomCmakeArgs}
+            selectedRunConfig={selectedRunConfig}
+            slurmForm={slurmForm}
+            slurmOverrideDirty={slurmOverrideDirty}
+            onCustomCmakeTextChange={setCustomCmakeText}
+            onSlurmFormChange={updateSlurmForm}
+            onSlurmReset={resetSlurmForm}
+          />
         )}
 
         {error && <p className="text-failed text-sm">{error}</p>}

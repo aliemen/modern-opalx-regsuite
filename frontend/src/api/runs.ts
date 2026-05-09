@@ -26,6 +26,7 @@ export interface TriggerRequest {
   custom_cmake_args?: string[];
   mpi_ranks?: number;
   opalx_info_level?: number;
+  slurm_resources?: SlurmResources | null;
   /**
    * Name of the per-user Connection to run on. Use `null` or `"local"` for
    * local execution. Connections are managed in Settings.
@@ -35,6 +36,15 @@ export interface TriggerRequest {
   gateway_password?: string;
   gateway_otp?: string;
   rerun_of?: RerunReference;
+}
+
+export interface SlurmResources {
+  partition?: string | null;
+  nodes?: number | null;
+  tasks_per_node?: number | null;
+  cpus_per_task?: number | null;
+  gpus?: number | null;
+  gpus_per_task?: number | null;
 }
 
 export interface TriggerResponse {
@@ -68,6 +78,8 @@ export interface RunConfigSummary {
   max_mpi_ranks: number | null;
   default_opalx_info_level: number;
   slurm_enabled: boolean;
+  slurm_overrides_supported: boolean;
+  slurm_defaults: SlurmResources | null;
 }
 
 export interface DashboardStats {

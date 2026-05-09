@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from ..config import Connection
+    from ..config import Connection, SlurmResources
     from ..data_model import RerunReference
 
 
@@ -48,6 +48,7 @@ class ActiveRun:
     custom_cmake_args: list[str] = field(default_factory=list)
     mpi_ranks: Optional[int] = None
     opalx_info_level: Optional[int] = None
+    slurm_resources: Optional["SlurmResources"] = None
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -77,6 +78,7 @@ class QueuedRun:
     custom_cmake_args: list[str] = field(default_factory=list)
     mpi_ranks: Optional[int] = None
     opalx_info_level: Optional[int] = None
+    slurm_resources: Optional["SlurmResources"] = None
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -148,6 +150,7 @@ async def acquire_run_slot(
     custom_cmake_args: Optional[list[str]] = None,
     mpi_ranks: Optional[int] = None,
     opalx_info_level: Optional[int] = None,
+    slurm_resources: Optional["SlurmResources"] = None,
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -176,6 +179,7 @@ async def acquire_run_slot(
             custom_cmake_args=list(custom_cmake_args or []),
             mpi_ranks=mpi_ranks,
             opalx_info_level=opalx_info_level,
+            slurm_resources=slurm_resources,
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

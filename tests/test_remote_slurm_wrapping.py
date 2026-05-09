@@ -73,6 +73,7 @@ def test_allocated_slurm_step_command_uses_srun_ranks(tmp_path: Path) -> None:
         slurm_step_args=[
             "--nodes=2",
             "--ntasks-per-node=1",
+            "--gpus=2",
             "--gpus-per-task=1",
             "--cpus-per-task=16",
         ],
@@ -82,7 +83,7 @@ def test_allocated_slurm_step_command_uses_srun_ranks(tmp_path: Path) -> None:
     assert len(conn.commands) == 1
     assert conn.commands[0].startswith(
         "srun --jobid=12345 -n 2 --nodes=2 --ntasks-per-node=1 "
-        "--gpus-per-task=1 --cpus-per-task=16 --overlap "
+        "--gpus=2 --gpus-per-task=1 --cpus-per-task=16 --overlap "
         "--uenv=/uenv/image.squashfs --view=develop"
     )
     assert "uenv run" not in conn.commands[0]

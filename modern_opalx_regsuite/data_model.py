@@ -6,6 +6,8 @@ from typing import Annotated, Iterable, List, Optional
 
 from pydantic import BaseModel, AfterValidator, ConfigDict, Field
 
+from .config_types import SlurmResources
+
 
 def _ensure_utc(v: datetime) -> datetime:
     """Coerce a naive datetime to UTC so aware/naive comparisons never raise."""
@@ -122,6 +124,7 @@ class RunOptions(BaseModel):
     custom_cmake_args: List[str] = Field(default_factory=list)
     mpi_ranks: int = Field(1, ge=1)
     opalx_info_level: int = Field(2, ge=0)
+    slurm_resources: Optional[SlurmResources] = None
 
 
 class RerunReference(BaseModel):

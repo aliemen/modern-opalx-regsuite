@@ -9,6 +9,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { SimCard } from "./RunSimulationCard";
 import { duration, fmtDate } from "./runDetailFormat";
+import { SlurmResourceSummary, addSlurmRerunParams } from "./SlurmResourceSummary";
 
 export { SimCard, duration, fmtDate };
 
@@ -165,6 +166,8 @@ export function RunDetailPage() {
     rerun_arch: meta.arch,
     rerun_id: meta.run_id,
   });
+  const slurmResources = meta.run_options?.slurm_resources ?? null;
+  addSlurmRerunParams(rerunParams, slurmResources);
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
@@ -403,6 +406,7 @@ export function RunDetailPage() {
             {meta.run_options?.opalx_info_level ?? 2}
           </p>
         </div>
+        <SlurmResourceSummary resources={slurmResources} />
         {(meta.run_options?.custom_cmake_args?.length ?? 0) > 0 && (
           <div className="space-y-1 sm:col-span-2">
             <p className="text-muted text-xs">Custom CMake Args</p>

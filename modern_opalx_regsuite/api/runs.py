@@ -7,8 +7,9 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from ..config import SuiteConfig
+from ..config import SlurmResources, SuiteConfig
 from ..data_model import RerunReference
+from ..runner.pipeline_options import resolve_effective_run_options
 from ..user_store import get_connection
 from .deps import get_config, require_auth
 from .runs_core import start_run
@@ -37,6 +38,7 @@ class TriggerRequest(BaseModel):
     custom_cmake_args: list[str] = Field(default_factory=list)
     mpi_ranks: Optional[int] = Field(default=None, ge=1)
     opalx_info_level: Optional[int] = Field(default=None, ge=0)
+    slurm_resources: Optional[SlurmResources] = None
     # None or "local" → local execution. Otherwise → load the calling user's
     # named connection from <users_root>/<username>/connections.json.
     connection_name: Optional[str] = None
@@ -61,6 +63,8 @@ class RunConfigSummary(BaseModel):
     max_mpi_ranks: Optional[int] = None
     default_opalx_info_level: int
     slurm_enabled: bool
+    slurm_overrides_supported: bool = False
+    slurm_defaults: Optional[SlurmResources] = None
 
 
 class CurrentRunStatus(BaseModel):
@@ -112,6 +116,8 @@ def _validate_run_option_overrides(
     arch: str,
     *,
     mpi_ranks: Optional[int],
+    opalx_info_level: Optional[int],
+    slurm_resources: Optional[SlurmResources],
 ) -> None:
     ac = cfg.get_arch_config(arch)
     if (
@@ -126,6 +132,21 @@ def _validate_run_option_overrides(
                 f"{ac.max_mpi_ranks} for arch '{arch}'."
             ),
         )
+    try:
+        resolve_effective_run_options(
+            cfg=cfg,
+            arch=arch,
+            clean_build=False,
+            custom_cmake_args=None,
+            mpi_ranks=mpi_ranks,
+            opalx_info_level=opalx_info_level,
+            slurm_resources=slurm_resources,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -159,6 +180,10 @@ def list_run_configs(
                     else cfg.opalx_info_level
                 ),
                 slurm_enabled=bool(ac.slurm is not None or ac.slurm_args),
+                slurm_overrides_supported=ac.slurm is not None,
+                slurm_defaults=(
+                    ac.slurm.resource_defaults() if ac.slurm is not None else None
+                ),
             )
         )
     return out
@@ -229,6 +254,8 @@ async def trigger_run(
         cfg,
         body.arch,
         mpi_ranks=body.mpi_ranks,
+        opalx_info_level=body.opalx_info_level,
+        slurm_resources=body.slurm_resources,
     )
 
     # HTTP-specific pre-validation: interactive 2FA gateways must receive
@@ -271,6 +298,7 @@ async def trigger_run(
         custom_cmake_args=body.custom_cmake_args,
         mpi_ranks=body.mpi_ranks,
         opalx_info_level=body.opalx_info_level,
+        slurm_resources=body.slurm_resources,
         connection_name=body.connection_name,
         rerun_of=body.rerun_of,
         gateway_password=body.gateway_password,

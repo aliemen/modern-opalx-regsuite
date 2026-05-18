@@ -254,6 +254,7 @@ def _read_stat_data(
 
     s_col = int(columns["s"]["column"])
     var_col = int(columns[var_name]["column"])
+    time_col = int(columns["t"]["column"]) if "t" in columns else None
     var_unit = str(columns[var_name].get("units", "")).strip('"')
 
     data_start = header_lines + len(params)
@@ -264,6 +265,12 @@ def _read_stat_data(
         if len(parts) <= max(s_col, var_col):
             continue
         try:
+            if time_col is not None:
+                if len(parts) <= time_col:
+                    continue
+                # Emission can start before t=0; compare only propagated samples.
+                if float(parts[time_col]) < 0.0:
+                    continue
             s_vals.append(float(parts[s_col]))
             values.append(float(parts[var_col]))
         except ValueError:
@@ -273,10 +280,12 @@ def _read_stat_data(
 
 
 def _compute_delta(mode: str, values: list[float], ref_values: list[float]) -> Optional[float]:
-    if not values or not ref_values or len(values) != len(ref_values):
+    if not values or not ref_values:
         return None
     if mode == "last":
         return abs(values[-1] - ref_values[-1])
+    if len(values) != len(ref_values):
+        return None
     if mode == "avg":
         sq = sum((values[i] - ref_values[i]) ** 2 for i in range(len(values)))
         return math.sqrt(sq) / len(values)

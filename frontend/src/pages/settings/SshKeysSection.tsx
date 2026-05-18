@@ -17,6 +17,7 @@ import {
  */
 export function SshKeysSection() {
   const queryClient = useQueryClient();
+  const formRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const certRef = useRef<HTMLInputElement>(null);
 
@@ -129,7 +130,7 @@ export function SshKeysSection() {
     clearFormInputs();
     setError(null);
     setSuccess(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function cancelReplace() {
@@ -153,7 +154,7 @@ export function SshKeysSection() {
         <span className="text-fg">connections</span> below.
       </p>
 
-      <div className="flex flex-col gap-3 mb-6">
+      <div ref={formRef} className="flex flex-col gap-3 mb-6">
         {isReplaceMode && (
           <div className="flex items-center gap-2 text-sm bg-bg border border-accent/40 rounded-md px-3 py-2">
             <RefreshCw size={14} className="text-accent" />
@@ -259,6 +260,7 @@ export function SshKeysSection() {
                       <button
                         onClick={() => startReplace(k.name)}
                         disabled={submitPending}
+                        aria-label={`Replace ${k.name}`}
                         className={`transition p-1 ${
                           isReplacingThis
                             ? "text-accent"
@@ -271,6 +273,7 @@ export function SshKeysSection() {
                       <button
                         onClick={() => deleteKeyMut.mutate(k.name)}
                         disabled={deleteKeyMut.isPending}
+                        aria-label={`Delete ${k.name}`}
                         className="text-muted hover:text-failed transition p-1"
                         title={`Delete ${k.name}`}
                       >

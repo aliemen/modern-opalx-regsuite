@@ -42,25 +42,6 @@ from .data_model import (
 
 ViewMode = Literal["active", "archived", "all"]
 
-#: Branch name that is permanently protected from archive / hard-delete.
-#: master holds the canonical history every developer cares about, so the
-#: surface area to accidentally hide it must be zero. Both the API layer and
-#: the CLI go through this constant.
-PROTECTED_BRANCH = "master"
-
-
-class ProtectedBranchError(Exception):
-    """Raised when a caller tries to archive or hard-delete the protected
-    branch (``master``). The API translates this into HTTP 409, the CLI into
-    a typer.Exit. Unarchiving the protected branch is allowed."""
-
-    def __init__(self, branch: str) -> None:
-        super().__init__(
-            f"Branch '{branch}' is protected and cannot be archived or "
-            f"hard-deleted. Unarchiving is still allowed."
-        )
-        self.branch = branch
-
 
 class ArchiveResult(BaseModel):
     """Outcome of an archive / unarchive / hard-delete operation."""
@@ -565,12 +546,9 @@ def set_archived_for_branch(
 ) -> ArchiveResult:
     """Archive or unarchive every run for *branch* (across all archs).
 
-    Raises :class:`ProtectedBranchError` when *branch* is the protected
-    branch and *archived* is True. Unarchiving the protected branch (e.g.
-    after a manual mis-archive on disk) is still allowed.
+    Runs whose ids appear in *protect_run_ids* are skipped so actively-running
+    or queued work is not hidden underneath the runner.
     """
-    if archived and branch == PROTECTED_BRANCH:
-        raise ProtectedBranchError(branch)
     protect = set(protect_run_ids)
     total_changed = 0
     skipped: list[str] = []
@@ -605,11 +583,9 @@ def set_archived_for_arch(
 ) -> ArchiveResult:
     """Archive or unarchive every run for *branch* + *arch*.
 
-    Raises :class:`ProtectedBranchError` when *branch* is the protected
-    branch and *archived* is True.
+    Runs whose ids appear in *protect_run_ids* are skipped so actively-running
+    or queued work is not hidden underneath the runner.
     """
-    if archived and branch == PROTECTED_BRANCH:
-        raise ProtectedBranchError(branch)
     protect = set(protect_run_ids)
     changed, skipped, _, failed_move = _set_archived_for_index(
         data_root,
@@ -638,9 +614,8 @@ def set_archived_for_runs(
 ) -> ArchiveResult:
     """Archive or unarchive an explicit list of run ids in one branch+arch.
 
-    Unlike branch-wide or arch-wide archiving, per-run archiving is allowed
-    on the protected branch so that individual runs can be tidied up without
-    hiding the entire branch from the dashboard.
+    Runs whose ids appear in *protect_run_ids* are skipped so actively-running
+    or queued work is not hidden underneath the runner.
     """
     requested = set(run_ids)
     if not requested:
@@ -675,7 +650,7 @@ def set_public_for_runs(
 
     Mirrors :func:`set_archived_for_runs` but flips the ``public`` flag. No
     ``protect_run_ids`` check — publishing never conflicts with run-slot
-    ownership. Allowed on the protected branch.
+    ownership.
     """
     requested = set(run_ids)
     if not requested:
@@ -722,11 +697,8 @@ def hard_delete_runs(
 
     Defense in depth: even though archived runs cannot be active (active runs
     are skipped at archive time), we still refuse to hard-delete any run id
-    in *protect_run_ids*. Also raises :class:`ProtectedBranchError` if the
-    target branch is the protected one.
+    in *protect_run_ids*.
     """
-    if branch == PROTECTED_BRANCH:
-        raise ProtectedBranchError(branch)
     requested = set(run_ids)
     if not requested:
         return ArchiveResult()
@@ -784,12 +756,8 @@ def hard_delete_arch_archived(
     """Permanently delete every *archived* run for one (branch, arch) cell.
 
     Skips active (non-archived) entries entirely so the dashboard view of the
-    cell is unaffected. Raises :class:`ProtectedBranchError` for the
-    protected branch — defense in depth even though the dashboard never
-    surfaces a protected-branch cell on the Archive page.
+    cell is unaffected.
     """
-    if branch == PROTECTED_BRANCH:
-        raise ProtectedBranchError(branch)
     protect = set(protect_run_ids)
     index_path = runs_index_path(data_root, branch, arch)
 

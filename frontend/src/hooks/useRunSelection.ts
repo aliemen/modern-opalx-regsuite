@@ -34,13 +34,13 @@ export interface SelectionHandle {
   clear: () => void;
   /** Selected (branch, arch) pairs in flat form for the bulk endpoints. */
   selectedCells: () => CellRef[];
-  /** Predicate the parent uses to filter "selectable" cells (e.g. exclude master). */
+  /** Predicate the parent uses to filter selectable cells. */
   isCellSelectable: (cell: LatestRunCell) => boolean;
 }
 
 interface UseRunSelectionOptions {
-  /** Cells matching this predicate are not selectable (e.g. the master branch
-   *  on the dashboard). Defaults to "everything is selectable". */
+  /** Cells matching this predicate are not selectable. Defaults to everything
+   *  being selectable. */
   isCellSelectable?: (cell: LatestRunCell) => boolean;
 }
 

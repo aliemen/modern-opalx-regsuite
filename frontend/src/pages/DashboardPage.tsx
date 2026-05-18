@@ -1,9 +1,9 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Radio } from "lucide-react";
 import { getQueueState } from "../api/runs";
-import { useLatestRuns, type LatestRunCell } from "../hooks/useLatestRuns";
+import { useLatestRuns } from "../hooks/useLatestRuns";
 import { useRunSelection } from "../hooks/useRunSelection";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
 import { useGroupBy } from "../hooks/useGroupBy";
@@ -16,10 +16,6 @@ import { StatsPanel } from "../components/StatsPanel";
 import { QueuePanel } from "../components/QueuePanel";
 import type { Group } from "../lib/grouping";
 
-/** master holds canonical history; we never let the user archive it from
- *  the dashboard. The backend enforces this too (returns 409). */
-const PROTECTED_BRANCH = "master";
-
 export function DashboardPage() {
   const { cells, branches, runCounts, isLoading } = useLatestRuns("active");
 
@@ -29,14 +25,7 @@ export function DashboardPage() {
     refetchInterval: 5000,
   });
 
-  // Master is filtered out of selection so the bulk-archive bar reflects only
-  // archivable cells; per-card checkboxes for master are also disabled below.
-  const isCellSelectable = useCallback(
-    (cell: LatestRunCell) => cell.branch !== PROTECTED_BRANCH,
-    []
-  );
-
-  const selection = useRunSelection({ isCellSelectable });
+  const selection = useRunSelection();
   const mutations = useArchiveMutations();
   const [groupBy, setGroupBy] = useGroupBy();
 
@@ -65,9 +54,7 @@ export function DashboardPage() {
   const totalQueued = machines.reduce((s, m) => s + m.queue.length, 0);
 
   function groupAction(group: Group) {
-    // Hide the per-group "Archive branch" shortcut for master.
     if (group.kind !== "branch") return undefined;
-    if (group.label === PROTECTED_BRANCH) return undefined;
     return {
       label: "Archive branch",
       onClick: () => setPendingBranchArchive(group.label),

@@ -68,8 +68,7 @@ export function AccordionGroup({
   const counts = summaryCounts(group.cells);
   const allSelected = selection ? selection.areAllSelected(group.cells) : false;
   // The "select all" checkbox only makes sense when at least one cell in the
-  // group is selectable (e.g. a branch=master arch row in a date bucket
-  // shouldn't make the bucket-level checkbox lit up alone).
+  // group is selectable.
   const hasSelectable = selection
     ? group.cells.some(
         (c) => c.run !== undefined && selection.isCellSelectable(c)
@@ -173,7 +172,7 @@ export function AccordionGroup({
                   }
                   checkboxDisabled={!selectable}
                   checkboxDisabledReason={
-                    !selectable ? "master cannot be archived" : undefined
+                    !selectable ? "This cell cannot be selected" : undefined
                   }
                   onToggleSelect={
                     selection && selectable

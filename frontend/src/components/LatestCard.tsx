@@ -17,7 +17,7 @@ interface LatestCardProps {
   showCheckbox?: boolean;
   /** Whether the checkbox is checked. */
   selected?: boolean;
-  /** Disable the checkbox (e.g. master cells which can't be archived). */
+  /** Disable the checkbox when the parent selection policy excludes this cell. */
   checkboxDisabled?: boolean;
   /** Tooltip shown on a disabled checkbox. */
   checkboxDisabledReason?: string;

@@ -266,6 +266,7 @@ def run_pipeline(
                 remote_cwd=remote_build,  # type: ignore[arg-type]
                 log_path=paths.logs_dir / "cmake.log",
                 cancel_event=cancel_event,
+                slurm_step_ranks=1 if slurm_allocation_args else None,
             )
         else:
             cmake_cmd = build_cmake_command(effective_cmake_args, str(opalx_repo))
@@ -301,6 +302,7 @@ def run_pipeline(
                 remote_cwd=remote_build,  # type: ignore[arg-type]
                 log_path=paths.logs_dir / "build.log",
                 cancel_event=cancel_event,
+                slurm_step_ranks=1 if slurm_allocation_args else None,
             )
         else:
             build_rc, _ = _run_command(

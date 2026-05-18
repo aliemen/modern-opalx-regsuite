@@ -1063,9 +1063,9 @@ class RemoteExecutor:
         )
 
         # When explicitly requested, run the command as a Slurm job step so
-        # that MPI-linked test executables can see the allocated host list.
-        # Git/cmake/build orchestration deliberately stays outside srun even
-        # while an allocation is being held.
+        # commands can see allocation-only environments and host placement.
+        # Callers choose this per phase: git/network operations can stay on
+        # the login node, while configure/build/test phases may opt into srun.
         # srun calls execve, not a shell, so we use bash -c to preserve the
         # &&-chain (cd, module loads, env preamble) around the real command.
         # When uenv style is configured, pass the image/view as srun --uenv/--view

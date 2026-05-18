@@ -25,7 +25,9 @@ class _FakeConnection:
         return SimpleNamespace(return_code=0, stdout="", stderr="")
 
 
-def _executor_with_allocation(env: EnvActivation | None = None) -> tuple[RemoteExecutor, _FakeConnection]:
+def _executor_with_allocation(
+    env: EnvActivation | None = None,
+) -> tuple[RemoteExecutor, _FakeConnection]:
     conn = _FakeConnection()
     executor = RemoteExecutor.__new__(RemoteExecutor)
     executor._conn = conn
@@ -88,3 +90,29 @@ def test_allocated_slurm_step_command_uses_srun_ranks(tmp_path: Path) -> None:
     )
     assert "uenv run" not in conn.commands[0]
     assert "/build/src/opalx Generated.in --info 2" in conn.commands[0]
+
+
+def test_allocated_single_rank_build_step_uses_srun(tmp_path: Path) -> None:
+    executor, conn = _executor_with_allocation(
+        EnvActivation(
+            style="modules",
+            module_use_paths=["/apps/modules"],
+            module_loads=["openmpi/4.1"],
+        )
+    )
+
+    rc = executor.run_command(
+        "cmake /work/opalx-src",
+        remote_cwd="/work/build",
+        log_path=tmp_path / "cmake.log",
+        slurm_step_ranks=1,
+    )
+
+    assert rc == 0
+    assert len(conn.commands) == 1
+    assert conn.commands[0].startswith(
+        "srun --jobid=12345 -n 1 --overlap -- bash -c "
+    )
+    assert "module use /apps/modules" in conn.commands[0]
+    assert "module load openmpi/4.1" in conn.commands[0]
+    assert "cmake /work/opalx-src" in conn.commands[0]

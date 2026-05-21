@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import signal as _signal
 import time
 from pathlib import Path
@@ -19,6 +20,82 @@ from .parsing.regression import (
     _read_stat_data,
 )
 from .plotting import _write_stat_plot
+
+
+def _append_regression_warning(
+    pipeline_log_path: Path,
+    test_log_path: Optional[Path],
+    message: str,
+) -> None:
+    line = f"[regression] WARNING: {message}"
+    _append_pipeline_line(pipeline_log_path, line)
+    if test_log_path is None or test_log_path == pipeline_log_path:
+        return
+    test_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with test_log_path.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def _count_common_s_values(s_vals: list[float], ref_s_vals: list[float]) -> int:
+    count = 0
+    i = 0
+    j = 0
+    while i < len(s_vals) and j < len(ref_s_vals):
+        s = s_vals[i]
+        ref_s = ref_s_vals[j]
+        if math.isclose(s, ref_s, rel_tol=1e-9, abs_tol=1e-12):
+            count += 1
+            i += 1
+            j += 1
+        elif s < ref_s:
+            i += 1
+        else:
+            j += 1
+    return count
+
+
+def _stat_grid_mismatch_warning(
+    test_name: str,
+    container_id: Optional[str],
+    var_name: str,
+    s_vals: list[float],
+    values: list[float],
+    ref_s_vals: list[float],
+    ref_values: list[float],
+) -> Optional[str]:
+    current_samples = min(len(s_vals), len(values))
+    reference_samples = min(len(ref_s_vals), len(ref_values))
+    if current_samples == 0 or reference_samples == 0:
+        return None
+
+    current_s = s_vals[:current_samples]
+    reference_s = ref_s_vals[:reference_samples]
+    same_count = current_samples == reference_samples
+    same_grid = same_count and all(
+        math.isclose(current_s[i], reference_s[i], rel_tol=1e-9, abs_tol=1e-12)
+        for i in range(current_samples)
+    )
+    if same_grid:
+        return None
+
+    tag = (
+        f"{test_name}:{var_name}"
+        if container_id is None
+        else f"{test_name}[{container_id}]:{var_name}"
+    )
+    if same_count:
+        detail = f"both have {current_samples} samples but s coordinates differ"
+    else:
+        detail = (
+            f"current samples={current_samples}, "
+            f"reference samples={reference_samples}"
+        )
+    common_count = _count_common_s_values(current_s, reference_s)
+    return (
+        f"{tag} stat sample grid mismatch ({detail}; "
+        f"common s samples={common_count}). Difference plots use matching "
+        "s coordinates only."
+    )
 
 
 def _classify_crash(rc: int, log_path: Path) -> tuple[Optional[str], Optional[str]]:
@@ -63,6 +140,7 @@ def _build_container(
     reference_stat: Optional[Path],
     plots_dir: Path,
     pipeline_log_path: Path,
+    test_log_path: Optional[Path],
 ) -> tuple[RegressionContainer, bool]:
     """Build one RegressionContainer from a single stat file pair."""
     metrics: list[RegressionMetric] = []
@@ -83,6 +161,21 @@ def _build_container(
                 if reference_stat is not None and reference_stat.exists()
                 else (None, [], [], None)
             )
+            grid_warning = _stat_grid_mismatch_warning(
+                test_name,
+                container_id,
+                var_name,
+                s_vals,
+                values,
+                ref_s_vals,
+                ref_values,
+            )
+            if grid_warning:
+                _append_regression_warning(
+                    pipeline_log_path,
+                    test_log_path,
+                    grid_warning,
+                )
             delta = _compute_delta(mode, values, ref_values)
 
             state = "broken"
@@ -198,9 +291,8 @@ def _build_simulation(
     transport_errors: Optional[list[str]] = None,
 ) -> RegressionSimulation:
     """Build the result model for one regression simulation."""
-    crash_signal, crash_summary = _classify_crash(
-        rc, log_path or work_test_dir / f"{test_name}-RT.log"
-    )
+    test_log_path = log_path or work_test_dir / f"{test_name}-RT.log"
+    crash_signal, crash_summary = _classify_crash(rc, test_log_path)
 
     description, checks = _parse_rt_file(rt_file)
     generated_pairs = _enumerate_stat_containers(work_test_dir, test_name)
@@ -229,6 +321,7 @@ def _build_simulation(
             reference_stat=reference_stat,
             plots_dir=plots_dir,
             pipeline_log_path=pipeline_log_path,
+            test_log_path=test_log_path,
         )
         containers.append(container)
         any_stat_plots = any_stat_plots or had_plots

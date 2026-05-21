@@ -1,7 +1,38 @@
 """Matplotlib-based stat comparison plots."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
+
+
+def _common_s_differences(
+    s_vals: list[float],
+    values: list[float],
+    ref_s_vals: list[float],
+    ref_values: list[float],
+) -> tuple[list[float], list[float]]:
+    """Return differences only at s coordinates shared by both series."""
+    s_common: list[float] = []
+    diffs: list[float] = []
+    i = 0
+    j = 0
+    value_count = min(len(s_vals), len(values))
+    ref_value_count = min(len(ref_s_vals), len(ref_values))
+
+    while i < value_count and j < ref_value_count:
+        s = s_vals[i]
+        ref_s = ref_s_vals[j]
+        if math.isclose(s, ref_s, rel_tol=1e-9, abs_tol=1e-12):
+            s_common.append(s)
+            diffs.append(values[i] - ref_values[j])
+            i += 1
+            j += 1
+        elif s < ref_s:
+            i += 1
+        else:
+            j += 1
+
+    return s_common, diffs
 
 
 def _write_stat_plot(
@@ -22,13 +53,24 @@ def _write_stat_plot(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax1 = plt.subplots(figsize=(9, 4.5))
     ax2 = ax1.twinx()
-    n_common = min(len(values), len(ref_values))
-    diffs = [values[i] - ref_values[i] for i in range(n_common)]
+    diff_s, diffs = _common_s_differences(s_vals, values, ref_s_vals, ref_values)
 
     ax1.plot(s_vals[: len(values)], values, label="current", linewidth=2)
-    ref_s = ref_s_vals if len(ref_s_vals) == len(ref_values) else s_vals[: len(ref_values)]
+    ref_s = (
+        ref_s_vals
+        if len(ref_s_vals) == len(ref_values)
+        else s_vals[: len(ref_values)]
+    )
     ax1.plot(ref_s, ref_values, label="reference", linewidth=2)
-    ax2.plot(s_vals[:n_common], diffs, "--", color="grey", label="difference", linewidth=1.0)
+    if diff_s:
+        ax2.plot(
+            diff_s,
+            diffs,
+            "--",
+            color="grey",
+            label="difference",
+            linewidth=1.0,
+        )
 
     pretty_var = var_name.replace("_", "(")
     if "(" in pretty_var and not pretty_var.endswith(")"):
@@ -40,7 +82,8 @@ def _write_stat_plot(
     ax1.set_ylabel(f"{pretty_var}{y_unit}")
     ax2.set_ylabel(f"delta {pretty_var}{y_unit}")
     ax1.legend(loc="lower left")
-    ax2.legend(loc="lower right")
+    if diff_s:
+        ax2.legend(loc="lower right")
     ax1.grid(True)
     fig.tight_layout()
     fig.savefig(out_path)

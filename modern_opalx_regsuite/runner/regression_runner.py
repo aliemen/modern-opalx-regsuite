@@ -158,7 +158,7 @@ def _run_regression_suite(
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
             input_file=in_file,
-            log_path=test_log_local,
+            log_path=test_log_run,
         )
         report.simulations.append(sim)
         metric_count = sum(len(c.metrics) for c in sim.containers)
@@ -449,7 +449,7 @@ def _run_regression_suite_remote(
             pipeline_log_path=pipeline_log_path,
             test_start=test_start,
             input_file=in_file,
-            log_path=test_log_local,
+            log_path=test_log_run,
             transport_errors=transport_errors,
         )
         report.simulations.append(sim)

@@ -20,9 +20,16 @@ keep_work_dirs = false
 host = "0.0.0.0"
 port = 8000
 users_file = "~/.config/opalx-regsuite/users.json"
+# Public execution presets live at <users_root>/_public/execution-settings.json.
+# Private run profiles and SSH keys live under <users_root>/<username>/.
+# users_root = "~/.config/opalx-regsuite/users"
 # Deprecated legacy global key directory (used only by migrate-keys helper).
 # ssh_keys_dir = "~/.config/opalx-regsuite/ssh-keys"
 
+# Deprecated seed-only examples.
+# The dashboard now manages build, machine, environment, and Slurm presets under
+# Settings -> Execution. These legacy arch_configs are read only to seed public
+# presets on first load and to keep old trigger/schedule paths compatible.
 [[arch_configs]]
 arch = "cpu-serial"
 cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DOPALX_USE_INSTALLED_HDF5=ON", "-DOPALX_USE_INSTALLED_H5HUT=ON", "-DOPALX_USE_INSTALLED_GTEST=ON"]
@@ -69,5 +76,5 @@ time = "00:30:00"
 tasks_per_node = 1
 cpus_per_task = 16
 gpus_per_task = 1
-# No [arch_configs.env] — environment activation is defined in the "daint-gh200" Connection
-# (Settings → Connections), using uenv style.
+# No [arch_configs.env] here: define the uenv activation as a public environment
+# preset in Settings -> Execution, then select it from a private run profile.

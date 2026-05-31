@@ -8,16 +8,16 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 
 - **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), results browsing, dashboard statistics, and live queue display.
 - **Test catalog**: Browse the local `regression-tests-x` clone by branch without checking it out. The catalog shows enabled/disabled tests, `.rt` metric checks, reference data, multi-container references, last status, and flaky suspects.
-- **Re-run from results**: A run detail page can prefill Start a Run with the original branch, tests branch, architecture, connection, and run options.
+- **Re-run from results**: A run detail page can prefill Start a Run with the original branch, tests branch, build preset, execution snapshot, and run options.
 - **Advanced CMake overrides**: Manual triggers can add one-off CMake arguments such as `-DIPPL_GIT_TAG=master`; custom args force a clean build and override matching configured `-D` values.
 - **Artifact integrity checks**: Runs carry an `artifact-manifest.json`; CLI and API checks verify required JSON, logs, plots, hashes, and referenced artifacts.
 - **Flakiness signals**: Dashboard and catalog surfaces flag simulations with mixed pass/fail outcomes in the recent history for the same OPALX branch, regression-tests branch, and architecture.
 - **Per-machine run queuing**: Runs are queued per machine instead of rejected. Local and remote machines can run in parallel; only one run per physical host at a time.
-- **Config-driven build recipes**: `config.toml` with per-architecture overrides (`[[arch_configs]]`) carrying only the *build recipe* (cmake args, build jobs, mpi ranks, env activation).
-- **Per-user named connections**: Each authenticated regsuite user manages their own SSH keys and named *connections* (target host, user, key, optional ProxyJump gateway, environment activation) via the Settings UI. At trigger time the user picks a run config + a connection (or "Local").
-- **ProxyJump support**: Connections can hop through a bastion host — perfect for HPC sites like CSCS Daint via `ela.cscs.ch`.
-- **Two env activation styles**: `module load` (lmod) or free-form `prologue` commands like `uenv start prgenv-gnu/24.7:v3 --view=default`.
-- **Sensitive-data isolation**: `data_root` (which may be shared publicly) contains only test/run data + the user-chosen connection name. Identity-bearing state (SSH keys, hostnames, usernames, work dirs) lives under `~/.config/opalx-regsuite/`.
+- **Dashboard-managed execution profiles**: Public build, machine, environment, and Slurm presets live under `users_root/_public/`; each user combines them with private usernames, SSH keys, and workspace paths in run profiles.
+- **Config-driven deployment defaults**: `config.toml` keeps repo/data roots, default branches, host/port/auth paths, and optional deprecated `[[arch_configs]]` only for first-load seeding and legacy compatibility.
+- **ProxyJump support**: SSH machine presets can hop through a bastion host — perfect for HPC sites like CSCS Daint via `ela.cscs.ch`.
+- **Environment presets**: Public presets support `none`, `modules`, `prologue`, and `uenv`; remote Slurm+uenv still uses `srun --uenv/--view`.
+- **Sensitive-data isolation**: `data_root` (which may be shared publicly) contains test/run data plus public execution snapshots. Private usernames, key names, OTPs, passwords, and workspace paths stay under `users_root`.
 - **API keys for automation**: Long-lived, scope-limited bearer tokens (managed in Settings -> API keys) let you automate SSH-key rotation from a laptop via the [deploy/opalx-keys.sh](deploy/opalx-keys.sh) bash client - no browser session needed.
 - **File-based data model**: JSON + logs + SVG plots on disk, no database. Results live in a separate git repo (`opalx-regsuite-test-data`).
 - **Single-command server**: `opalx-regsuite serve` starts the full stack.
@@ -108,9 +108,12 @@ cd frontend && npm run dev   # frontend on :5173, proxies /api → :8000
 
 ### Configuration (`config.toml`)
 
-`config.toml` carries only the **build recipe**. SSH targets, gateways, keys
-and remote work dirs live in *per-user named connections*, managed in the
-Settings UI (see [Connections](#connections-and-remote-execution) below).
+`config.toml` carries deployment defaults: checkout roots, data/archive roots,
+default branches, global commands, web binding, and auth paths. Build,
+machine, environment, and Slurm execution definitions are managed in the
+dashboard under **Settings -> Execution**. Optional legacy `[[arch_configs]]`
+entries are still accepted and are used to seed public build/env/Slurm presets
+the first time `users_root/_public/execution-settings.json` is created.
 
 Core fields (set by `init`):
 
@@ -121,13 +124,13 @@ data_root            = "/path/to/opalx-regsuite-test-data"
 regtests_repo_root   = "/path/to/regression-tests-x"
 opalx_info_level     = 2
 
-# Where per-user state (ssh-keys, connections.json, profile.json) lives.
+# Where public execution settings and per-user private state live.
 # Must be OUTSIDE data_root since it contains identity-bearing data.
 # Default: ~/.config/opalx-regsuite/users
 users_root           = "~/.config/opalx-regsuite/users"
 ```
 
-Per-architecture build recipes (optional, can have multiple):
+Deprecated seed-only per-architecture build recipes (optional):
 
 ```toml
 [[arch_configs]]
@@ -137,8 +140,7 @@ mpi_ranks  = 1
 max_mpi_ranks = 4
 cmake_args = ["-DBUILD_TYPE=Release", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT_TESTS=ON"]
 
-# Optional: environment activation for LOCAL runs of this arch.
-# (Remote runs use the connection's env activation instead.)
+# Optional seed for a public environment preset.
 [arch_configs.env]
 style        = "modules"
 module_loads = ["gcc/15.2.0", "openmpi/4.1.6"]
@@ -158,22 +160,29 @@ tasks_per_node = 1
 cpus_per_task = 16
 gpus_per_task = 1
 
-# Optional: local-only environment activation. Remote runs use the selected
-# connection's environment activation instead.
+# Optional seed for a public environment preset.
 # [arch_configs.env]
 # style        = "modules"
 # module_loads = ["gcc/15.2.0", "openmpi/4.1.6", "cuda/12.0"]
 ```
 
+After first login, edit these definitions in **Settings -> Execution**. The
+public settings store contains:
+
+- build presets: CMake args, build jobs, default/max MPI ranks, OPALX info level
+- machine presets: local or SSH targets, public host/port/gateway shape, queue key
+- environment presets: `none`, `modules`, `prologue`, or `uenv`
+- Slurm presets: typed Slurm resources or legacy raw `slurm_args`
+
 Regression commands are generated by the suite, not by `*.local` scripts. By
 default each test runs as `mpirun -np <mpi_ranks> <opalx> <test>.in --info
 <opalx_info_level>`, with optional per-run overrides from the trigger page or
-schedule form. For Slurm-backed remote runs, `[arch_configs.slurm]` is expanded
-at trigger time so requested MPI ranks scale `--ntasks`, `--nodes`, and GPU
-counts consistently. Legacy `slurm_args` still load for old configs, but new
-configs should use the typed Slurm table.
+schedule form. For Slurm-backed profiles, typed Slurm presets are expanded at
+trigger time so requested MPI ranks scale `--ntasks`, `--nodes`, and GPU counts
+consistently. Legacy `slurm_args` still load for old configs, but new configs
+should use typed Slurm presets.
 
-The `[arch_configs.env]` sub-table accepts four styles:
+Environment presets accept four styles:
 
 | `style` | Fields | Use case |
 |---|---|---|
@@ -198,12 +207,20 @@ users_file = "~/.config/opalx-regsuite/users.json"
 
 ---
 
-### Connections and remote execution
+### Execution profiles and remote execution
 
-Remote execution is configured per-user via **named connections** in the
-Settings UI, not in `config.toml`. Each connection captures everything needed
-to reach a specific remote target, including (optionally) a `ProxyJump`
-gateway for hopping through a bastion host.
+Remote execution is configured in two layers in the Settings UI:
+
+- **Public execution settings** define build, machine, environment, and Slurm
+  presets that any authenticated dashboard user can reference.
+- **Private run profiles** combine those public presets with one user's SSH
+  username, key names, optional gateway username/key, remote workspace path,
+  and cleanup/keepalive behavior.
+
+Legacy `connections.json` files are not modified. On first profile load, the
+suite imports existing connections into generated public machine/env presets
+and generated private run profiles so the old "arch + connection" behavior is
+still available.
 
 #### 1. Upload your SSH key
 
@@ -213,47 +230,62 @@ key. Give it a short name (e.g. `cscs-key`). The key is stored at
 and is **owned by your regsuite user only** — other regsuite users cannot
 see it.
 
-#### 2. Create a connection
+#### 2. Define public execution presets
 
-In **Settings** → **Connections**, click **Add connection** and fill in:
+In **Settings** -> **Execution**, edit the shared public settings:
 
 | Field | Example | Notes |
 |---|---|---|
-| Name | `daint-cpu` | Avoid embedding usernames or hostnames here — this label is the only identity surface that may end up in publicly-shareable run logs. |
-| Description | `CSCS Alps Daint, CPU partition` | Optional |
-| Host / User / Port | `daint.alps.cscs.ch` / `aliemen` / `22` | The target machine |
-| SSH key | `cscs-key` | Pick from the dropdown of your uploaded keys |
-| Use ProxyJump | ☑ | Enable to hop through a bastion |
-| Gateway host / user / port / key | `ela.cscs.ch` / `aliemen` / `22` / `cscs-key` | Bastion settings |
-| Remote work directory | `/scratch/snx3000/aliemen/opalx-regsuite` | Persistent workspace on the target |
-| Wipe work directory after every run | ☐ | Off keeps incremental builds; on is good for disk-constrained machines |
-| Environment activation | `prologue` | Or `modules` or `none` |
-| Prologue command | `uenv start prgenv-gnu/24.7:v3 --view=default` | Free-form shell command prepended to every remote command |
+| Build preset | `cuda-daint` | CMake args, build jobs, default/max MPI ranks, OPALX info level |
+| Machine preset | `daint-gh200` | Local or SSH target, public host/port/gateway shape, queue key |
+| Environment preset | `daint-uenv` | `none`, `modules`, `prologue`, or `uenv` activation |
+| Slurm preset | `daint-debug-gh200` | Typed Slurm resources, or legacy raw `slurm_args` when needed |
 
-Click **Test** (the lightning-bolt icon) on a connection row to open the SSH
-chain (gateway included) and run `whoami` as a smoke test.
+Public presets should not contain usernames, key names, passwords, OTPs, or
+workspace paths. Those stay in each user's private profile.
 
-#### 3. Start a run on a connection
+#### 3. Create a private run profile
+
+In **Settings** -> **Execution** -> **Run profiles**, click **Add profile** and
+select:
+
+| Field | Example | Notes |
+|---|---|---|
+| Build preset | `cuda-daint` | Becomes the run `arch` for compatibility and data paths |
+| Machine preset | `daint-gh200` | Local or remote machine target |
+| Environment preset | `daint-uenv` | Optional; controls local/remote environment activation |
+| Slurm preset | `daint-debug-gh200` | Optional; remote Slurm allocation/step defaults |
+| SSH user / key | `aliemen` / `cscs-key` | Private to your user directory |
+| Gateway user / key | `aliemen` / `cscs-key` | Required for key-auth gateways |
+| Remote work directory | `/scratch/.../opalx-regsuite` | Private and never written to `data_root` |
+
+Click **Test** (the lightning-bolt icon) on a profile row to open the SSH chain
+(gateway included) and run `whoami` as a smoke test. Interactive 2FA gateways
+ask for password and OTP only for that test/trigger request; they are never
+stored.
+
+#### 4. Start a run with a profile
 
 Go to **Start a Run**, pick:
 - **OPALX branch**
 - **Regression-tests branch**
-- **Run config** (the architecture / build recipe from `config.toml`)
-- **Connection** (your named connection, or `Local`)
+- **Run profile**
 
-The combination is independent: the same arch can be run on Local *or* on
-any remote target, depending on which connection you pick.
+The profile determines the build preset, machine, environment, Slurm defaults,
+private SSH identity, and workspace path. The same build preset can be used in
+multiple profiles, for example local modules, remote direct SSH, remote Slurm,
+remote Slurm+uenv, or remote Slurm+modules.
 
 The **Advanced** tab accepts one custom CMake argument per line for manual
 runs. Empty lines and lines starting with `#` are ignored. Custom `-DKEY=...`
-or `-DKEY:type=...` values replace matching values from `cmake_args` or the
-selected `[[arch_configs]]`; other custom arguments are appended. Any custom
-CMake argument forces a clean build so dependency tag changes cannot reuse a
-stale build tree.
+or `-DKEY:type=...` values replace matching values from the selected build
+preset; other custom arguments are appended. Any custom CMake argument forces
+a clean build so dependency tag changes cannot reuse a stale build tree.
 
 #### Equivalent SSH config
 
-A connection of the form below is equivalent to this `~/.ssh/config`:
+A run profile targeting an SSH machine preset with a key-auth gateway is
+equivalent to this `~/.ssh/config`:
 
 ```
 Host ela
@@ -285,39 +317,39 @@ otherwise unused.
 
 #### Remote workspace layout
 
-The workspace on the remote persists between runs by default
-(`cleanup_after_run = false`), so git repos are only cloned once and builds
-are incremental:
+The profile's remote workspace persists between runs by default
+(`cleanup_after_run = false`), so git repos are only cloned once and builds are
+incremental:
 
 ```
-{connection.work_dir}/
+{profile.work_dir}/
   opalx-src/                        # git clone of OPALX (HTTPS, updated each run)
   regtests/                         # git clone of regression-tests-x
   builds/{branch}/{arch}/build/     # persistent build dir (incremental cmake/make)
   work/{run_id}/{test_name}/        # per-run work dirs (cleaned after each run)
 ```
 
-Enable `cleanup_after_run` on the connection to delete the entire workspace
+Enable `cleanup_after_run` on the profile to delete the entire workspace
 after every run.
 
 #### Requirements on the remote machine
 
 - `git` installed with outbound HTTPS access to the repos
-- Any compilers/libraries needed by the build (loaded via the connection's env activation)
-- The SSH user must have write access to the connection's `work_dir`
+- Any compilers/libraries needed by the build (loaded via the selected environment preset)
+- The SSH user must have write access to the profile's `work_dir`
 - If using a `prologue` env activation, the prologue must keep `git`, `cmake`,
   and `make` available on `PATH` after activation (some `uenv` views strip
   them — use a view that includes a build toolchain)
 
 #### Sensitive-data isolation
 
-`data_root` is treated as publicly shareable. The runner writes only the
-**user-chosen connection name** into run metadata and log headers — never
-the SSH host, user, key, or work_dir. Note that build/test stdout/stderr
-streams verbatim into the run logs, so if a build prints absolute paths
-that contain a username (e.g. `/scratch/snx3000/aliemen/...`), those *will*
-appear in the logs. If you intend to share `data_root` publicly, choose a
-generic-looking `work_dir` for your connections.
+`data_root` is treated as publicly shareable. The runner writes public build,
+machine, environment, and Slurm snapshot fields into run metadata, but never
+private profile data: no SSH usernames, key names, passwords, OTPs, or
+workspace paths. Note that build/test stdout/stderr streams verbatim into the
+run logs, so if a build prints absolute paths that contain a username (e.g.
+`/scratch/snx3000/aliemen/...`), those *will* appear in the logs. If you intend
+to share `data_root` publicly, choose a generic-looking `work_dir` in profiles.
 
 ---
 
@@ -352,14 +384,14 @@ suite also exposes a scripted path:
    opalx-keys delete  cscs-key
    ```
 
-   `replace` keeps the key's server-side name, so every connection that
-   references it picks up the new credentials on the next run. Ideal for
-   short-lived keys.
+   `replace` keeps the key's server-side name, so every run profile or legacy
+   connection that references it picks up the new credentials on the next run.
+   Ideal for short-lived keys.
 
 API keys are **scoped to the SSH-key endpoints only** - a leaked token
-cannot read run data, modify connections, or mint more tokens. The only way
-to get broader access is a browser session (JWT). Rotate or revoke a key
-any time in **Settings -> API keys** (the refresh icon and trash icon).
+cannot read run data, modify profiles/public settings, or mint more tokens.
+The only way to get broader access is a browser session (JWT). Rotate or revoke
+a key any time in **Settings -> API keys** (the refresh icon and trash icon).
 
 See [deploy/opalx-keys.README.md](deploy/opalx-keys.README.md) for the full
 manual (keyboard-macro examples, exit codes, troubleshooting).
@@ -407,7 +439,7 @@ python scripts/generate_demo_data.py
 ```
 data_root/                                 # publicly shareable: only test/run data
   runs/<branch>/<arch>/<run_id>/
-    run-meta.json                           # carries connection_name, NOT host/user/key
+    run-meta.json                           # carries public execution snapshot, NOT user/key/work_dir
     artifact-manifest.json                  # generated file inventory with size/hash data
     unit-tests.json
     regression-tests.json
@@ -418,9 +450,12 @@ data_root/                                 # publicly shareable: only test/run d
 
 ~/.config/opalx-regsuite/                  # never publicly shared: identity-bearing
   users.json                                # bcrypt credential hashes
+  users/_public/
+    execution-settings.json                 # public build/machine/env/Slurm presets
   users/<username>/                         # one directory per regsuite user
     profile.json
-    connections.json                        # named SSH connections
+    run-profiles.json                       # private profile refs, usernames, key names, work dirs
+    connections.json                        # legacy named SSH connections, used for migration/compat
     api-keys.json                           # scoped API keys (sha256 hashes, mode 0600)
     ssh-keys/<name>.pem                     # private SSH keys (mode 0600)
 ```
@@ -431,20 +466,21 @@ data_root/                                 # publicly shareable: only test/run d
 
 Runs are queued per **physical machine** rather than rejected when a machine is busy:
 
-- **Local runs**: All runs triggered with the `Local` connection share a single
+- **Local runs**: All runs triggered with a local machine preset share a single
   `local` slot. Only one local run at a time.
-- **Remote runs**: Each physical target host gets its own queue, keyed on
-  `connection.host`. Two regsuite users with different connections to the
-  same host correctly serialize against each other (so they don't trash
-  each other's `work_dir`).
+- **Remote runs**: Each physical target host gets its own queue, keyed on the
+  public machine preset `queue_key` if set, otherwise the SSH host. Two
+  regsuite users with profiles targeting the same host correctly serialize
+  against each other.
 - **Cross-machine parallelism**: A local run and a remote run (or two remote runs on different
   hosts) can execute simultaneously.
 - **Auto-start**: When a run finishes, the next queued run on the same machine starts
   automatically.
 - **Queue visibility**: The dashboard shows a live "Running Jobs & Queue" panel. Queued runs
   can be cancelled before they start.
-- **Connection name**: Each run records the user-chosen connection name
-  (e.g. `daint-cpu`, `local`) — never the underlying SSH host, user, or key.
+- **Run label**: Active/queued runs expose `connection_name` for compatibility.
+  Profile-based runs use the public machine preset id (or `local`), never the
+  private SSH user, key, or workspace path.
 
 Queued runs are held in memory. If the server restarts, queued (not-yet-started) runs are
 lost. Already-running runs that were interrupted are healed to "failed" on the next startup.
@@ -468,4 +504,4 @@ run queue state is held in process memory. This is enforced by the CLI's `serve`
 | `/live/:runId?` | Live log streaming for a specific run (or the most recent active run) |
 | `/results/:branch/:arch` | Run history table |
 | `/results/:branch/:arch/:run_id` | Detailed results with plots, metrics, and machine info |
-| `/settings` | SSH key management + named SSH connections + API keys for scripted access (per-user) |
+| `/settings` | SSH keys, public execution presets, private run profiles, and API keys |

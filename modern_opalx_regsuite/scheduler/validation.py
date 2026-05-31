@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 from ..user_store import get_connection
+from ..execution_profiles import resolve_run_profile
 
 if TYPE_CHECKING:
     from ..config import Connection, SuiteConfig
@@ -33,6 +34,26 @@ def resolve_scheduled_connection(
     if conn.gateway is not None and conn.gateway.auth_method == "interactive":
         raise ScheduleValidationError(
             "Scheduled runs cannot use connections with an interactive 2FA "
+            "gateway. One-time passwords would expire before the run starts."
+        )
+    return conn
+
+
+def resolve_scheduled_profile(
+    cfg: "SuiteConfig", owner: str, profile_id: str
+) -> Optional["Connection"]:
+    """Resolve a scheduled run profile and reject interactive 2FA gateways."""
+    try:
+        resolved = resolve_run_profile(cfg, owner, profile_id)
+    except KeyError as exc:
+        raise ScheduleValidationError(str(exc)) from exc
+    except ValueError as exc:
+        raise ScheduleValidationError(str(exc)) from exc
+
+    conn = resolved.connection
+    if conn is not None and conn.gateway is not None and conn.gateway.auth_method == "interactive":
+        raise ScheduleValidationError(
+            "Scheduled runs cannot use profiles with an interactive 2FA "
             "gateway. One-time passwords would expire before the run starts."
         )
     return conn

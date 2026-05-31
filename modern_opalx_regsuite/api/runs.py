@@ -9,6 +9,14 @@ from pydantic import BaseModel, Field
 
 from ..config import SlurmResources, SuiteConfig
 from ..data_model import RerunReference
+from ..execution_profiles import (
+    RunProfileSummary,
+    load_execution_settings,
+    load_run_profiles,
+    resolve_run_profile,
+    suite_config_with_profile,
+    summarize_profile,
+)
 from ..runner.pipeline_options import resolve_effective_run_options
 from ..user_store import get_connection
 from .deps import get_config, require_auth
@@ -28,7 +36,8 @@ router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 class TriggerRequest(BaseModel):
     branch: str
-    arch: str
+    arch: Optional[str] = None
+    profile_id: Optional[str] = None
     regtests_branch: Optional[str] = None
     skip_unit: bool = False
     skip_regression: bool = False
@@ -149,6 +158,33 @@ def _validate_run_option_overrides(
         ) from exc
 
 
+def _resolve_validation_config(
+    cfg: SuiteConfig,
+    username: str,
+    body: TriggerRequest,
+) -> tuple[SuiteConfig, str, object | None]:
+    if body.profile_id:
+        try:
+            resolved = resolve_run_profile(cfg, username, body.profile_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        return suite_config_with_profile(cfg, resolved), resolved.arch, resolved
+    if not body.arch:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="arch is required when profile_id is not provided.",
+        )
+    return cfg, body.arch, None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/archs", response_model=list[str])
@@ -187,6 +223,19 @@ def list_run_configs(
             )
         )
     return out
+
+
+@router.get("/profiles", response_model=list[RunProfileSummary])
+def list_run_profiles_for_trigger(
+    username: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> list[RunProfileSummary]:
+    """Return this user's resolved run profile summaries for trigger forms."""
+    settings = load_execution_settings(cfg)
+    return [
+        summarize_profile(cfg, username, profile, settings)
+        for profile in load_run_profiles(cfg, username)
+    ]
 
 
 @router.get("/current", response_model=Optional[CurrentRunStatus])
@@ -250,9 +299,12 @@ async def trigger_run(
     cfg: SuiteConfig = Depends(get_config),
 ):
     run_id = _run_id_from_time()
+    validation_cfg, effective_arch, resolved_profile = _resolve_validation_config(
+        cfg, username, body
+    )
     _validate_run_option_overrides(
-        cfg,
-        body.arch,
+        validation_cfg,
+        effective_arch,
         mpi_ranks=body.mpi_ranks,
         opalx_info_level=body.opalx_info_level,
         slurm_resources=body.slurm_resources,
@@ -261,7 +313,22 @@ async def trigger_run(
     # HTTP-specific pre-validation: interactive 2FA gateways must receive
     # credentials in the request body. start_run() doesn't know about the
     # request body so we enforce this here before calling it.
-    if body.connection_name and body.connection_name.lower() != "local":
+    if body.profile_id:
+        conn = getattr(resolved_profile, "connection", None)
+        if (
+            conn is not None
+            and conn.gateway is not None
+            and conn.gateway.auth_method == "interactive"
+            and (not body.gateway_password or not body.gateway_otp)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "This profile uses an interactive gateway (password + 2FA). "
+                    "Provide 'gateway_password' and 'gateway_otp' in the request body."
+                ),
+            )
+    elif body.connection_name and body.connection_name.lower() != "local":
         conn = get_connection(cfg, username, body.connection_name)
         if conn is None:
             raise HTTPException(
@@ -290,7 +357,7 @@ async def trigger_run(
         triggered_by=username,
         owner_for_connection=username,
         branch=body.branch,
-        arch=body.arch,
+        arch=effective_arch,
         regtests_branch=body.regtests_branch,
         skip_unit=body.skip_unit,
         skip_regression=body.skip_regression,
@@ -300,6 +367,7 @@ async def trigger_run(
         opalx_info_level=body.opalx_info_level,
         slurm_resources=body.slurm_resources,
         connection_name=body.connection_name,
+        profile_id=body.profile_id,
         rerun_of=body.rerun_of,
         gateway_password=body.gateway_password,
         gateway_otp=body.gateway_otp,

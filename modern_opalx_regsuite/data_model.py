@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Iterable, List, Optional
+from typing import Annotated, Iterable, List, Literal, Optional
 
 from pydantic import BaseModel, AfterValidator, ConfigDict, Field
 
-from .config_types import SlurmResources
+from .config_types import EnvActivation, SlurmConfig, SlurmResources
 
 
 def _ensure_utc(v: datetime) -> datetime:
@@ -127,6 +127,60 @@ class RunOptions(BaseModel):
     slurm_resources: Optional[SlurmResources] = None
 
 
+class BuildPresetSnapshot(BaseModel):
+    """Public build preset settings used for a run."""
+
+    id: str
+    name: str
+    cmake_args: Optional[List[str]] = None
+    build_jobs: int = 2
+    mpi_ranks: int = 1
+    max_mpi_ranks: Optional[int] = None
+    opalx_info_level: Optional[int] = None
+
+
+class MachinePresetSnapshot(BaseModel):
+    """Public machine preset settings used for a run.
+
+    This intentionally excludes login usernames, SSH key names, and workspace
+    paths. Only shared machine shape is persisted under data_root.
+    """
+
+    id: str
+    name: str
+    kind: Literal["local", "ssh"]
+    host: Optional[str] = None
+    port: int = 22
+    gateway_host: Optional[str] = None
+    gateway_port: Optional[int] = None
+    gateway_auth_method: Optional[Literal["key", "interactive"]] = None
+    queue_key: Optional[str] = None
+
+
+class EnvPresetSnapshot(BaseModel):
+    id: str
+    name: str
+    env: EnvActivation
+
+
+class SlurmPresetSnapshot(BaseModel):
+    id: str
+    name: str
+    slurm: Optional[SlurmConfig] = None
+    slurm_args: List[str] = Field(default_factory=list)
+    command_timeout: int = 0
+    salloc_timeout: int = 0
+
+
+class ExecutionSnapshot(BaseModel):
+    """Safe public execution settings snapshot stored with run data."""
+
+    build: Optional[BuildPresetSnapshot] = None
+    machine: Optional[MachinePresetSnapshot] = None
+    environment: Optional[EnvPresetSnapshot] = None
+    slurm: Optional[SlurmPresetSnapshot] = None
+
+
 class RerunReference(BaseModel):
     """Pointer to the source run when a run is created via "Run again"."""
 
@@ -139,9 +193,9 @@ class RunMeta(BaseModel):
     """Per-run metadata stored at ``runs/<branch>/<arch>/<run_id>/run-meta.json``.
 
     SENSITIVE-DATA RULE: This file lives under ``data_root`` which may be shared
-    publicly. **Never** add fields here that hold raw SSH hostnames, usernames,
-    file paths, or credentials. The user-chosen ``connection_name`` is the only
-    identity surface allowed.
+    publicly. **Never** add private profile fields here: SSH usernames, key
+    names, passwords, OTPs, or workspace paths. Only public execution presets
+    and compatibility labels may be stored.
     """
 
     # Accept legacy keys (execution_host / execution_user) silently when reading
@@ -160,8 +214,9 @@ class RunMeta(BaseModel):
     tests_repo_commit: Optional[str] = None
     regtest_branch: Optional[str] = None
 
-    # The user-chosen connection name (e.g. "daint", "local"). Safe for public
-    # sharing as long as the user did not embed identifying info in the name.
+    # Compatibility label for live/queued/result views. Profile-based runs use
+    # the public machine preset id (or "local"); legacy runs use the old
+    # user-chosen connection name.
     connection_name: Optional[str] = None
 
     # The username that triggered the run.
@@ -189,6 +244,10 @@ class RunMeta(BaseModel):
     # Persisted execution options. Historical runs default to all False so
     # "Run again" can still prefill a sensible request from legacy metadata.
     run_options: RunOptions = Field(default_factory=RunOptions)
+
+    # Public preset settings used for this run. Historical runs and legacy
+    # triggers may not have this field.
+    execution_snapshot: Optional[ExecutionSnapshot] = None
 
     # Optional source run when this run was triggered from an existing result.
     rerun_of: Optional[RerunReference] = None
@@ -223,6 +282,7 @@ class RunIndexEntry(BaseModel):
     archived: bool = False
     public: bool = False
     run_options: RunOptions = Field(default_factory=RunOptions)
+    execution_snapshot: Optional[ExecutionSnapshot] = None
     rerun_of: Optional[RerunReference] = None
 
 

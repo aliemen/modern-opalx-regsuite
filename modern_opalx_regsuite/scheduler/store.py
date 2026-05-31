@@ -4,9 +4,10 @@ All schedules live in one shared file at ``<data_root>/schedules.json``. A
 module-level :class:`asyncio.Lock` serializes read-modify-write operations to
 avoid interleaved writes from concurrent API calls or the scheduler task.
 
-Sensitive-data rule: only ``connection_name`` (user-chosen label) is stored in
-this file — never the underlying SSH host, user, or key paths. Key resolution
-happens at fire time via the owner's per-user connection store.
+Sensitive-data rule: schedules may store a private ``profile_id`` owned by the
+schedule owner plus legacy ``connection_name`` compatibility labels, but never
+SSH users, key names, passwords, OTPs, or workspace paths. Profile/key
+resolution happens at fire time via the owner's per-user state.
 """
 from __future__ import annotations
 
@@ -85,6 +86,7 @@ async def create_schedule(
         branch=body.branch,
         arch=body.arch,
         regtests_branch=body.regtests_branch,
+        profile_id=body.profile_id,
         connection_name=body.connection_name,
         skip_unit=body.skip_unit,
         skip_regression=body.skip_regression,
@@ -123,6 +125,7 @@ async def update_schedule(
                         "branch": body.branch,
                         "arch": body.arch,
                         "regtests_branch": body.regtests_branch,
+                        "profile_id": body.profile_id,
                         "connection_name": body.connection_name,
                         "skip_unit": body.skip_unit,
                         "skip_regression": body.skip_regression,

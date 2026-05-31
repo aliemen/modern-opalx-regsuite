@@ -1,9 +1,9 @@
 """SSH key management endpoints (per-user).
 
 Each authenticated regsuite user has their own ``ssh-keys/`` directory under
-``<users_root>/<username>/``. Keys are referenced by name from a
-:class:`~modern_opalx_regsuite.config.Connection`. Deletion of a key that is
-referenced by any of the user's connections returns 409 Conflict.
+``<users_root>/<username>/``. Keys are referenced by name from private run
+profiles and legacy connections. Deletion of a key that is still referenced
+returns 409 Conflict.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from .._atomic_write import write_secret_bytes_atomic
 from ..api_keys import ApiKeyScope
 from ..config import SuiteConfig
+from ..execution_profiles import run_profiles_referencing_key
 from ..user_store import (
     connections_referencing_key,
     user_keys_dir,
@@ -221,17 +222,21 @@ def delete_ssh_key(
     _validate_name(name)
     username, _ = user_paths
 
-    # Block deletion if any connection (or its gateway) references this key.
-    dependents = connections_referencing_key(cfg, username, name)
-    if dependents:
+    # Block deletion if any run profile or legacy connection references this key.
+    dependent_connections = connections_referencing_key(cfg, username, name)
+    dependent_profiles = run_profiles_referencing_key(cfg, username, name)
+    if dependent_connections or dependent_profiles:
+        total = len(dependent_connections) + len(dependent_profiles)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "message": (
-                    f"Key '{name}' is in use by {len(dependents)} connection(s). "
+                    f"Key '{name}' is in use by {total} profile/connection "
+                    f"reference(s). "
                     "Unlink them before deleting."
                 ),
-                "dependent_connections": dependents,
+                "dependent_connections": dependent_connections,
+                "dependent_profiles": dependent_profiles,
             },
         )
 

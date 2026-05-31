@@ -244,13 +244,11 @@ class SlurmConfig(SlurmResources):
 
 
 class Connection(BaseModel):
-    """A named, per-user remote execution target.
+    """Legacy named, per-user remote execution target.
 
     Stored in ``<users_root>/<username>/connections.json`` as part of a list.
-    Referenced by ``name`` from the trigger endpoint and selected at run time.
-
-    The ``name`` is the only identity surface that may appear in publicly-shareable
-    ``data_root`` artifacts (run metadata, log headers). Choose it accordingly.
+    New dashboard runs use private run profiles resolved into transient
+    ``Connection`` objects; this model remains for compatibility and migration.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -294,14 +292,21 @@ class Connection(BaseModel):
             "drops caused by NAT/firewall timeouts during long builds. 0 = disabled."
         ),
     )
+    queue_key: Optional[str] = Field(
+        None,
+        description=(
+            "Optional public machine queue key. If unset, the remote host is "
+            "used so different users targeting the same host serialize."
+        ),
+    )
 
 
 class ArchConfig(BaseModel):
-    """Per-architecture build recipe.
+    """Deprecated per-architecture build recipe.
 
-    Pure run-config: cmake/build/test parameters and (for local runs) environment
-    activation. Execution-target details — SSH host, user, key, gateway, remote
-    work_dir — live in per-user :class:`Connection` objects, not here.
+    Public dashboard build/env/Slurm presets are resolved into transient
+    ``ArchConfig`` objects before calling the runner. Static ``arch_configs``
+    remain for first-load seeding and legacy trigger/schedule compatibility.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -357,7 +362,10 @@ class ArchConfig(BaseModel):
     )
     env: EnvActivation = Field(
         default_factory=EnvActivation,
-        description="Environment activation for local runs of this arch. Remote runs use the selected Connection's env instead.",
+        description=(
+            "Environment activation for this legacy arch config. Dashboard "
+            "profiles use selected public environment presets."
+        ),
     )
 
     @model_validator(mode="after")

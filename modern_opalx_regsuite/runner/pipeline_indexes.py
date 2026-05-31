@@ -55,6 +55,7 @@ def _update_indexes(data_root: Path, meta: RunMeta) -> None:
                 archived=meta.archived,
                 public=meta.public,
                 run_options=meta.run_options,
+                execution_snapshot=meta.execution_snapshot,
                 rerun_of=meta.rerun_of,
             )
         )

@@ -313,6 +313,10 @@ def create_app() -> FastAPI:
     from .connections import router as connections_router
     app.include_router(connections_router)
 
+    # Dashboard-managed public execution presets and private run profiles.
+    from .execution_settings import router as execution_settings_router
+    app.include_router(execution_settings_router)
+
     # API-key management router (per-user). JWT-only; the keys themselves are
     # scoped to the SSH-keys endpoints above.
     from .api_keys import router as api_keys_router

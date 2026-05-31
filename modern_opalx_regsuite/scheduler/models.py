@@ -55,6 +55,7 @@ class Schedule(BaseModel):
     branch: str
     arch: str
     regtests_branch: Optional[str] = None
+    profile_id: Optional[str] = None
     connection_name: str = "local"  # "local" or the owner's named connection
     skip_unit: bool = False
     skip_regression: bool = False
@@ -92,6 +93,7 @@ class ScheduleCreateRequest(BaseModel):
     branch: str
     arch: str
     regtests_branch: Optional[str] = None
+    profile_id: Optional[str] = None
     connection_name: str = "local"
     skip_unit: bool = False
     skip_regression: bool = False
@@ -112,6 +114,7 @@ class ScheduleUpdateRequest(BaseModel):
     branch: str
     arch: str
     regtests_branch: Optional[str] = None
+    profile_id: Optional[str] = None
     connection_name: str = "local"
     skip_unit: bool = False
     skip_regression: bool = False

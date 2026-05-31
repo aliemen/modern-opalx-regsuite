@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..config import SuiteConfig
+from ..execution_profiles import resolve_run_profile
 from ..user_store import get_connection
 from .matcher import matches, same_minute, seconds_to_next_minute
 from .models import Schedule
@@ -56,7 +57,34 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
     # Pre-check: the owner may have swapped their connection to one with an
     # interactive 2FA gateway since the schedule was created. In that case we
     # skip (never block, never queue) and log the reason.
-    if schedule.connection_name and schedule.connection_name.lower() != "local":
+    if schedule.profile_id:
+        try:
+            resolved = resolve_run_profile(cfg, schedule.owner, schedule.profile_id)
+        except Exception as exc:  # noqa: BLE001
+            await update_schedule_runtime_state(
+                cfg,
+                schedule.id,
+                last_triggered_at=datetime.now(timezone.utc),
+                last_run_id=None,
+                last_status="error",
+                last_message=f"Profile '{schedule.profile_id}' cannot be resolved: {exc}",
+            )
+            return
+        conn = resolved.connection
+        if conn is not None and conn.gateway is not None and conn.gateway.auth_method == "interactive":
+            await update_schedule_runtime_state(
+                cfg,
+                schedule.id,
+                last_triggered_at=datetime.now(timezone.utc),
+                last_run_id=None,
+                last_status="skipped_2fa",
+                last_message=(
+                    "Profile uses an interactive 2FA gateway; scheduled runs "
+                    "cannot supply OTPs."
+                ),
+            )
+            return
+    elif schedule.connection_name and schedule.connection_name.lower() != "local":
         conn = get_connection(cfg, schedule.owner, schedule.connection_name)
         if conn is None:
             await update_schedule_runtime_state(
@@ -106,7 +134,7 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
         now.isoformat(timespec="seconds"),
         schedule.branch,
         schedule.arch,
-        schedule.connection_name,
+        schedule.profile_id or schedule.connection_name,
         schedule.clean_build,
         schedule.mpi_ranks,
         schedule.opalx_info_level,
@@ -126,6 +154,7 @@ async def _fire(cfg: SuiteConfig, schedule: Schedule, now: datetime) -> None:
             mpi_ranks=schedule.mpi_ranks,
             opalx_info_level=schedule.opalx_info_level,
             connection_name=schedule.connection_name,
+            profile_id=schedule.profile_id,
             public=schedule.public,
         )
     except Exception as exc:  # noqa: BLE001 — never let one schedule kill the loop

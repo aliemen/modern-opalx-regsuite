@@ -105,6 +105,7 @@ class RunCoordinator:
                 mpi_ranks=active.mpi_ranks,
                 opalx_info_level=active.opalx_info_level,
                 slurm_resources=active.slurm_resources,
+                execution_snapshot=active.execution_snapshot,
             )
 
         tailer_task = asyncio.create_task(self._log_tailer(active))
@@ -173,6 +174,7 @@ class RunCoordinator:
             mpi_ranks=queued.mpi_ranks,
             opalx_info_level=queued.opalx_info_level,
             slurm_resources=queued.slurm_resources,
+            execution_snapshot=queued.execution_snapshot,
             connection=queued.connection,
             target_key_path=queued.target_key_path,
             gateway_key_path=queued.gateway_key_path,

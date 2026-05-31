@@ -11,9 +11,9 @@ Endpoints under ``/api/schedules``:
                           lets live users remove stale schedules from inactive
                           users so the pipeline doesn't get blocked)
 
-On create and update, the schedule's ``connection_name`` is validated against
-the owner's per-user connection store: unknown names and interactive-2FA
-gateways are rejected (the scheduler cannot handle single-use OTPs).
+On create and update, profile-based schedules validate the owner's private
+``profile_id`` and reject interactive-2FA gateways. Legacy schedules that still
+use ``connection_name`` keep the old validation path.
 """
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ from ..scheduler.task import scheduler_is_running, scheduler_last_tick
 from ..scheduler.validation import (
     ScheduleValidationError,
     resolve_scheduled_connection,
+    resolve_scheduled_profile,
 )
 from .deps import get_config, require_auth
 
@@ -77,11 +78,14 @@ async def get_scheduler_status(
 
 
 def _validate_connection_for_owner(
-    cfg: SuiteConfig, owner: str, connection_name: str
+    cfg: SuiteConfig, owner: str, connection_name: str, profile_id: Optional[str] = None
 ) -> None:
     """Raise HTTP errors if the connection is unknown or uses 2FA."""
     try:
-        resolve_scheduled_connection(cfg, owner, connection_name)
+        if profile_id:
+            resolve_scheduled_profile(cfg, owner, profile_id)
+        else:
+            resolve_scheduled_connection(cfg, owner, connection_name)
     except ScheduleValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -90,8 +94,20 @@ def _validate_connection_for_owner(
 
 
 def _validate_schedule_run_options(
-    cfg: SuiteConfig, arch: str, mpi_ranks: int
+    cfg: SuiteConfig, arch: str, mpi_ranks: int, owner: str, profile_id: Optional[str] = None
 ) -> None:
+    if profile_id:
+        from ..execution_profiles import resolve_run_profile, suite_config_with_profile
+
+        try:
+            resolved = resolve_run_profile(cfg, owner, profile_id)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        cfg = suite_config_with_profile(cfg, resolved)
+        arch = resolved.arch
     ac = cfg.get_arch_config(arch)
     if ac.max_mpi_ranks is not None and mpi_ranks > ac.max_mpi_ranks:
         raise HTTPException(
@@ -119,8 +135,10 @@ async def create_schedule_endpoint(
     username: Annotated[str, Depends(require_auth)],
     cfg: Annotated[SuiteConfig, Depends(get_config)],
 ) -> Schedule:
-    _validate_connection_for_owner(cfg, username, body.connection_name)
-    _validate_schedule_run_options(cfg, body.arch, body.mpi_ranks)
+    _validate_connection_for_owner(cfg, username, body.connection_name, body.profile_id)
+    _validate_schedule_run_options(
+        cfg, body.arch, body.mpi_ranks, username, body.profile_id
+    )
     return await create_schedule(cfg, owner=username, body=body)
 
 
@@ -159,8 +177,10 @@ async def update_schedule_endpoint(
                 f"Only the owner ('{existing.owner}') can edit this schedule."
             ),
         )
-    _validate_connection_for_owner(cfg, username, body.connection_name)
-    _validate_schedule_run_options(cfg, body.arch, body.mpi_ranks)
+    _validate_connection_for_owner(cfg, username, body.connection_name, body.profile_id)
+    _validate_schedule_run_options(
+        cfg, body.arch, body.mpi_ranks, username, body.profile_id
+    )
     updated = await update_schedule(cfg, schedule_id, body)
     if updated is None:
         raise HTTPException(
@@ -197,6 +217,7 @@ async def toggle_schedule_endpoint(
         branch=existing.branch,
         arch=existing.arch,
         regtests_branch=existing.regtests_branch,
+        profile_id=existing.profile_id,
         connection_name=existing.connection_name,
         skip_unit=existing.skip_unit,
         skip_regression=existing.skip_regression,
@@ -207,8 +228,10 @@ async def toggle_schedule_endpoint(
     )
     # Re-validate the connection on enable in case it has since gained 2FA.
     if body.enabled:
-        _validate_connection_for_owner(cfg, username, body.connection_name)
-        _validate_schedule_run_options(cfg, body.arch, body.mpi_ranks)
+        _validate_connection_for_owner(cfg, username, body.connection_name, body.profile_id)
+        _validate_schedule_run_options(
+            cfg, body.arch, body.mpi_ranks, username, body.profile_id
+        )
     updated = await update_schedule(cfg, schedule_id, body)
     assert updated is not None  # existence confirmed above
     return updated

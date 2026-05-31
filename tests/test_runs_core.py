@@ -5,7 +5,12 @@ from pathlib import Path
 
 from modern_opalx_regsuite.api import runs_core
 from modern_opalx_regsuite.api.state import ActiveRun
-from modern_opalx_regsuite.config import SlurmResources, SuiteConfig
+from modern_opalx_regsuite.config import ArchConfig, SlurmResources, SuiteConfig
+from modern_opalx_regsuite.execution_profiles import (
+    RunProfile,
+    load_execution_settings,
+    save_run_profiles,
+)
 
 
 def test_start_run_forces_clean_build_for_custom_cmake_args(
@@ -133,3 +138,86 @@ def test_start_run_preserves_rank_options_when_queued(
         nodes=2,
         tasks_per_node=2,
     )
+
+
+def test_start_run_resolves_profile_and_persists_snapshot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    cfg = SuiteConfig(
+        opalx_repo_root=tmp_path / "opalx",
+        builds_root=tmp_path / "builds",
+        data_root=tmp_path / "data",
+        users_root=tmp_path / "users",
+        regtests_repo_root=tmp_path / "regtests",
+        arch_configs=[
+            ArchConfig(
+                arch="cpu-serial",
+                cmake_args=["-DPLATFORMS=SERIAL"],
+                build_jobs=8,
+            )
+        ],
+    )
+    load_execution_settings(cfg)
+    save_run_profiles(
+        cfg,
+        "demo-user",
+        [
+            RunProfile(
+                id="local-cpu",
+                name="Local CPU",
+                build_preset_id="cpu-serial",
+                machine_preset_id="local",
+            )
+        ],
+    )
+
+    async def fake_acquire_run_slot(**kwargs):
+        captured["arch"] = kwargs["arch"]
+        captured["execution_snapshot"] = kwargs["execution_snapshot"]
+        active_kwargs = {
+            k: v for k, v in kwargs.items() if k != "custom_cmake_args"
+        }
+        return ActiveRun(
+            **active_kwargs,
+            custom_cmake_args=kwargs["custom_cmake_args"],
+        )
+
+    class FakeCoordinator:
+        async def run_pipeline_async(self, cfg_arg, active, *_args):
+            captured["cfg_arch_jobs"] = cfg_arg.get_arch_config(active.arch).build_jobs
+            captured["active_snapshot"] = active.execution_snapshot
+
+    monkeypatch.setattr(runs_core, "acquire_run_slot", fake_acquire_run_slot)
+    monkeypatch.setattr(runs_core, "get_coordinator", lambda: FakeCoordinator())
+
+    async def run() -> None:
+        await runs_core.start_run(
+            cfg,
+            run_id="profile-run",
+            triggered_by="demo-user",
+            owner_for_connection="demo-user",
+            branch="master",
+            arch="ignored",
+            regtests_branch=None,
+            skip_unit=False,
+            skip_regression=False,
+            clean_build=False,
+            custom_cmake_args=None,
+            mpi_ranks=None,
+            opalx_info_level=None,
+            slurm_resources=None,
+            connection_name=None,
+            profile_id="local-cpu",
+        )
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert captured["arch"] == "cpu-serial"
+    assert captured["cfg_arch_jobs"] == 8
+    snapshot = captured["execution_snapshot"]
+    assert snapshot is not None
+    assert snapshot.build.id == "cpu-serial"
+    assert captured["active_snapshot"] == snapshot

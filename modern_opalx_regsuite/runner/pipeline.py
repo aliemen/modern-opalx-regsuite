@@ -10,6 +10,7 @@ from typing import Optional
 from ..config import Connection, SlurmResources, SuiteConfig
 from ..artifacts import write_artifact_manifest
 from ..data_model import (
+    ExecutionSnapshot,
     RerunReference,
     RunMeta,
     RunOptions,
@@ -54,6 +55,7 @@ def run_pipeline(
     mpi_ranks: Optional[int] = None,
     opalx_info_level: Optional[int] = None,
     slurm_resources: Optional[SlurmResources] = None,
+    execution_snapshot: Optional[ExecutionSnapshot] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -64,7 +66,7 @@ def run_pipeline(
     updates, after cmake+build, after unit tests, and between each regression
     test.
 
-    Pass *connection* to run remotely. The runner is user-agnostic — the
+    Pass *connection* to run remotely. The runner is user-agnostic - the
     caller (the API layer) is responsible for resolving *target_key_path* and
     (optionally) *gateway_key_path* from the user's per-user ssh-keys dir
     before invoking this function. When *connection* is None, the run is
@@ -94,8 +96,8 @@ def run_pipeline(
     )
     ac = run_options.arch_config
 
-    # SENSITIVE-DATA RULE: only ``connection_name`` (user-chosen) lands in
-    # run-meta.json. Never write the underlying SSH host/user/work_dir here.
+    # SENSITIVE-DATA RULE: write only the compatibility label plus safe public
+    # execution snapshot fields. Never write SSH user/key or work_dir here.
     meta = RunMeta(
         branch=branch,
         arch=arch,
@@ -114,6 +116,7 @@ def run_pipeline(
             opalx_info_level=run_options.opalx_info_level,
             slurm_resources=run_options.persisted_slurm_resources,
         ),
+        execution_snapshot=execution_snapshot,
         rerun_of=rerun_of,
     )
     meta.regtest_branch = cfg.regtests_branch

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
+    from ..data_model import ExecutionSnapshot
     from ..config import Connection, SlurmResources
     from ..data_model import RerunReference
 
@@ -49,6 +50,7 @@ class ActiveRun:
     mpi_ranks: Optional[int] = None
     opalx_info_level: Optional[int] = None
     slurm_resources: Optional["SlurmResources"] = None
+    execution_snapshot: Optional["ExecutionSnapshot"] = None
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -79,6 +81,7 @@ class QueuedRun:
     mpi_ranks: Optional[int] = None
     opalx_info_level: Optional[int] = None
     slurm_resources: Optional["SlurmResources"] = None
+    execution_snapshot: Optional["ExecutionSnapshot"] = None
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -126,12 +129,14 @@ def resolve_machine_id(connection: Optional["Connection"]) -> str:
     """Return the queue serialization key for a run.
 
     For local runs (``connection is None``): ``"local"``.
-    For remote runs: ``connection.host`` (just the host string — per-physical-
-    machine identity, not per-user, so two regsuite users with different
-    connections to the same host serialize against each other).
+    For remote runs: ``connection.queue_key`` when configured, otherwise
+    ``connection.host``. This keeps the public machine preset in control of
+    serialization while preserving the legacy per-host behavior.
     """
     if connection is None:
         return "local"
+    if getattr(connection, "queue_key", None):
+        return connection.queue_key
     return connection.host
 
 
@@ -151,6 +156,7 @@ async def acquire_run_slot(
     mpi_ranks: Optional[int] = None,
     opalx_info_level: Optional[int] = None,
     slurm_resources: Optional["SlurmResources"] = None,
+    execution_snapshot: Optional["ExecutionSnapshot"] = None,
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -180,6 +186,7 @@ async def acquire_run_slot(
             mpi_ranks=mpi_ranks,
             opalx_info_level=opalx_info_level,
             slurm_resources=slurm_resources,
+            execution_snapshot=execution_snapshot,
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

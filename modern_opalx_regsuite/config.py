@@ -150,19 +150,26 @@ class SuiteConfig(BaseModel):
         ),
     )
 
-    # Per-architecture build recipes (optional).
+    # Deprecated per-architecture build recipes (optional). The dashboard now
+    # manages public build/env/Slurm presets; these remain for first-load
+    # seeding and legacy trigger/schedule compatibility.
     arch_configs: List[ArchConfig] = Field(
         default_factory=list,
-        description="Per-architecture build recipes.",
+        description=(
+            "DEPRECATED. Per-architecture build recipes used for first-load "
+            "execution-settings seeding and legacy compatibility."
+        ),
     )
 
     # ── Per-user storage ─────────────────────────────────────────────────────
-    # All identity-bearing state (SSH keys, named connections, profile) lives
-    # under <users_root>/<username>/, never under data_root.
+    # Public execution settings live under <users_root>/_public/. Identity-bearing
+    # state (SSH keys, run profiles, legacy connections) lives under
+    # <users_root>/<username>/, never under data_root.
     users_root: Optional[Path] = Field(
         None,
         description=(
-            "Root directory for per-user state (ssh-keys, connections.json). "
+            "Root directory for public execution settings and per-user state "
+            "(ssh-keys, run-profiles.json, legacy connections.json). "
             "Defaults to ~/.config/opalx-regsuite/users."
         ),
     )

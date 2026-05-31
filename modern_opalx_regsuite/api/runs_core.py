@@ -21,7 +21,12 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import Connection, SlurmResources, SuiteConfig
-from ..data_model import RerunReference
+from ..data_model import ExecutionSnapshot, RerunReference
+from ..execution_profiles import (
+    resolved_profile_key_paths,
+    resolve_run_profile,
+    suite_config_with_profile,
+)
 from ..user_store import get_connection, resolve_connection_key_paths
 from .coordinator import get_coordinator
 from .state import (
@@ -95,6 +100,7 @@ class StartRunResult:
     detail: Optional[str] = None
     # The resolved connection name ("local" when no remote) — useful for logging.
     connection_name: str = "local"
+    arch: Optional[str] = None
 
 
 async def start_run(
@@ -109,6 +115,7 @@ async def start_run(
     skip_unit: bool,
     skip_regression: bool,
     connection_name: Optional[str],
+    profile_id: Optional[str] = None,
     public: bool = False,
     clean_build: bool = False,
     custom_cmake_args: Optional[list[str]] = None,
@@ -146,8 +153,6 @@ async def start_run(
     gateway_password, gateway_otp
         Only used for interactive 2FA gateways (HTTP trigger path).
     """
-    data_root = cfg.resolved_data_root
-    log_path = data_root / "runs" / branch / arch / run_id / "logs" / "pipeline.log"
     effective_custom_cmake_args = [
         arg.strip()
         for arg in (custom_cmake_args or [])
@@ -155,16 +160,45 @@ async def start_run(
     ]
     effective_clean_build = clean_build or bool(effective_custom_cmake_args)
 
+    connection: Optional[Connection] = None
+    target_key_path: Optional[Path] = None
+    gateway_key_path: Optional[Path] = None
+    execution_snapshot: Optional[ExecutionSnapshot] = None
+
     # Override regtests_branch if provided (model_copy keeps caller's cfg intact).
     effective_cfg = cfg
     if regtests_branch:
         effective_cfg = cfg.model_copy(update={"regtests_branch": regtests_branch})
 
-    connection: Optional[Connection] = None
-    target_key_path: Optional[Path] = None
-    gateway_key_path: Optional[Path] = None
-
-    if connection_name and connection_name.lower() != "local":
+    if profile_id:
+        try:
+            resolved_profile = resolve_run_profile(
+                effective_cfg, owner_for_connection, profile_id
+            )
+        except KeyError as exc:
+            return StartRunResult(
+                outcome="missing_connection",
+                run_id=run_id,
+                detail=str(exc),
+                connection_name=profile_id,
+                arch=arch,
+            )
+        except ValueError as exc:
+            return StartRunResult(
+                outcome="missing_connection",
+                run_id=run_id,
+                detail=str(exc),
+                connection_name=profile_id,
+                arch=arch,
+            )
+        effective_cfg = suite_config_with_profile(effective_cfg, resolved_profile)
+        arch = resolved_profile.arch
+        connection = resolved_profile.connection
+        target_key_path, gateway_key_path = resolved_profile_key_paths(
+            effective_cfg, owner_for_connection, resolved_profile
+        )
+        execution_snapshot = resolved_profile.execution_snapshot
+    elif connection_name and connection_name.lower() != "local":
         connection = get_connection(effective_cfg, owner_for_connection, connection_name)
         if connection is None:
             return StartRunResult(
@@ -175,10 +209,16 @@ async def start_run(
                     f"'{owner_for_connection}'."
                 ),
                 connection_name=connection_name,
+                arch=arch,
             )
         target_key_path, gateway_key_path = resolve_connection_key_paths(
             effective_cfg, owner_for_connection, connection
         )
+
+    data_root = effective_cfg.resolved_data_root
+    log_path = data_root / "runs" / branch / arch / run_id / "logs" / "pipeline.log"
+
+    if connection is not None:
         target_problem = _describe_key_problem(
             target_key_path,
             key_name=connection.key_name,
@@ -190,6 +230,7 @@ async def start_run(
                 run_id=run_id,
                 detail=target_problem,
                 connection_name=connection.name,
+                arch=arch,
             )
         if (
             connection.gateway is not None
@@ -206,6 +247,7 @@ async def start_run(
                     run_id=run_id,
                     detail=gateway_problem,
                     connection_name=connection.name,
+                    arch=arch,
                 )
 
     machine_id = resolve_machine_id(connection)
@@ -225,6 +267,7 @@ async def start_run(
         mpi_ranks=mpi_ranks,
         opalx_info_level=opalx_info_level,
         slurm_resources=slurm_resources,
+        execution_snapshot=execution_snapshot,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -247,6 +290,7 @@ async def start_run(
             outcome="started",
             run_id=run_id,
             connection_name=resolved_conn_name,
+            arch=arch,
         )
 
     # Machine busy. Interactive 2FA connections cannot queue (OTP expiry).
@@ -263,6 +307,7 @@ async def start_run(
                 "queueing would let the OTP expire before run starts."
             ),
             connection_name=resolved_conn_name,
+            arch=arch,
         )
 
     queued = QueuedRun(
@@ -279,6 +324,7 @@ async def start_run(
         mpi_ranks=mpi_ranks,
         opalx_info_level=opalx_info_level,
         slurm_resources=slurm_resources,
+        execution_snapshot=execution_snapshot,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -297,4 +343,5 @@ async def start_run(
         queue_id=queued.queue_id,
         position=position,
         connection_name=resolved_conn_name,
+        arch=arch,
     )

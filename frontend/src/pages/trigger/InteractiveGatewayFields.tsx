@@ -21,7 +21,7 @@ export function InteractiveGatewayFields({
       <div className="flex items-start gap-2 text-sm text-muted">
         <ShieldAlert size={16} className="mt-0.5 shrink-0 text-accent" />
         <p className="text-xs">
-          This connection uses an interactive SSH gateway
+          This profile uses an interactive SSH gateway
           ({connection.gateway!.host}). Enter your password and Microsoft
           Authenticator OTP code below. Credentials are used for this run only
           and are never stored.

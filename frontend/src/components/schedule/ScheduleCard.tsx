@@ -159,10 +159,13 @@ export function ScheduleCard({
           </span>
         </div>
         <div className="truncate">
-          Arch: <span className="text-fg">{schedule.arch}</span>
+          Build: <span className="text-fg">{schedule.arch}</span>
         </div>
         <div className="truncate">
-          Connection: <span className="text-fg">{schedule.connection_name}</span>
+          Profile:{" "}
+          <span className="text-fg">
+            {schedule.profile_id ?? schedule.connection_name}
+          </span>
         </div>
         <div className="truncate">
           Runtime:{" "}

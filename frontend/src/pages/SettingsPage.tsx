@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import { SshKeysSection } from "./settings/SshKeysSection";
-import { ConnectionsSection } from "./settings/ConnectionsSection";
 import { ApiKeysSection } from "./settings/ApiKeysSection";
 import { PasswordSection } from "./settings/PasswordSection";
 import { UsernameSection } from "./settings/UsernameSection";
+import { ExecutionSettingsSection } from "./settings/ExecutionSettingsSection";
+import { RunProfilesSection } from "./settings/RunProfilesSection";
 
 function SettingsGroup({
   title,
@@ -68,9 +69,10 @@ export function SettingsPage() {
 
       <SettingsGroup
         title="Execution"
-        description="Reusable connection profiles for local and remote runs."
+        description="Shared execution presets and private run profiles for local and remote runs."
       >
-        <ConnectionsSection />
+        <ExecutionSettingsSection />
+        <RunProfilesSection />
       </SettingsGroup>
     </div>
   );

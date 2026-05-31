@@ -64,7 +64,7 @@ export function SchedulePage() {
           </h1>
           <p className="text-muted text-sm mt-1">
             Weekly recurring runs, visible to all users. Create one for each
-            branch/arch combination you want tested on a cadence.
+            branch/profile combination you want tested on a cadence.
           </p>
         </div>
         <button

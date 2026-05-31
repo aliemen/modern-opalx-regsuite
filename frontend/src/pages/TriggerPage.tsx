@@ -6,11 +6,10 @@ import { RefreshCw, Play, Info } from "lucide-react";
 import {
   getOpalxBranches,
   getRegtestsBranches,
-  getRunConfigs,
   triggerRun,
   type TriggerRequest,
 } from "../api/runs";
-import { listConnections, LOCAL_CONNECTION } from "../api/connections";
+import { getRunProfilesForTrigger } from "../api/executionProfiles";
 import { InteractiveGatewayFields } from "./trigger/InteractiveGatewayFields";
 import { RuntimeFields } from "./trigger/RuntimeFields";
 import {
@@ -52,10 +51,7 @@ export function TriggerPage() {
   const [regtestsBranch, setRegtestsBranch] = useState(
     searchParams.get("regtests_branch") ?? "master"
   );
-  const [arch, setArch] = useState(searchParams.get("arch") ?? "cpu-serial");
-  const [connectionName, setConnectionName] = useState<string>(
-    searchParams.get("connection_name") ?? LOCAL_CONNECTION
-  );
+  const [profileId, setProfileId] = useState(searchParams.get("profile_id") ?? "");
   const [skipUnit, setSkipUnit] = useState(searchParams.get("skip_unit") === "true");
   const [skipRegression, setSkipRegression] = useState(
     searchParams.get("skip_regression") === "true"
@@ -98,14 +94,9 @@ export function TriggerPage() {
     isFetching: fetchingRegtests,
   } = useQuery({ queryKey: ["regtests-branches"], queryFn: getRegtestsBranches });
 
-  const { data: runConfigs, isLoading: loadingArchs } = useQuery({
-    queryKey: ["run-configs"],
-    queryFn: getRunConfigs,
-  });
-
-  const { data: connections, isLoading: loadingConnections } = useQuery({
-    queryKey: ["connections"],
-    queryFn: listConnections,
+  const { data: runProfiles, isLoading: loadingProfiles } = useQuery({
+    queryKey: ["run-profiles-trigger"],
+    queryFn: getRunProfilesForTrigger,
   });
 
   useEffect(() => {
@@ -118,23 +109,62 @@ export function TriggerPage() {
     setRegtestsBranch(fallbackBranch(regtestsBranches));
   }, [regtestsBranches, regtestsBranch]);
 
-  // Detect if the selected connection uses an interactive gateway.
-  const selectedConnection =
-    connections?.find((c) => c.name === connectionName) ?? null;
   const selectedRunConfig =
-    runConfigs?.find((c) => c.arch === arch) ?? null;
-  const archConfigs = runConfigs?.map((c) => c.arch);
-  const connectionMissing =
-    connectionName !== LOCAL_CONNECTION &&
-    !loadingConnections &&
-    selectedConnection === null;
+    runProfiles?.find((profile) => profile.id === profileId) ?? null;
+  const profileMissing =
+    profileId !== "" && !loadingProfiles && selectedRunConfig === null;
   const customCmakeArgs = parseCustomCmakeArgs(customCmakeText);
   const hasCustomCmakeArgs = customCmakeArgs.length > 0;
   const effectiveCleanBuild = cleanBuild || hasCustomCmakeArgs;
   const needsInteractiveCredentials =
-    selectedConnection !== null &&
-    selectedConnection.gateway != null &&
-    selectedConnection.gateway.auth_method === "interactive";
+    selectedRunConfig !== null && selectedRunConfig.interactive_gateway;
+
+  useEffect(() => {
+    if (!runProfiles || runProfiles.length === 0 || profileId) return;
+    const requestedArch = searchParams.get("arch");
+    const requestedConnection = searchParams.get("connection_name");
+    const requestedBuildPreset = searchParams.get("build_preset_id");
+    const requestedMachinePreset = searchParams.get("machine_preset_id");
+    const hasEnvPresetParam = searchParams.has("env_preset_id");
+    const requestedEnvPreset = searchParams.get("env_preset_id") || null;
+    const hasSlurmPresetParam = searchParams.has("slurm_preset_id");
+    const requestedSlurmPreset = searchParams.get("slurm_preset_id") || null;
+    const preferred =
+      runProfiles.find((profile) => profile.id === searchParams.get("profile_id")) ??
+      runProfiles.find((profile) => {
+        if (!requestedBuildPreset && !requestedMachinePreset) return false;
+        if (requestedBuildPreset && profile.build_preset_id !== requestedBuildPreset) {
+          return false;
+        }
+        if (
+          requestedMachinePreset &&
+          profile.machine_preset_id !== requestedMachinePreset
+        ) {
+          return false;
+        }
+        if (hasEnvPresetParam && (profile.env_preset_id ?? null) !== requestedEnvPreset) {
+          return false;
+        }
+        if (
+          hasSlurmPresetParam &&
+          (profile.slurm_preset_id ?? null) !== requestedSlurmPreset
+        ) {
+          return false;
+        }
+        return true;
+      }) ??
+      runProfiles.find((profile) => {
+        if (!requestedArch) return false;
+        if (profile.arch !== requestedArch) return false;
+        if (!requestedConnection || requestedConnection === "local") {
+          return profile.machine_kind === "local";
+        }
+        return profile.machine_preset_id === requestedConnection;
+      }) ??
+      runProfiles.find((profile) => profile.valid) ??
+      runProfiles[0];
+    setProfileId(preferred.id);
+  }, [runProfiles, profileId, searchParams]);
 
   useEffect(() => {
     if (!selectedRunConfig) return;
@@ -153,9 +183,9 @@ export function TriggerPage() {
     );
   }, [selectedRunConfig, slurmOverrideDirty, mpiRanks]);
 
-  function updateArch(nextArch: string) {
-    setArch(nextArch);
-    const nextConfig = runConfigs?.find((c) => c.arch === nextArch);
+  function updateProfile(nextProfileId: string) {
+    setProfileId(nextProfileId);
+    const nextConfig = runProfiles?.find((profile) => profile.id === nextProfileId);
     if (nextConfig) {
       setMpiRanks(nextConfig.default_mpi_ranks);
       setOpalxInfoLevel(nextConfig.default_opalx_info_level);
@@ -180,8 +210,15 @@ export function TriggerPage() {
     setError(null);
     setQueuedInfo(null);
 
-    if (connectionMissing) {
-      setError("The source run's connection is not available for this user. Choose another connection.");
+    if (!selectedRunConfig) {
+      setError("Choose a run profile before starting the run.");
+      return;
+    }
+    if (profileMissing || !selectedRunConfig.valid) {
+      setError(
+        selectedRunConfig?.validation_errors.join("; ") ||
+          "This run profile is not available. Choose another profile.",
+      );
       return;
     }
 
@@ -203,7 +240,7 @@ export function TriggerPage() {
       selectedRunConfig?.max_mpi_ranks != null &&
       mpiRanks > selectedRunConfig.max_mpi_ranks
     ) {
-      setError(`MPI ranks cannot exceed ${selectedRunConfig.max_mpi_ranks} for ${arch}.`);
+      setError(`MPI ranks cannot exceed ${selectedRunConfig.max_mpi_ranks} for ${selectedRunConfig.name}.`);
       return;
     }
     if (!Number.isInteger(opalxInfoLevel) || opalxInfoLevel < 0) {
@@ -225,7 +262,8 @@ export function TriggerPage() {
     try {
       const body: TriggerRequest = {
         branch: opalxBranch,
-        arch,
+        arch: selectedRunConfig.arch,
+        profile_id: selectedRunConfig.id,
         regtests_branch: regtestsBranch,
         skip_unit: skipUnit,
         skip_regression: skipRegression,
@@ -233,7 +271,6 @@ export function TriggerPage() {
         custom_cmake_args: customCmakeArgs,
         mpi_ranks: mpiRanks,
         opalx_info_level: opalxInfoLevel,
-        connection_name: connectionName,
       };
       if (slurmOverrideDirty) {
         body.slurm_resources = slurmResourcesFromForm(slurmForm);
@@ -337,22 +374,47 @@ export function TriggerPage() {
           </div>
         </div>
 
-        {/* Architecture */}
+        {/* Run profile */}
         <div>
-          <label className="block text-sm text-muted mb-1">Run config</label>
+          <label className="block text-sm text-muted mb-1">Run profile</label>
           <select
-            value={arch}
-            onChange={(e) => updateArch(e.target.value)}
+            value={profileId}
+            onChange={(e) => {
+              updateProfile(e.target.value);
+              setGatewayPassword("");
+              setGatewayOtp("");
+            }}
             className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-            disabled={loadingArchs}
+            disabled={loadingProfiles}
           >
-            {archConfigs && !archConfigs.includes(arch) && (
-              <option value={arch}>{arch} (not configured)</option>
+            {profileMissing && (
+              <option value={profileId}>{profileId} (unavailable)</option>
             )}
-            {(archConfigs ?? ["cpu-serial"]).map((a) => (
-              <option key={a}>{a}</option>
+            {(runProfiles ?? []).map((profile) => (
+              <option key={profile.id} value={profile.id} disabled={!profile.valid}>
+                {profile.name}
+                {profile.description ? ` - ${profile.description}` : ""}
+                {!profile.valid ? " (invalid)" : ""}
+              </option>
             ))}
           </select>
+          {selectedRunConfig && (
+            <p className="text-muted text-xs mt-1">
+              {selectedRunConfig.build_preset_name} /{" "}
+              {selectedRunConfig.machine_preset_name}
+              {selectedRunConfig.env_preset_name
+                ? ` / ${selectedRunConfig.env_preset_name}`
+                : ""}
+              {selectedRunConfig.slurm_preset_name
+                ? ` / ${selectedRunConfig.slurm_preset_name}`
+                : ""}
+            </p>
+          )}
+          {selectedRunConfig && !selectedRunConfig.valid && (
+            <p className="text-failed text-xs mt-1">
+              {selectedRunConfig.validation_errors.join("; ")}
+            </p>
+          )}
         </div>
 
         <RuntimeFields
@@ -365,48 +427,27 @@ export function TriggerPage() {
           onOpalxInfoLevelChange={setOpalxInfoLevel}
         />
 
-        {/* Connection (or local) */}
-        <div>
-          <label className="block text-sm text-muted mb-1">Connection</label>
-          <select
-            value={connectionName}
-            onChange={(e) => {
-              setConnectionName(e.target.value);
-              // Clear gateway credentials when switching connections.
-              setGatewayPassword("");
-              setGatewayOtp("");
-            }}
-            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-            disabled={loadingConnections}
-          >
-            <option value={LOCAL_CONNECTION}>Local</option>
-            {connectionMissing && (
-              <option value={connectionName}>
-                {connectionName} (unavailable)
-              </option>
-            )}
-            {(connections ?? []).map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.name}
-                {c.description ? ` — ${c.description}` : ""}
-              </option>
-            ))}
-          </select>
-          <p className="text-muted text-xs mt-1">
-            Manage connections in <span className="text-fg">Settings</span>.
-          </p>
-          {connectionMissing && (
-            <p className="text-failed text-xs mt-1">
-              This saved connection is not available for your account. Choose
-              another connection before starting the run.
-            </p>
-          )}
-        </div>
-
         {/* Interactive gateway credentials */}
         {needsInteractiveCredentials && (
           <InteractiveGatewayFields
-            connection={selectedConnection!}
+            connection={{
+              name: selectedRunConfig!.name,
+              host: selectedRunConfig!.machine_preset_name,
+              user: "",
+              port: 22,
+              key_name: "",
+              gateway: {
+                host: selectedRunConfig!.machine_preset_name,
+                user: "",
+                port: 22,
+                key_name: null,
+                auth_method: "interactive",
+              },
+              work_dir: "",
+              cleanup_after_run: false,
+              keepalive_interval: 30,
+              env: { style: "none" },
+            }}
             gatewayPassword={gatewayPassword}
             gatewayOtp={gatewayOtp}
             onGatewayPasswordChange={setGatewayPassword}
@@ -493,7 +534,7 @@ export function TriggerPage() {
 
         <button
           onClick={handleStart}
-          disabled={connectionMissing}
+          disabled={!selectedRunConfig || profileMissing || selectedRunConfig.valid === false}
           className="flex items-center justify-center gap-2 bg-accent text-bg font-medium rounded-md py-2.5 text-sm hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Play size={15} />

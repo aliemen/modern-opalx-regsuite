@@ -35,6 +35,7 @@ export interface Schedule {
   branch: string;
   arch: string;
   regtests_branch?: string | null;
+  profile_id?: string | null;
   connection_name: string;
   skip_unit: boolean;
   skip_regression: boolean;
@@ -58,6 +59,7 @@ export interface ScheduleWriteBody {
   branch: string;
   arch: string;
   regtests_branch?: string | null;
+  profile_id?: string | null;
   connection_name: string;
   skip_unit: boolean;
   skip_regression: boolean;

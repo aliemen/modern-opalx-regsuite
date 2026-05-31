@@ -12,8 +12,7 @@ import {
 /**
  * SSH-key management: upload, in-place replace (for short-lived daily keys),
  * and delete. Deletion is blocked by the backend when any of the user's
- * connections references the key -- the UI surfaces the dependent connection
- * names in the error toast.
+ * run profiles or legacy connections reference the key.
  */
 export function SshKeysSection() {
   const queryClient = useQueryClient();
@@ -50,6 +49,9 @@ export function SshKeysSection() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });
       queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profile-summaries"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profiles-trigger"] });
       clearFormInputs();
       setError(null);
       setSuccess(`Key "${data.name}" uploaded.`);
@@ -65,6 +67,10 @@ export function SshKeysSection() {
       replaceSshKey(name, file, cert),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });
+      queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profile-summaries"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profiles-trigger"] });
       clearFormInputs();
       setReplaceTarget(null);
       setError(null);
@@ -80,21 +86,27 @@ export function SshKeysSection() {
     mutationFn: deleteSshKey,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ssh-keys"] });
+      queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profile-summaries"] });
+      queryClient.invalidateQueries({ queryKey: ["run-profiles-trigger"] });
       setError(null);
       setSuccess(null);
     },
     onError: (e: unknown) => {
       const detail = (e as { response?: { data?: { detail?: unknown } } })
         ?.response?.data?.detail;
-      if (
-        detail &&
-        typeof detail === "object" &&
-        "dependent_connections" in detail
-      ) {
+      if (detail && typeof detail === "object") {
         const deps = (detail as { dependent_connections: string[] })
-          .dependent_connections;
+          .dependent_connections ?? [];
+        const profileDeps = (detail as { dependent_profiles?: string[] })
+          .dependent_profiles ?? [];
+        const parts = [
+          deps.length ? `connection(s): ${deps.join(", ")}` : null,
+          profileDeps.length ? `profile(s): ${profileDeps.join(", ")}` : null,
+        ].filter(Boolean);
         setError(
-          `Cannot delete key — it's used by connection(s): ${deps.join(", ")}. Unlink them first.`,
+          `Cannot delete key - it is used by ${parts.join("; ")}. Unlink it first.`,
         );
       } else if (typeof detail === "string") {
         setError(detail);
@@ -151,7 +163,7 @@ export function SshKeysSection() {
       <p className="text-muted text-sm mb-5">
         Private keys you upload here are stored in your personal user
         directory and are referenced by name from your{" "}
-        <span className="text-fg">connections</span> below.
+        <span className="text-fg">run profiles</span> below.
       </p>
 
       <div ref={formRef} className="flex flex-col gap-3 mb-6">
@@ -161,7 +173,7 @@ export function SshKeysSection() {
             <span className="text-muted">
               Replacing key{" "}
               <code className="text-fg font-mono">{replaceTarget}</code> in
-              place. Connections referencing this key keep working.
+              place. Run profiles referencing this key keep working.
             </span>
           </div>
         )}

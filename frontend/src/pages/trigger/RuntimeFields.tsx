@@ -1,7 +1,7 @@
-import type { RunConfigSummary } from "../../api/runs";
-
 interface RuntimeFieldsProps {
-  selectedRunConfig: RunConfigSummary | null;
+  selectedRunConfig: {
+    max_mpi_ranks?: number | null;
+  } | null;
   mpiRanks: number;
   opalxInfoLevel: number;
   showMpiRanks?: boolean;

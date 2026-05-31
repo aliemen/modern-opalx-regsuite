@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { EnvActivation } from "./connections";
 import type { SlurmResources } from "./runs";
 
 /** "active" hides archived runs (default), "archived" shows only archived,
@@ -24,6 +25,7 @@ export interface RunIndexEntry {
   archived: boolean;
   public: boolean;
   run_options: RunOptions;
+  execution_snapshot?: ExecutionSnapshot | null;
   rerun_of: RerunReference | null;
 }
 
@@ -95,6 +97,7 @@ export interface RunMeta {
   archived: boolean;
   public: boolean;
   run_options: RunOptions;
+  execution_snapshot?: ExecutionSnapshot | null;
   rerun_of: RerunReference | null;
 }
 
@@ -112,6 +115,50 @@ export interface RerunReference {
   branch: string;
   arch: string;
   run_id: string;
+}
+
+export interface BuildPresetSnapshot {
+  id: string;
+  name: string;
+  cmake_args: string[] | null;
+  build_jobs: number;
+  mpi_ranks: number;
+  max_mpi_ranks: number | null;
+  opalx_info_level: number | null;
+}
+
+export interface MachinePresetSnapshot {
+  id: string;
+  name: string;
+  kind: "local" | "ssh";
+  host: string | null;
+  port: number;
+  gateway_host: string | null;
+  gateway_port: number | null;
+  gateway_auth_method: string | null;
+  queue_key: string | null;
+}
+
+export interface EnvPresetSnapshot {
+  id: string;
+  name: string;
+  env: EnvActivation;
+}
+
+export interface SlurmPresetSnapshot {
+  id: string;
+  name: string;
+  slurm: Record<string, unknown> | null;
+  slurm_args: string[];
+  command_timeout: number;
+  salloc_timeout: number;
+}
+
+export interface ExecutionSnapshot {
+  build: BuildPresetSnapshot | null;
+  machine: MachinePresetSnapshot | null;
+  environment: EnvPresetSnapshot | null;
+  slurm: SlurmPresetSnapshot | null;
 }
 
 export interface RunDetail {

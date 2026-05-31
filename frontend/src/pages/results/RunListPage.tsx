@@ -36,19 +36,25 @@ export function RunListPage() {
   const runs = data?.runs ?? [];
   const total = data?.total ?? 0;
   const qs = searchParams.toString();
+  const buildLabel =
+    runs.find((run) => run.execution_snapshot?.build?.name)?.execution_snapshot?.build
+      ?.name ?? arch ?? "";
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       <Breadcrumb
         crumbs={[
           {
-            label: `${branch} \u00b7 ${arch}`,
-            title: `OPALX branch ${branch} on ${arch}`,
+            label: `${branch} \u00b7 ${buildLabel}`,
+            title:
+              buildLabel === arch
+                ? `OPALX branch ${branch} on build preset ${buildLabel}`
+                : `OPALX branch ${branch} on build preset ${buildLabel} (${arch})`,
           },
         ]}
       />
       <h1 className="text-fg text-xl font-semibold mb-1">
-        {branch} / {arch}
+        {branch} / {buildLabel}
       </h1>
       <p className="text-muted text-sm mb-6">
         {total} run{total !== 1 ? "s" : ""} across all regtest branches

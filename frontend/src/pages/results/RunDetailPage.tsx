@@ -149,6 +149,8 @@ export function RunDetailPage() {
   const listHref = `/results/${branch}/${arch}${qs ? `?${qs}` : ""}`;
   const regtestLabel = meta.regtest_branch ?? "\u2014";
   const isColdStored = meta.archived && data.archived_on_cold_storage;
+  const executionSnapshot = meta.execution_snapshot ?? null;
+  const buildLabel = executionSnapshot?.build?.name ?? meta.arch;
   const rerunParams = new URLSearchParams({
     branch: meta.branch,
     regtests_branch: meta.regtest_branch ?? "master",
@@ -167,6 +169,16 @@ export function RunDetailPage() {
     rerun_id: meta.run_id,
   });
   const slurmResources = meta.run_options?.slurm_resources ?? null;
+  if (executionSnapshot) {
+    if (executionSnapshot.build?.id) {
+      rerunParams.set("build_preset_id", executionSnapshot.build.id);
+    }
+    if (executionSnapshot.machine?.id) {
+      rerunParams.set("machine_preset_id", executionSnapshot.machine.id);
+    }
+    rerunParams.set("env_preset_id", executionSnapshot.environment?.id ?? "");
+    rerunParams.set("slurm_preset_id", executionSnapshot.slurm?.id ?? "");
+  }
   addSlurmRerunParams(rerunParams, slurmResources);
 
   return (
@@ -174,9 +186,12 @@ export function RunDetailPage() {
       <Breadcrumb
         crumbs={[
           {
-            label: `${branch} \u00b7 ${arch}`,
+            label: `${branch} \u00b7 ${buildLabel}`,
             to: listHref,
-            title: `All runs on ${branch} / ${arch}`,
+            title:
+              buildLabel === arch
+                ? `All runs on ${branch} / build preset ${buildLabel}`
+                : `All runs on ${branch} / build preset ${buildLabel} (${arch})`,
           },
           {
             label: `regtests=${regtestLabel}`,
@@ -360,11 +375,13 @@ export function RunDetailPage() {
           <p className="text-fg">{duration(meta.started_at, meta.finished_at)}</p>
         </div>
         <div className="space-y-1">
-          <p className="text-muted text-xs">Arch / Executed On</p>
+          <p className="text-muted text-xs">Build / Executed On</p>
           <p className="text-fg font-mono text-sm">
-            {meta.arch} / {meta.connection_name && meta.connection_name !== "local"
-              ? meta.connection_name
-              : "local"}
+            {executionSnapshot?.build?.name ?? meta.arch} /{" "}
+            {executionSnapshot?.machine?.name ??
+              (meta.connection_name && meta.connection_name !== "local"
+                ? meta.connection_name
+                : "local")}
           </p>
         </div>
         <div className="space-y-1">
@@ -407,6 +424,19 @@ export function RunDetailPage() {
           </p>
         </div>
         <SlurmResourceSummary resources={slurmResources} />
+        {executionSnapshot && (
+          <div className="space-y-1 sm:col-span-2">
+            <p className="text-muted text-xs">Execution Presets</p>
+            <p className="text-fg text-sm">
+              {executionSnapshot.build?.name ?? meta.arch}
+              {executionSnapshot.machine ? ` / ${executionSnapshot.machine.name}` : ""}
+              {executionSnapshot.environment
+                ? ` / ${executionSnapshot.environment.name}`
+                : ""}
+              {executionSnapshot.slurm ? ` / ${executionSnapshot.slurm.name}` : ""}
+            </p>
+          </div>
+        )}
         {(meta.run_options?.custom_cmake_args?.length ?? 0) > 0 && (
           <div className="space-y-1 sm:col-span-2">
             <p className="text-muted text-xs">Custom CMake Args</p>

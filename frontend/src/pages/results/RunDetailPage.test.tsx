@@ -85,6 +85,30 @@ describe("RunDetailPage", () => {
             gpus_per_task: null,
           },
         },
+        execution_snapshot: {
+          build: {
+            id: "cpu-serial",
+            name: "CPU serial",
+            cmake_args: ["-DBUILD_TYPE=Release"],
+            build_jobs: 8,
+            mpi_ranks: 1,
+            max_mpi_ranks: 4,
+            opalx_info_level: 2,
+          },
+          machine: {
+            id: "local",
+            name: "Local",
+            kind: "local",
+            host: null,
+            port: 22,
+            gateway_host: null,
+            gateway_port: null,
+            gateway_auth_method: null,
+            queue_key: "local",
+          },
+          environment: null,
+          slurm: null,
+        },
         rerun_of: null,
       },
       unit: { tests: [] },
@@ -104,6 +128,10 @@ describe("RunDetailPage", () => {
     expect(href).toContain("/trigger?");
     expect(href).toContain("branch=master");
     expect(href).toContain("arch=cpu-serial");
+    expect(href).toContain("build_preset_id=cpu-serial");
+    expect(href).toContain("machine_preset_id=local");
+    expect(href).toContain("env_preset_id=");
+    expect(href).toContain("slurm_preset_id=");
     expect(href).toContain("skip_unit=true");
     expect(href).toContain("clean_build=true");
     expect(href).toContain("mpi_ranks=2");
@@ -116,5 +144,6 @@ describe("RunDetailPage", () => {
     expect(href).not.toContain("custom_cmake_args");
     expect(await screen.findByText("Custom CMake Args")).toBeInTheDocument();
     expect(screen.getByText("-DIPPL_GIT_TAG=master")).toBeInTheDocument();
+    expect(screen.getByText("master · CPU serial")).toBeInTheDocument();
   });
 });

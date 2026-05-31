@@ -1,13 +1,12 @@
 /* eslint-disable react-hooks/set-state-in-effect */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X, ShieldAlert } from "lucide-react";
 import {
   getOpalxBranches,
   getRegtestsBranches,
-  getRunConfigs,
 } from "../../api/runs";
-import { listConnections, LOCAL_CONNECTION } from "../../api/connections";
+import { getRunProfilesForTrigger } from "../../api/executionProfiles";
 import type {
   DayOfWeek,
   Schedule,
@@ -31,7 +30,8 @@ function defaultBody(): ScheduleWriteBody {
     branch: "master",
     arch: "cpu-serial",
     regtests_branch: "master",
-    connection_name: LOCAL_CONNECTION,
+    profile_id: null,
+    connection_name: "local",
     skip_unit: false,
     skip_regression: false,
     clean_build: false,
@@ -49,6 +49,7 @@ function scheduleToBody(schedule: Schedule): ScheduleWriteBody {
     branch: schedule.branch,
     arch: schedule.arch,
     regtests_branch: schedule.regtests_branch ?? "master",
+    profile_id: schedule.profile_id ?? null,
     connection_name: schedule.connection_name,
     skip_unit: schedule.skip_unit,
     skip_regression: schedule.skip_regression,
@@ -86,36 +87,29 @@ export function ScheduleFormModal({
     queryFn: getRegtestsBranches,
     enabled: open,
   });
-  const { data: runConfigs } = useQuery({
-    queryKey: ["run-configs"],
-    queryFn: getRunConfigs,
-    enabled: open,
-  });
-  const { data: connections } = useQuery({
-    queryKey: ["connections"],
-    queryFn: listConnections,
+  const { data: runProfiles } = useQuery({
+    queryKey: ["run-profiles-trigger"],
+    queryFn: getRunProfilesForTrigger,
     enabled: open,
   });
 
-  const selectedConnection = useMemo(
-    () =>
-      form.connection_name === LOCAL_CONNECTION
-        ? null
-        : connections?.find((c) => c.name === form.connection_name) ?? null,
-    [connections, form.connection_name],
+  const selectedRunProfile = useMemo(
+    () => runProfiles?.find((profile) => profile.id === form.profile_id) ?? null,
+    [runProfiles, form.profile_id],
   );
-  const selectedIs2fa =
-    selectedConnection?.gateway?.auth_method === "interactive";
+  const selectedIs2fa = selectedRunProfile?.interactive_gateway ?? false;
   const selectedRunConfig = useMemo(
-    () => runConfigs?.find((c) => c.arch === form.arch) ?? null,
-    [runConfigs, form.arch],
+    () => selectedRunProfile,
+    [selectedRunProfile],
   );
-  const archConfigs = runConfigs?.map((c) => c.arch);
 
   useEffect(() => {
     if (!open || initial || !selectedRunConfig) return;
     setForm((prev) => ({
       ...prev,
+      profile_id: selectedRunConfig.id,
+      arch: selectedRunConfig.arch,
+      connection_name: selectedRunConfig.machine_preset_id,
       mpi_ranks: selectedRunConfig.default_mpi_ranks,
       opalx_info_level: selectedRunConfig.default_opalx_info_level,
     }));
@@ -136,16 +130,26 @@ export function ScheduleFormModal({
     setForm((prev) => ({ ...prev, spec: { ...prev.spec, time } }));
   }
 
-  function updateArch(arch: string) {
-    const nextConfig = runConfigs?.find((c) => c.arch === arch);
+  const updateProfile = useCallback((profileId: string) => {
+    const nextConfig = runProfiles?.find((profile) => profile.id === profileId);
     setForm((prev) => ({
       ...prev,
-      arch,
+      profile_id: profileId || null,
+      arch: nextConfig?.arch ?? prev.arch,
+      connection_name: nextConfig?.machine_preset_id ?? prev.connection_name,
       mpi_ranks: nextConfig?.default_mpi_ranks ?? prev.mpi_ranks,
       opalx_info_level:
         nextConfig?.default_opalx_info_level ?? prev.opalx_info_level,
     }));
-  }
+  }, [runProfiles]);
+
+  useEffect(() => {
+    if (!open || initial || !runProfiles || runProfiles.length === 0 || form.profile_id) {
+      return;
+    }
+    const firstValid = runProfiles.find((profile) => profile.valid) ?? runProfiles[0];
+    updateProfile(firstValid.id);
+  }, [open, initial, runProfiles, form.profile_id, updateProfile]);
 
   async function handleSubmit() {
     setError(null);
@@ -159,6 +163,14 @@ export function ScheduleFormModal({
     }
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(form.spec.time)) {
       setError("Time must be HH:MM in 24-hour format.");
+      return;
+    }
+    if (!form.profile_id || !selectedRunProfile) {
+      setError("Choose a run profile.");
+      return;
+    }
+    if (!selectedRunProfile.valid) {
+      setError(selectedRunProfile.validation_errors.join("; "));
       return;
     }
     if (selectedIs2fa) {
@@ -282,16 +294,28 @@ export function ScheduleFormModal({
           </div>
 
           <div>
-            <label className="block text-sm text-muted mb-1">Run config</label>
+            <label className="block text-sm text-muted mb-1">Run profile</label>
             <select
-              value={form.arch}
-              onChange={(e) => updateArch(e.target.value)}
+              value={form.profile_id ?? ""}
+              onChange={(e) => updateProfile(e.target.value)}
               className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
             >
-              {(archConfigs ?? [form.arch]).map((a) => (
-                <option key={a}>{a}</option>
+              <option value="">Select profile</option>
+              {(runProfiles ?? []).map((profile) => (
+                <option key={profile.id} value={profile.id} disabled={!profile.valid || profile.interactive_gateway}>
+                  {profile.name}
+                  {profile.description ? ` - ${profile.description}` : ""}
+                  {profile.interactive_gateway ? " (2FA - not supported)" : ""}
+                  {!profile.valid ? " (invalid)" : ""}
+                </option>
               ))}
             </select>
+            {selectedRunProfile && (
+              <p className="text-muted text-xs mt-1">
+                {selectedRunProfile.build_preset_name} /{" "}
+                {selectedRunProfile.machine_preset_name}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -339,39 +363,15 @@ export function ScheduleFormModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm text-muted mb-1">Connection</label>
-            <select
-              value={form.connection_name}
-              onChange={(e) => updateField("connection_name", e.target.value)}
-              className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
-            >
-              <option value={LOCAL_CONNECTION}>Local</option>
-              {(connections ?? []).map((c) => {
-                const is2fa = c.gateway?.auth_method === "interactive";
-                return (
-                  <option key={c.name} value={c.name} disabled={is2fa}>
-                    {c.name}
-                    {c.description ? ` - ${c.description}` : ""}
-                    {is2fa ? " (2FA - not supported)" : ""}
-                  </option>
-                );
-              })}
-            </select>
-            {selectedIs2fa && (
-              <div className="flex items-start gap-2 text-xs text-failed mt-2">
-                <ShieldAlert size={14} className="mt-0.5 shrink-0" />
-                <span>
-                  Scheduled runs cannot use 2FA gateways (OTPs expire before
-                  the run starts).
-                </span>
-              </div>
-            )}
-            <p className="text-muted text-xs mt-1">
-              Only your own connections are listed. Other users' connections
-              remain private.
-            </p>
-          </div>
+          {selectedIs2fa && (
+            <div className="flex items-start gap-2 text-xs text-failed mt-2">
+              <ShieldAlert size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Scheduled runs cannot use 2FA gateways (OTPs expire before the
+                run starts).
+              </span>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-x-6 gap-y-2">
             <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">

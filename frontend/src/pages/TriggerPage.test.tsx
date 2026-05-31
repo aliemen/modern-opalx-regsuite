@@ -7,9 +7,45 @@ import { parseCustomCmakeArgs, TriggerPage } from "./TriggerPage";
 import {
   getOpalxBranches,
   getRegtestsBranches,
-  getRunConfigs,
   triggerRun,
 } from "../api/runs";
+import {
+  getRunProfilesForTrigger,
+  type RunProfileSummary,
+} from "../api/executionProfiles";
+
+function profileSummary(
+  overrides: Partial<RunProfileSummary> = {},
+): RunProfileSummary {
+  const arch = overrides.arch ?? "cpu-serial";
+  const id = overrides.id ?? `local-${arch}`;
+  return {
+    id,
+    name: overrides.name ?? `Local ${arch}`,
+    description: overrides.description ?? null,
+    arch,
+    build_preset_id: overrides.build_preset_id ?? arch,
+    build_preset_name: overrides.build_preset_name ?? arch,
+    machine_preset_id: overrides.machine_preset_id ?? "local",
+    machine_preset_name: overrides.machine_preset_name ?? "Local",
+    machine_kind: overrides.machine_kind ?? "local",
+    env_preset_id: overrides.env_preset_id ?? null,
+    env_preset_name: overrides.env_preset_name ?? null,
+    env_style: overrides.env_style ?? "none",
+    slurm_preset_id: overrides.slurm_preset_id ?? null,
+    slurm_preset_name: overrides.slurm_preset_name ?? null,
+    default_mpi_ranks: overrides.default_mpi_ranks ?? 1,
+    max_mpi_ranks: overrides.max_mpi_ranks ?? 4,
+    default_opalx_info_level: overrides.default_opalx_info_level ?? 2,
+    slurm_enabled: overrides.slurm_enabled ?? false,
+    slurm_overrides_supported: overrides.slurm_overrides_supported ?? false,
+    slurm_defaults: overrides.slurm_defaults ?? null,
+    interactive_gateway: overrides.interactive_gateway ?? false,
+    generated: overrides.generated ?? false,
+    valid: overrides.valid ?? true,
+    validation_errors: overrides.validation_errors ?? [],
+  };
+}
 
 vi.mock("../api/runs", async () => {
   const actual = await vi.importActual<typeof import("../api/runs")>("../api/runs");
@@ -18,28 +54,17 @@ vi.mock("../api/runs", async () => {
     getOpalxBranches: vi.fn(async () => ["master"]),
     getRegtestsBranches: vi.fn(async () => ["master"]),
     getArchConfigs: vi.fn(async () => ["cpu-serial"]),
-    getRunConfigs: vi.fn(async () => [
-      {
-        arch: "cpu-serial",
-        default_mpi_ranks: 1,
-        max_mpi_ranks: 4,
-        default_opalx_info_level: 2,
-        slurm_enabled: false,
-        slurm_overrides_supported: false,
-        slurm_defaults: null,
-      },
-    ]),
     triggerRun: vi.fn(),
   };
 });
 
-vi.mock("../api/connections", async () => {
-  const actual = await vi.importActual<typeof import("../api/connections")>(
-    "../api/connections"
+vi.mock("../api/executionProfiles", async () => {
+  const actual = await vi.importActual<typeof import("../api/executionProfiles")>(
+    "../api/executionProfiles"
   );
   return {
     ...actual,
-    listConnections: vi.fn(async () => []),
+    getRunProfilesForTrigger: vi.fn(async () => [profileSummary()]),
   };
 });
 
@@ -62,15 +87,13 @@ describe("TriggerPage rerun prefill", () => {
     vi.clearAllMocks();
   });
 
-  it("blocks a prefilled missing connection until the user chooses another", async () => {
+  it("falls back to an available profile for a legacy missing connection query", async () => {
     renderPage(
       "/trigger?branch=master&regtests_branch=master&arch=cpu-serial&connection_name=missing-remote&clean_build=true"
     );
 
-    expect(
-      await screen.findByText(/This saved connection is not available/)
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Start Run/i })).toBeDisabled();
+    expect(await screen.findByText("cpu-serial / Local")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Start Run/i })).toBeEnabled();
     expect(screen.getByLabelText("Clean build")).toBeChecked();
   });
 
@@ -176,7 +199,7 @@ describe("TriggerPage rerun prefill", () => {
       expect(triggerRun).toHaveBeenCalledWith(
         expect.objectContaining({
           arch: "cpu-serial",
-          connection_name: "local",
+          profile_id: "local-cpu-serial",
           mpi_ranks: 3,
         })
       );
@@ -184,9 +207,16 @@ describe("TriggerPage rerun prefill", () => {
   });
 
   it("sends manual Slurm resource overrides from the advanced tab", async () => {
-    vi.mocked(getRunConfigs).mockResolvedValue([
-      {
+    vi.mocked(getRunProfilesForTrigger).mockResolvedValue([
+      profileSummary({
+        id: "daint-cuda-daint",
+        name: "Daint CUDA",
         arch: "cuda-daint",
+        build_preset_id: "cuda-daint",
+        build_preset_name: "cuda-daint",
+        machine_preset_id: "daint",
+        machine_preset_name: "Daint",
+        machine_kind: "ssh",
         default_mpi_ranks: 1,
         max_mpi_ranks: 4,
         default_opalx_info_level: 2,
@@ -200,7 +230,7 @@ describe("TriggerPage rerun prefill", () => {
           gpus: null,
           gpus_per_task: 1,
         },
-      },
+      }),
     ]);
     vi.mocked(triggerRun).mockResolvedValue({
       run_id: "20260507-120000",
@@ -228,6 +258,7 @@ describe("TriggerPage rerun prefill", () => {
       expect(triggerRun).toHaveBeenCalledWith(
         expect.objectContaining({
           arch: "cuda-daint",
+          profile_id: "daint-cuda-daint",
           mpi_ranks: 2,
           slurm_resources: {
             partition: "debug",
@@ -243,9 +274,16 @@ describe("TriggerPage rerun prefill", () => {
   });
 
   it("resets Slurm resource edits back to defaults", async () => {
-    vi.mocked(getRunConfigs).mockResolvedValue([
-      {
+    vi.mocked(getRunProfilesForTrigger).mockResolvedValue([
+      profileSummary({
+        id: "daint-cuda-daint",
+        name: "Daint CUDA",
         arch: "cuda-daint",
+        build_preset_id: "cuda-daint",
+        build_preset_name: "cuda-daint",
+        machine_preset_id: "daint",
+        machine_preset_name: "Daint",
+        machine_kind: "ssh",
         default_mpi_ranks: 2,
         max_mpi_ranks: 4,
         default_opalx_info_level: 2,
@@ -259,7 +297,7 @@ describe("TriggerPage rerun prefill", () => {
           gpus: 1,
           gpus_per_task: null,
         },
-      },
+      }),
     ]);
     vi.mocked(triggerRun).mockResolvedValue({
       run_id: "20260507-120000",

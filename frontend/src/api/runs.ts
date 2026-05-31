@@ -14,7 +14,8 @@ export interface CurrentRunStatus {
 
 export interface TriggerRequest {
   branch: string;
-  arch: string;
+  arch?: string;
+  profile_id?: string | null;
   regtests_branch?: string;
   skip_unit?: boolean;
   skip_regression?: boolean;
@@ -28,8 +29,8 @@ export interface TriggerRequest {
   opalx_info_level?: number;
   slurm_resources?: SlurmResources | null;
   /**
-   * Name of the per-user Connection to run on. Use `null` or `"local"` for
-   * local execution. Connections are managed in Settings.
+   * Legacy compatibility path. New triggers use `profile_id`; legacy callers
+   * may still pass a per-user connection name or `"local"`.
    */
   connection_name?: string | null;
   /** Interactive gateway credentials -- never persisted, used once. */

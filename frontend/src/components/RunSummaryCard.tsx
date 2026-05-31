@@ -32,10 +32,13 @@ export function RunSummaryCard({
   onCopyPublicLink,
   userLink,
 }: RunSummaryCardProps) {
-  const connectionSuffix =
-    run.connection_name && run.connection_name !== "local"
-      ? ` / ${run.connection_name}`
-      : "";
+  const buildName = run.execution_snapshot?.build?.name ?? run.arch;
+  const machineName =
+    run.execution_snapshot?.machine?.name ??
+    (run.connection_name && run.connection_name !== "local"
+      ? run.connection_name
+      : "local");
+  const executionLabel = `${buildName} / ${machineName}`;
 
   return (
     <div className="bg-surface border border-border rounded-xl overflow-hidden">
@@ -61,8 +64,8 @@ export function RunSummaryCard({
         <div className="space-y-1.5 text-xs text-muted">
           <p className="flex items-center gap-1.5 min-w-0">
             <Cpu size={11} className="shrink-0" />
-            <span className="truncate" title={`${run.arch}${connectionSuffix}`}>
-              {run.arch}{connectionSuffix}
+            <span className="truncate" title={executionLabel}>
+              {executionLabel}
             </span>
           </p>
           <p className="flex items-center gap-1.5 min-w-0">

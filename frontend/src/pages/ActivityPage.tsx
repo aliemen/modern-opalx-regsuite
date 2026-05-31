@@ -134,7 +134,7 @@ export function ActivityPage() {
                 <tr>
                   <th className="px-4 py-3 font-medium w-36">OPALX Branch</th>
                   <th className="px-4 py-3 font-medium w-36">Tests Branch</th>
-                  <th className="px-4 py-3 font-medium">Arch / Exec. On</th>
+                  <th className="px-4 py-3 font-medium">Build / Exec. On</th>
                   <th className="px-4 py-3 font-medium">User</th>
                   <th className="px-4 py-3 font-medium">
                     <Clock size={12} className="inline mr-1" />
@@ -160,9 +160,11 @@ export function ActivityPage() {
                       {run.regtest_branch ?? "—"}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted">
-                      {run.arch}{run.connection_name && run.connection_name !== "local"
-                        ? ` / ${run.connection_name}`
-                        : ""}
+                      {run.execution_snapshot?.build?.name ?? run.arch} /{" "}
+                      {run.execution_snapshot?.machine?.name ??
+                        (run.connection_name && run.connection_name !== "local"
+                          ? run.connection_name
+                          : "local")}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {run.triggered_by ? (

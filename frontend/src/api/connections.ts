@@ -32,6 +32,7 @@ export interface Connection {
   work_dir: string;
   cleanup_after_run: boolean;
   keepalive_interval: number;
+  queue_key?: string | null;
   env: EnvActivation;
 }
 

@@ -1,4 +1,4 @@
-import type { RunConfigSummary } from "../../api/runs";
+import type { SlurmResources } from "../../api/runs";
 import {
   SlurmResourceFields,
   type SlurmResourceForm,
@@ -8,7 +8,12 @@ import { RuntimeFields } from "./RuntimeFields";
 interface AdvancedRunFieldsProps {
   customCmakeText: string;
   hasCustomCmakeArgs: boolean;
-  selectedRunConfig: RunConfigSummary | null;
+  selectedRunConfig: {
+    max_mpi_ranks?: number | null;
+    slurm_enabled: boolean;
+    slurm_overrides_supported: boolean;
+    slurm_defaults?: SlurmResources | null;
+  } | null;
   mpiRanks: number;
   opalxInfoLevel: number;
   slurmForm: SlurmResourceForm;

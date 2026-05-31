@@ -101,11 +101,13 @@ export function PublicRunDetailPage() {
             </p>
           </div>
           <div className="space-y-1">
-            <p className="text-muted text-xs">Arch / Executed On</p>
+            <p className="text-muted text-xs">Build / Executed On</p>
             <p className="text-fg font-mono text-sm">
-              {meta.arch} / {meta.connection_name && meta.connection_name !== "local"
-                ? meta.connection_name
-                : "local"}
+              {meta.execution_snapshot?.build?.name ?? meta.arch} /{" "}
+              {meta.execution_snapshot?.machine?.name ??
+                (meta.connection_name && meta.connection_name !== "local"
+                  ? meta.connection_name
+                  : "local")}
             </p>
           </div>
           <div className="space-y-1">

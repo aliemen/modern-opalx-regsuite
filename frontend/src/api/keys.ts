@@ -25,9 +25,9 @@ export async function uploadSshKey(
 }
 
 /**
- * Replace the contents of an existing key in place. Connections that
- * reference this key by name pick up the new contents on next use, so this
- * avoids the unlink → delete → re-add → re-link dance for short-lived keys
+ * Replace the contents of an existing key in place. Run profiles and legacy
+ * connections that reference this key by name pick up the new contents on next
+ * use, so this avoids the unlink → delete → re-add → re-link dance for short-lived keys
  * (e.g. CSCS Daint, where keys are valid for only one day).
  *
  * Passing `cert` replaces `<name>-cert.pub` too. Omit it to leave the

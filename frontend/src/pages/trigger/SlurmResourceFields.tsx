@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import type { SlurmResources } from "../../api/runs";
 
 export interface SlurmResourceForm {
@@ -102,7 +103,7 @@ export function SlurmResourceFields({
   if (!supported) {
     return (
       <div className="rounded-md border border-border bg-bg px-3 py-2 text-xs text-muted">
-        This run config uses legacy slurm_args. Convert it to [arch_configs.slurm]
+        This profile uses legacy slurm_args. Convert the Slurm preset to typed resources
         before using manual Slurm overrides.
       </div>
     );

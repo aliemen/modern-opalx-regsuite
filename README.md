@@ -232,7 +232,11 @@ see it.
 
 #### 2. Define public execution presets
 
-In **Settings** -> **Execution**, edit the shared public settings:
+In **Settings** -> **Execution** -> **Public Settings**, edit the shared
+presets with the Build, Machine, and Environment cards. Slurm presets live in
+the Machine card because they describe queue/allocation behavior for remote
+machines. A collapsed read-only JSON export is available for auditing the exact
+stored document.
 
 | Field | Example | Notes |
 |---|---|---|
@@ -246,7 +250,7 @@ workspace paths. Those stay in each user's private profile.
 
 #### 3. Create a private run profile
 
-In **Settings** -> **Execution** -> **Run profiles**, click **Add profile** and
+In **Settings** -> **Execution** -> **Run Profiles**, click **Add profile** and
 select:
 
 | Field | Example | Notes |

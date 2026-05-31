@@ -3,8 +3,7 @@ import { SshKeysSection } from "./settings/SshKeysSection";
 import { ApiKeysSection } from "./settings/ApiKeysSection";
 import { PasswordSection } from "./settings/PasswordSection";
 import { UsernameSection } from "./settings/UsernameSection";
-import { ExecutionSettingsSection } from "./settings/ExecutionSettingsSection";
-import { RunProfilesSection } from "./settings/RunProfilesSection";
+import { ExecutionSection } from "./settings/ExecutionSection";
 
 function SettingsGroup({
   title,
@@ -71,8 +70,7 @@ export function SettingsPage() {
         title="Execution"
         description="Shared execution presets and private run profiles for local and remote runs."
       >
-        <ExecutionSettingsSection />
-        <RunProfilesSection />
+        <ExecutionSection />
       </SettingsGroup>
     </div>
   );

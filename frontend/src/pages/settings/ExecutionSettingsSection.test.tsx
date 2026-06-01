@@ -133,11 +133,21 @@ describe("Execution public settings UI", () => {
 
   it("renders public settings as a sub-tab with the three primary cards", async () => {
     apiMocks.getExecutionSettings.mockResolvedValue(settingsFixture());
+    const user = userEvent.setup();
     renderWithClient(<ExecutionSection />);
 
     expect(screen.getByText("Run profile mock")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Public Settings/i }));
+    await user.click(screen.getByRole("button", { name: /Public Settings/i }));
 
+    expect(
+      screen.getByText(/DANGER: If you don't know what you're doing/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Build Presets")).not.toBeInTheDocument();
+    const continueButton = screen.getByRole("button", { name: "Continue" });
+    expect(continueButton).toBeDisabled();
+    await user.click(screen.getByLabelText("Yes I know what I'm doing"));
+    expect(continueButton).toBeEnabled();
+    await user.click(continueButton);
     expect(await screen.findByText("Build Presets")).toBeInTheDocument();
     expect(screen.getByText("Machine Presets")).toBeInTheDocument();
     expect(screen.getByText("Environment Presets")).toBeInTheDocument();

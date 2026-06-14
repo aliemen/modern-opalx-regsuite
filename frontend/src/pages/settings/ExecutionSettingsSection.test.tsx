@@ -70,7 +70,7 @@ function settingsFixture(): ExecutionSettings {
           style: "modules",
           lmod_init: "/usr/share/lmod/lmod/init/bash",
           module_use_paths: ["/opt/modulefiles"],
-          module_loads: ["gcc/15"],
+          module_loads: ["module load gcc/15"],
           prologue: null,
         },
         generated: true,
@@ -232,8 +232,11 @@ describe("Execution public settings UI", () => {
     await user.click(await screen.findByRole("button", { name: /Add environment/i }));
     await user.type(screen.getByLabelText("ID"), "modules-test");
     await user.type(screen.getByLabelText("Name"), "Modules Test");
-    await user.clear(screen.getByLabelText("Module loads"));
-    await user.type(screen.getByLabelText("Module loads"), "gcc/15\nopenmpi/5");
+    await user.clear(screen.getByLabelText("Module commands"));
+    await user.type(
+      screen.getByLabelText("Module commands"),
+      "module load gcc/15\nmodule swap cuda/12.1 cuda/12.4",
+    );
     await user.click(screen.getByRole("button", { name: /Save environment/i }));
 
     await waitFor(() => expect(saveExecutionSettings).toHaveBeenCalledTimes(1));
@@ -244,7 +247,10 @@ describe("Execution public settings UI", () => {
             id: "modules-test",
             env: expect.objectContaining({
               style: "modules",
-              module_loads: ["gcc/15", "openmpi/5"],
+              module_loads: [
+                "module load gcc/15",
+                "module swap cuda/12.1 cuda/12.4",
+              ],
             }),
           }),
         ]),

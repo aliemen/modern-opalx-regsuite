@@ -39,7 +39,7 @@ mpi_ranks = 1
 [arch_configs.env]
 style = "modules"
 module_use_paths = ["/home/aliemen/modulefiles"]
-module_loads = ["gcc/15", "openmpi/5.0.5-gcc15", "hdf5/1.14.6-gcc15", "gtest/1.16.0-gcc15", "h5hut/cmake-gcc15"]
+module_loads = ["module load gcc/15", "module load openmpi/5.0.5-gcc15", "module load hdf5/1.14.6-gcc15", "module load gtest/1.16.0-gcc15", "module load h5hut/cmake-gcc15"]
 
 [[arch_configs]]
 arch = "cpu-openmp"
@@ -50,7 +50,7 @@ mpi_ranks = 1
 [arch_configs.env]
 style = "modules"
 module_use_paths = ["/home/aliemen/modulefiles"]
-module_loads = ["gcc/15", "openmpi/5.0.5-gcc15", "hdf5/1.14.6-gcc15", "gtest/1.16.0-gcc15", "h5hut/cmake-gcc15"]
+module_loads = ["module load gcc/15", "module load openmpi/5.0.5-gcc15", "module load hdf5/1.14.6-gcc15", "module load gtest/1.16.0-gcc15", "module load h5hut/cmake-gcc15"]
 
 [[arch_configs]]
 arch = "cpu-serial-opalx-lxc"
@@ -61,7 +61,7 @@ mpi_ranks = 1
 [arch_configs.env]
 style = "modules"
 lmod_init = "/usr/share/lmod/lmod/init/profile"
-module_loads = ["opalx/1.2"]
+module_loads = ["module load opalx/1.2"]
 
 [[arch_configs]]
 arch = "cuda-daint"

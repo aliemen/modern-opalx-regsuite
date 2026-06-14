@@ -97,7 +97,10 @@ def test_allocated_single_rank_build_step_uses_srun(tmp_path: Path) -> None:
         EnvActivation(
             style="modules",
             module_use_paths=["/apps/modules"],
-            module_loads=["openmpi/4.1"],
+            module_loads=[
+                "module load openmpi/4.1",
+                "module swap cuda/12.1 cuda/12.4",
+            ],
         )
     )
 
@@ -115,4 +118,5 @@ def test_allocated_single_rank_build_step_uses_srun(tmp_path: Path) -> None:
     )
     assert "module use /apps/modules" in conn.commands[0]
     assert "module load openmpi/4.1" in conn.commands[0]
+    assert "module swap cuda/12.1 cuda/12.4" in conn.commands[0]
     assert "cmake /work/opalx-src" in conn.commands[0]

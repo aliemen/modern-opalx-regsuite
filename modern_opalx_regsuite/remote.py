@@ -935,8 +935,7 @@ class RemoteExecutor:
             parts = [f"source {shlex.quote(init_path)}"]
             for p in env.module_use_paths:
                 parts.append(f"module use {shlex.quote(p)}")
-            for m in env.module_loads:
-                parts.append(f"module load {shlex.quote(m)}")
+            parts.extend(env.module_loads)
             return parts
         return []
 
@@ -1067,7 +1066,7 @@ class RemoteExecutor:
         # Callers choose this per phase: git/network operations can stay on
         # the login node, while configure/build/test phases may opt into srun.
         # srun calls execve, not a shell, so we use bash -c to preserve the
-        # &&-chain (cd, module loads, env preamble) around the real command.
+        # &&-chain (cd, module commands, env preamble) around the real command.
         # When uenv style is configured, pass the image/view as srun --uenv/--view
         # flags instead of calling "uenv run" inside bash — this is the correct
         # way to activate a uenv on CSCS Alps compute nodes, equivalent to

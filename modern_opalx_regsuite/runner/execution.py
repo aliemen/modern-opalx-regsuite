@@ -45,7 +45,7 @@ def _build_local_env(
     parts: list[str] = []
 
     if env_activation.style == "modules":
-        if not env_activation.module_loads:
+        if not env_activation.module_use_paths and not env_activation.module_loads:
             return os.environ.copy()
         lmod_init = env_activation.lmod_init or _find_lmod_init()
         if not lmod_init or not os.path.isfile(lmod_init):
@@ -54,18 +54,17 @@ def _build_local_env(
             if not fallback:
                 _append_pipeline_line(
                     pipeline_log_path,
-                    "[env] WARNING: lmod init script not found; skipping module loads.",
+                    "[env] WARNING: lmod init script not found; skipping module commands.",
                 )
                 return os.environ.copy()
             lmod_init = fallback
         parts.append(f"source {shlex.quote(lmod_init)}")
         for p in env_activation.module_use_paths:
             parts.append(f"module use {shlex.quote(p)}")
-        for m in env_activation.module_loads:
-            parts.append(f"module load {shlex.quote(m)}")
+        parts.extend(env_activation.module_loads)
         _append_pipeline_line(
             pipeline_log_path,
-            f"[env] modules: {', '.join(env_activation.module_loads)}",
+            f"[env] module commands: {', '.join(env_activation.module_loads)}",
         )
 
     elif env_activation.style == "prologue":

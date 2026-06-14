@@ -1708,7 +1708,7 @@ function EnvironmentPresetCard({
         <Pill tone={preset.generated ? "muted" : "accent"}>
           {generatedLabel(preset.generated)}
         </Pill>
-        {moduleLoads.length > 0 && <Pill>{moduleLoads.length} modules</Pill>}
+        {moduleLoads.length > 0 && <Pill>{moduleLoads.length} module commands</Pill>}
         {moduleUsePaths.length > 0 && (
           <Pill>{moduleUsePaths.length} module paths</Pill>
         )}
@@ -1809,7 +1809,7 @@ function EnvironmentPresetForm({
               </Field>
             </div>
             <div className="sm:col-span-2">
-              <Field label="Module loads">
+              <Field label="Module commands">
                 <textarea
                   rows={5}
                   value={form.moduleLoadsText}

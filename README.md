@@ -143,7 +143,7 @@ cmake_args = ["-DBUILD_TYPE=Release", "-DPLATFORMS=SERIAL", "-DOPALX_ENABLE_UNIT
 # Optional seed for a public environment preset.
 [arch_configs.env]
 style        = "modules"
-module_loads = ["gcc/15.2.0", "openmpi/4.1.6"]
+module_loads = ["module load gcc/15.2.0", "module load openmpi/4.1.6"]
 
 [[arch_configs]]
 arch       = "gpu-cuda-a100"
@@ -163,7 +163,7 @@ gpus_per_task = 1
 # Optional seed for a public environment preset.
 # [arch_configs.env]
 # style        = "modules"
-# module_loads = ["gcc/15.2.0", "openmpi/4.1.6", "cuda/12.0"]
+# module_loads = ["module load gcc/15.2.0", "module swap cuda/12.0 cuda/12.4", "module load openmpi/4.1.6"]
 ```
 
 After first login, edit these definitions in **Settings -> Execution**. The
@@ -187,7 +187,7 @@ Environment presets accept four styles:
 | `style` | Fields | Use case |
 |---|---|---|
 | `none` (default) | — | Plain shell, no activation |
-| `modules` | `lmod_init`, `module_use_paths`, `module_loads` | Classic lmod-managed clusters |
+| `modules` | `lmod_init`, `module_use_paths`, `module_loads` | Classic lmod-managed clusters. `module_loads` entries are complete shell commands, such as `module load gcc/15` or `module swap cuda/12 cuda/12.4`. |
 | `prologue` | `prologue` | Free-form shell command, e.g. `uenv start prgenv-gnu/24.7:v3 --view=default` |
 | `uenv` | `prologue` | CSCS uenv arguments passed to `uenv run` or Slurm `srun --uenv/--view` |
 

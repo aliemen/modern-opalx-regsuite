@@ -447,7 +447,7 @@ export function ConnectionForm({ initial, onCancel, onSaved }: Props) {
             </div>
             <div>
               <label className="block text-xs text-muted mb-1">
-                module load (one per line, e.g. gcc/15.2.0)
+                module commands (one per line, e.g. module load gcc/15.2.0)
               </label>
               <textarea
                 rows={3}

@@ -14,7 +14,8 @@ class EnvActivation(BaseModel):
     Four styles:
 
     - ``"none"``: do nothing; commands run in whatever shell environment is the default.
-    - ``"modules"``: source an lmod init script, then ``module use`` + ``module load`` lines.
+    - ``"modules"``: source an lmod init script, then ``module use`` paths followed
+      by raw module command lines.
     - ``"prologue"``: prepend a free-form shell command that is joined with ``&&`` before
       each run command.  Use this for simple setups like ``export VAR=val`` or sourcing
       a setup script.
@@ -35,11 +36,14 @@ class EnvActivation(BaseModel):
     )
     module_use_paths: List[str] = Field(
         default_factory=list,
-        description="Paths added with 'module use' before module loads (modules style only).",
+        description="Paths added with 'module use' before module commands (modules style only).",
     )
     module_loads: List[str] = Field(
         default_factory=list,
-        description="Modules to load with 'module load' (modules style only).",
+        description=(
+            "Raw module command lines executed after module use paths, e.g. "
+            "'module load gcc/15' or 'module swap cuda/12 cuda/12.4' (modules style only)."
+        ),
     )
     prologue: Optional[str] = Field(
         None,

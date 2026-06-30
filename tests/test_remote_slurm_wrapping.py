@@ -85,10 +85,11 @@ def test_allocated_slurm_step_command_uses_srun_ranks(tmp_path: Path) -> None:
     assert len(conn.commands) == 1
     assert conn.commands[0].startswith(
         "srun --jobid=12345 -n 2 --nodes=2 --ntasks-per-node=1 "
-        "--gpus=2 --gpus-per-task=1 --cpus-per-task=16 --overlap "
+        "--gpus=2 --gpus-per-task=1 --cpus-per-task=16 --cpu-bind=none --overlap "
         "--uenv=/uenv/image.squashfs --view=develop"
     )
     assert "uenv run" not in conn.commands[0]
+    assert "unset SLURM_CPU_BIND SLURM_CPU_BIND_LIST" in conn.commands[0]
     assert "/build/src/opalx Generated.in --info 2" in conn.commands[0]
 
 
@@ -114,8 +115,9 @@ def test_allocated_single_rank_build_step_uses_srun(tmp_path: Path) -> None:
     assert rc == 0
     assert len(conn.commands) == 1
     assert conn.commands[0].startswith(
-        "srun --jobid=12345 -n 1 --overlap -- bash -c "
+        "srun --jobid=12345 -n 1 --cpu-bind=none --overlap -- bash -c "
     )
+    assert "unset SLURM_CPU_BIND SLURM_CPU_BIND_LIST" in conn.commands[0]
     assert "module use /apps/modules" in conn.commands[0]
     assert "module load openmpi/4.1" in conn.commands[0]
     assert "module swap cuda/12.1 cuda/12.4" in conn.commands[0]

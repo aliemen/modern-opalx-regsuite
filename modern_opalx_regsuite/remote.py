@@ -1054,12 +1054,20 @@ class RemoteExecutor:
         # function from the current shell but keeps BASH_FUNC_module%% in its
         # environment, which is then re-imported by child bashes (and forwarded
         # to nested srun). We must unset the raw env var by name as well.
-        wrapped = (
-            f'unset -f module 2>/dev/null; '
-            f'unset "BASH_FUNC_module%%" 2>/dev/null; '
-            f'unset "BASH_FUNC_module()" 2>/dev/null; '
-            f"cd {shlex.quote(remote_cwd)} && {full_cmd}"
-        )
+        prelude = [
+            "unset -f module 2>/dev/null",
+            'unset "BASH_FUNC_module%%" 2>/dev/null',
+            'unset "BASH_FUNC_module()" 2>/dev/null',
+        ]
+        if use_slurm_step:
+            # CTest and MPI test launchers may spawn nested srun steps.  Slurm
+            # CPU bind masks inherited from this outer step can be invalid for
+            # the nested step allocation on CSCS Alps/GH200.
+            prelude.append(
+                "unset SLURM_CPU_BIND SLURM_CPU_BIND_LIST "
+                "SLURM_CPU_BIND_TYPE SLURM_CPU_BIND_VERBOSE 2>/dev/null"
+            )
+        wrapped = f"{'; '.join(prelude)}; cd {shlex.quote(remote_cwd)} && {full_cmd}"
 
         # When explicitly requested, run the command as a Slurm job step so
         # commands can see allocation-only environments and host placement.
@@ -1086,7 +1094,8 @@ class RemoteExecutor:
                 )
             wrapped = (
                 f"srun --jobid={shlex.quote(self._allocation_id)}"
-                f"{rank_flag}{resource_flags} --overlap{cluster_flag}{uenv_flags}"
+                f"{rank_flag}{resource_flags} --cpu-bind=none"
+                f" --overlap{cluster_flag}{uenv_flags}"
                 f" -- bash -c {shlex.quote(wrapped)}"
             )
 

@@ -65,7 +65,17 @@ module_loads = ["module load opalx/1.2"]
 
 [[arch_configs]]
 arch = "cuda-daint"
-cmake_args = ["-DBUILD_TYPE=Debug", "-DPLATFORMS=CUDA", "-DOPALX_ENABLE_UNIT_TESTS=ON", "-DARCH=HOPPER90", "-DHeffte_VERSION=git.v2.4.1", "-DCMAKE_TEST_LAUNCHER=\"srun;-n;1;--overlap\"", "-DKokkos_VERSION=git.4.7.01"]
+cmake_args = [
+  "-DBUILD_TYPE=Debug",
+  "-DPLATFORMS=CUDA",
+  "-DOPALX_ENABLE_UNIT_TESTS=ON",
+  "-DARCH=HOPPER90",
+  "-DHeffte_VERSION=git.v2.4.1",
+  "-DMPIEXEC_EXECUTABLE=srun",
+  "-DMPIEXEC_NUMPROC_FLAG=-n",
+  "-DMPIEXEC_PREFLAGS=--overlap;--cpu-bind=none",
+  "-DKokkos_VERSION=git.4.7.01",
+]
 build_jobs = 16
 mpi_ranks = 1
 

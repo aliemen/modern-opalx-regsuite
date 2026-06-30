@@ -182,6 +182,12 @@ trigger time so requested MPI ranks scale `--ntasks`, `--nodes`, and GPU counts
 consistently. Legacy `slurm_args` still load for old configs, but new configs
 should use typed Slurm presets.
 
+On CSCS Alps/GH200, OPALX unit tests may still launch each CTest test through
+`MPIEXEC_EXECUTABLE` even when `CMAKE_TEST_LAUNCHER` is unset. Use
+`MPIEXEC_PREFLAGS=--overlap;--cpu-bind=none` for Daint `srun` test launches.
+The remote Slurm wrapper also clears inherited `SLURM_CPU_BIND*` variables
+inside each job step so nested test launchers do not reuse an invalid CPU mask.
+
 Environment presets accept four styles:
 
 | `style` | Fields | Use case |

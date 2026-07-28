@@ -10,7 +10,9 @@ import {
   triggerRun,
 } from "../api/runs";
 import {
+  getExecutionSettings,
   getRunProfilesForTrigger,
+  type ExecutionSettings,
   type RunProfileSummary,
 } from "../api/executionProfiles";
 
@@ -47,6 +49,21 @@ function profileSummary(
   };
 }
 
+function executionSettingsFixture(
+  cmakeQuickSelections: string[] = [],
+): ExecutionSettings {
+  return {
+    version: 1,
+    cmake_quick_selections: cmakeQuickSelections,
+    build_presets: [],
+    machine_presets: [],
+    env_presets: [],
+    slurm_presets: [],
+    created_at: null,
+    modified_at: null,
+  };
+}
+
 vi.mock("../api/runs", async () => {
   const actual = await vi.importActual<typeof import("../api/runs")>("../api/runs");
   return {
@@ -65,6 +82,7 @@ vi.mock("../api/executionProfiles", async () => {
   return {
     ...actual,
     getRunProfilesForTrigger: vi.fn(async () => [profileSummary()]),
+    getExecutionSettings: vi.fn(async () => executionSettingsFixture()),
   };
 });
 
@@ -85,6 +103,7 @@ describe("TriggerPage rerun prefill", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.mocked(getExecutionSettings).mockResolvedValue(executionSettingsFixture());
   });
 
   it("falls back to an available profile for a legacy missing connection query", async () => {
@@ -119,6 +138,63 @@ describe("TriggerPage rerun prefill", () => {
     ]);
   });
 
+  it("quick-adds CMake keys while keeping basic settings and overrides visible", async () => {
+    vi.mocked(getExecutionSettings).mockResolvedValue(
+      executionSettingsFixture(["IPPL_GIT_TAG"]),
+    );
+    vi.mocked(triggerRun).mockResolvedValue({
+      run_id: "20260507-120000",
+      queued: true,
+      queue_id: "queue-1",
+      position: 1,
+    });
+    const user = userEvent.setup();
+
+    renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial");
+
+    const advancedToggle = await screen.findByLabelText(/Show advanced options/);
+    expect(screen.getByLabelText("Clean build")).toBeVisible();
+    await user.click(advancedToggle);
+
+    const addButton = await screen.findByRole("button", {
+      name: "Add CMake argument IPPL_GIT_TAG",
+    });
+    await user.click(addButton);
+    const textarea = screen.getByLabelText("Custom CMake args");
+    expect(textarea).toHaveValue("-DIPPL_GIT_TAG=");
+    await waitFor(() => expect(textarea).toHaveFocus());
+    await user.type(textarea, "master");
+    expect(
+      screen.getByRole("button", { name: "IPPL_GIT_TAG already added" }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("Clean build")).toBeChecked();
+    expect(screen.getByLabelText("Clean build")).toBeDisabled();
+
+    await user.click(advancedToggle);
+    expect(screen.queryByLabelText("Custom CMake args")).not.toBeInTheDocument();
+    expect(screen.getByText("1 override active")).toBeVisible();
+    expect(screen.getByText("Required by custom CMake args.")).toBeVisible();
+
+    await user.click(advancedToggle);
+    const reopenedTextarea = screen.getByLabelText("Custom CMake args");
+    expect(reopenedTextarea).toHaveValue("-DIPPL_GIT_TAG=master");
+    await user.clear(reopenedTextarea);
+    await user.type(reopenedTextarea, "-DIPPL_GIT_TAG:STRING=feature");
+    expect(
+      screen.getByRole("button", { name: "IPPL_GIT_TAG already added" }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+    await waitFor(() => {
+      expect(triggerRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clean_build: true,
+          custom_cmake_args: ["-DIPPL_GIT_TAG:STRING=feature"],
+        }),
+      );
+    });
+  });
+
   it("sends advanced cmake args and forces clean build", async () => {
     vi.mocked(triggerRun).mockResolvedValue({
       run_id: "20260507-120000",
@@ -130,7 +206,7 @@ describe("TriggerPage rerun prefill", () => {
 
     renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial");
 
-    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    await user.click(screen.getByLabelText(/Show advanced options/));
     await user.type(
       screen.getByLabelText("Custom CMake args"),
       "# try current IPPL\n-DIPPL_GIT_TAG=master\n\n-DKokkos_VERSION=git.4.7.01"
@@ -148,6 +224,28 @@ describe("TriggerPage rerun prefill", () => {
         })
       );
     });
+  });
+
+  it("keeps manual run dispatch available when quick selections cannot load", async () => {
+    vi.mocked(getExecutionSettings).mockRejectedValue(
+      new Error("settings unavailable"),
+    );
+    vi.mocked(triggerRun).mockResolvedValue({
+      run_id: "20260507-120000",
+      queued: true,
+      queue_id: "queue-1",
+      position: 1,
+    });
+    const user = userEvent.setup();
+
+    renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial");
+
+    await user.click(await screen.findByLabelText(/Show advanced options/));
+    expect(screen.queryByText("Quick add")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Custom CMake args")).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+
+    await waitFor(() => expect(triggerRun).toHaveBeenCalledTimes(1));
   });
 
   it("sends MPI ranks and OPALX info level overrides", async () => {
@@ -188,7 +286,7 @@ describe("TriggerPage rerun prefill", () => {
 
     renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial");
 
-    await user.click(await screen.findByRole("button", { name: "Advanced" }));
+    await user.click(await screen.findByLabelText(/Show advanced options/));
     const ranksInput = screen.getByLabelText("MPI ranks");
     fireEvent.change(ranksInput, { target: { value: "3" } });
     expect(ranksInput).toHaveValue(3);
@@ -244,7 +342,7 @@ describe("TriggerPage rerun prefill", () => {
       "/trigger?branch=master&regtests_branch=master&arch=cuda-daint&mpi_ranks=2"
     );
 
-    await user.click(await screen.findByRole("button", { name: "Advanced" }));
+    await user.click(await screen.findByLabelText(/Show advanced options/));
     await user.clear(screen.getByLabelText("Nodes"));
     await user.type(screen.getByLabelText("Nodes"), "1");
     await user.clear(screen.getByLabelText("Tasks per node"));
@@ -309,7 +407,7 @@ describe("TriggerPage rerun prefill", () => {
 
     renderPage("/trigger?branch=master&regtests_branch=master&arch=cuda-daint");
 
-    await user.click(await screen.findByRole("button", { name: "Advanced" }));
+    await user.click(await screen.findByLabelText(/Show advanced options/));
     await user.clear(screen.getByLabelText("Nodes"));
     await user.type(screen.getByLabelText("Nodes"), "2");
     await user.click(screen.getByRole("button", { name: /Reset to defaults/i }));

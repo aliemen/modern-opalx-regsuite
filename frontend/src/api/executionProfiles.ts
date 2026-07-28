@@ -64,6 +64,7 @@ export interface SlurmPreset {
 
 export interface ExecutionSettings {
   version: number;
+  cmake_quick_selections: string[];
   build_presets: BuildPreset[];
   machine_presets: MachinePreset[];
   env_presets: EnvPreset[];
@@ -194,4 +195,3 @@ export async function testRunProfile(
   );
   return res.data;
 }
-

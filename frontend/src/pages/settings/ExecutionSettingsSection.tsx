@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Save,
   Server,
+  Tags,
   TerminalSquare,
   Trash2,
   X,
@@ -137,7 +138,6 @@ export function ExecutionSettingsSection() {
   });
 
   const invalidateExecution = () => {
-    queryClient.invalidateQueries({ queryKey: ["execution-settings"] });
     queryClient.invalidateQueries({ queryKey: ["run-profile-summaries"] });
     queryClient.invalidateQueries({ queryKey: ["run-profiles"] });
     queryClient.invalidateQueries({ queryKey: ["run-profiles-trigger"] });
@@ -185,6 +185,13 @@ export function ExecutionSettingsSection() {
       </div>
     );
   }
+
+  const saveCmakeQuickSelections = async (selections: string[]) => {
+    await persist({
+      ...data,
+      cmake_quick_selections: selections,
+    });
+  };
 
   const saveBuild: SavePreset<BuildPreset> = async (preset) => {
     const exists = data.build_presets.some((item) => item.id === preset.id);
@@ -265,6 +272,11 @@ export function ExecutionSettingsSection() {
         )}
       </div>
 
+      <CmakeQuickSelectionsCard
+        selections={data.cmake_quick_selections}
+        saving={saveMut.isPending}
+        onChange={saveCmakeQuickSelections}
+      />
       <BuildPresetsCard
         presets={data.build_presets}
         saving={saveMut.isPending}
@@ -306,8 +318,8 @@ function Header({
           Public Settings
         </h2>
         <p className="text-muted text-sm mt-2 max-w-3xl">
-          Shared build, machine, environment, and Slurm presets available to all
-          dashboard users.
+          Shared CMake shortcuts, build, machine, environment, and Slurm presets
+          available to all dashboard users.
         </p>
       </div>
       <button
@@ -319,6 +331,127 @@ function Header({
         <RotateCcw size={14} />
         Reset from config
       </button>
+    </div>
+  );
+}
+
+const CMAKE_QUICK_SELECTION_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function CmakeQuickSelectionsCard({
+  selections,
+  saving,
+  onChange,
+}: {
+  selections: string[];
+  saving: boolean;
+  onChange: (selections: string[]) => Promise<void>;
+}) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function addSelection() {
+    if (saving) return;
+    const key = value.trim();
+    if (!key) {
+      setError("CMake variable name is required.");
+      return;
+    }
+    if (!CMAKE_QUICK_SELECTION_PATTERN.test(key)) {
+      setError(
+        "Use a variable name starting with a letter or underscore and containing only letters, digits, or underscores.",
+      );
+      return;
+    }
+    if (selections.includes(key)) {
+      setError(`${key} is already available.`);
+      return;
+    }
+    setError(null);
+    try {
+      await onChange([...selections, key]);
+      setValue("");
+    } catch {
+      // The page-level settings error keeps the failed save visible.
+    }
+  }
+
+  async function removeSelection(key: string) {
+    if (saving) return;
+    setError(null);
+    try {
+      await onChange(selections.filter((selection) => selection !== key));
+    } catch {
+      // The page-level settings error keeps the failed save visible.
+    }
+  }
+
+  return (
+    <div className="space-y-4 rounded-xl border border-border bg-surface p-4 sm:p-6">
+      <SectionHeader
+        icon={<Tags size={18} />}
+        title="CMake Quick Selections"
+        count={selections.length}
+      />
+      <p className="text-xs text-muted">
+        Add cache-variable names without <span className="font-mono">-D</span> or{" "}
+        <span className="font-mono">=</span>. They appear as quick-add buttons when
+        starting a run.
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">CMake variable name</span>
+          <input
+            value={value}
+            disabled={saving}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (error) setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void addSelection();
+              }
+            }}
+            placeholder="IPPL_GIT_TAG"
+            aria-label="CMake variable name"
+            className={inputCls}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => void addSelection()}
+          disabled={saving || !value.trim()}
+          className={actionButtonCls("primary")}
+        >
+          <Plus size={14} />
+          Add selection
+        </button>
+      </div>
+      {error && <p className="text-sm text-failed">{error}</p>}
+      {selections.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {selections.map((key) => (
+            <span
+              key={key}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-bg py-1 pl-2.5 pr-1 font-mono text-xs text-fg"
+            >
+              {key}
+              <button
+                type="button"
+                onClick={() => void removeSelection(key)}
+                disabled={saving}
+                aria-label={`Remove CMake quick selection ${key}`}
+                className="rounded-full p-0.5 text-muted transition hover:bg-failed/10 hover:text-failed disabled:opacity-50"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted">No quick selections configured.</p>
+      )}
     </div>
   );
 }

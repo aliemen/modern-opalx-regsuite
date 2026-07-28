@@ -35,6 +35,7 @@ from .user_store import (
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
+_CMAKE_QUICK_SELECTION_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_id(value: str) -> str:
@@ -162,12 +163,27 @@ class ExecutionSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int = 1
+    cmake_quick_selections: list[str] = Field(default_factory=list)
     build_presets: list[BuildPreset] = Field(default_factory=list)
     machine_presets: list[MachinePreset] = Field(default_factory=list)
     env_presets: list[EnvPreset] = Field(default_factory=list)
     slurm_presets: list[SlurmPreset] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     modified_at: Optional[datetime] = None
+
+    @field_validator("cmake_quick_selections")
+    @classmethod
+    def _cmake_quick_selections(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        for value in normalized:
+            if not _CMAKE_QUICK_SELECTION_RE.fullmatch(value):
+                raise ValueError(
+                    "CMake quick selections must start with a letter or underscore "
+                    "and contain only letters, digits, or underscores"
+                )
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("cmake_quick_selections contains duplicate names")
+        return normalized
 
     @model_validator(mode="after")
     def _unique_ids(self) -> "ExecutionSettings":

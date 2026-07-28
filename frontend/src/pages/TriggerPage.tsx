@@ -2,14 +2,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Play, Info } from "lucide-react";
+import { ChevronDown, RefreshCw, Play, Info } from "lucide-react";
 import {
   getOpalxBranches,
   getRegtestsBranches,
   triggerRun,
   type TriggerRequest,
 } from "../api/runs";
-import { getRunProfilesForTrigger } from "../api/executionProfiles";
+import {
+  getExecutionSettings,
+  getRunProfilesForTrigger,
+} from "../api/executionProfiles";
 import { InteractiveGatewayFields } from "./trigger/InteractiveGatewayFields";
 import { RuntimeFields } from "./trigger/RuntimeFields";
 import {
@@ -19,7 +22,6 @@ import {
   type SlurmResourceForm,
 } from "./trigger/SlurmResourceFields";
 import { AdvancedRunFields } from "./trigger/AdvancedRunFields";
-import { TriggerTabs, type TriggerTab } from "./trigger/TriggerTabs";
 import { hasSlurmQueryParams, slurmFormFromQuery } from "./trigger/slurmQuery";
 import {
   parseCustomCmakeArgs,
@@ -71,7 +73,7 @@ export function TriggerPage() {
   const [slurmForm, setSlurmForm] = useState<SlurmResourceForm>(() =>
     slurmFormFromQuery(searchParams)
   );
-  const [activeTab, setActiveTab] = useState<TriggerTab>("basic");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [customCmakeText, setCustomCmakeText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [queuedInfo, setQueuedInfo] = useState<{ runId: string; position: number } | null>(null);
@@ -99,6 +101,11 @@ export function TriggerPage() {
     queryFn: getRunProfilesForTrigger,
   });
 
+  const { data: executionSettings } = useQuery({
+    queryKey: ["execution-settings"],
+    queryFn: getExecutionSettings,
+  });
+
   useEffect(() => {
     if (!opalxBranches || opalxBranches.includes(opalxBranch)) return;
     setOpalxBranch(fallbackBranch(opalxBranches));
@@ -116,6 +123,13 @@ export function TriggerPage() {
   const customCmakeArgs = parseCustomCmakeArgs(customCmakeText);
   const hasCustomCmakeArgs = customCmakeArgs.length > 0;
   const effectiveCleanBuild = cleanBuild || hasCustomCmakeArgs;
+  const advancedOverrideCount =
+    Number(hasCustomCmakeArgs) +
+    Number(slurmOverrideDirty) +
+    Number(
+      selectedRunConfig !== null &&
+        mpiRanks !== selectedRunConfig.default_mpi_ranks,
+    );
   const needsInteractiveCredentials =
     selectedRunConfig !== null && selectedRunConfig.interactive_gateway;
 
@@ -314,10 +328,6 @@ export function TriggerPage() {
       <h1 className="text-fg text-2xl font-semibold mb-6">Start a Run</h1>
 
       <div className="bg-surface border border-border rounded-xl p-4 flex flex-col gap-5 sm:p-6">
-        <TriggerTabs activeTab={activeTab} onChange={setActiveTab} />
-
-        {activeTab === "basic" ? (
-          <>
         {/* OPALX branch */}
         <div>
           <label className="block text-sm text-muted mb-1">OPALX branch</label>
@@ -494,22 +504,62 @@ export function TriggerPage() {
             </span>
           )}
         </div>
-          </>
-        ) : (
-          <AdvancedRunFields
-            customCmakeText={customCmakeText}
-            hasCustomCmakeArgs={hasCustomCmakeArgs}
-            selectedRunConfig={selectedRunConfig}
-            mpiRanks={mpiRanks}
-            opalxInfoLevel={opalxInfoLevel}
-            slurmForm={slurmForm}
-            slurmOverrideDirty={slurmOverrideDirty}
-            onMpiRanksChange={setMpiRanks}
-            onOpalxInfoLevelChange={setOpalxInfoLevel}
-            onCustomCmakeTextChange={setCustomCmakeText}
-            onSlurmFormChange={updateSlurmForm}
-            onSlurmReset={resetSlurmForm}
+
+        <label
+          htmlFor="show-advanced-options"
+          className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-bg px-3 py-3 transition hover:border-accent/50"
+        >
+          <input
+            id="show-advanced-options"
+            type="checkbox"
+            checked={advancedOpen}
+            onChange={(e) => setAdvancedOpen(e.target.checked)}
+            aria-controls="advanced-run-options"
+            className="h-4 w-4 accent-accent"
           />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-fg">
+              Show advanced options
+            </span>
+            <span className="block text-xs text-muted">
+              MPI ranks, custom CMake arguments, and Slurm resources
+            </span>
+          </span>
+          {!advancedOpen && advancedOverrideCount > 0 && (
+            <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-xs text-accent">
+              {advancedOverrideCount} override{advancedOverrideCount === 1 ? "" : "s"} active
+            </span>
+          )}
+          <ChevronDown
+            size={16}
+            aria-hidden="true"
+            className={`shrink-0 text-muted transition-transform ${
+              advancedOpen ? "rotate-180" : ""
+            }`}
+          />
+        </label>
+
+        {advancedOpen && (
+          <div
+            id="advanced-run-options"
+            className="rounded-lg border border-border bg-bg/50 p-4"
+          >
+            <AdvancedRunFields
+              customCmakeText={customCmakeText}
+              hasCustomCmakeArgs={hasCustomCmakeArgs}
+              cmakeQuickSelections={executionSettings?.cmake_quick_selections ?? []}
+              selectedRunConfig={selectedRunConfig}
+              mpiRanks={mpiRanks}
+              opalxInfoLevel={opalxInfoLevel}
+              slurmForm={slurmForm}
+              slurmOverrideDirty={slurmOverrideDirty}
+              onMpiRanksChange={setMpiRanks}
+              onOpalxInfoLevelChange={setOpalxInfoLevel}
+              onCustomCmakeTextChange={setCustomCmakeText}
+              onSlurmFormChange={updateSlurmForm}
+              onSlurmReset={resetSlurmForm}
+            />
+          </div>
         )}
 
         {error && <p className="text-failed text-sm">{error}</p>}

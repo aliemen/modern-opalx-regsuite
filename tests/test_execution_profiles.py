@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from modern_opalx_regsuite.config import SuiteConfig
 from modern_opalx_regsuite.config_types import (
@@ -10,11 +13,14 @@ from modern_opalx_regsuite.config_types import (
     SlurmConfig,
 )
 from modern_opalx_regsuite.execution_profiles import (
+    ExecutionSettings,
     RunProfile,
     load_execution_settings,
     load_run_profiles,
     resolve_run_profile,
     run_profiles_referencing_key,
+    public_settings_path,
+    save_execution_settings,
     save_run_profiles,
     suite_config_with_profile,
 )
@@ -61,6 +67,54 @@ def test_public_settings_seed_from_legacy_arch_configs(tmp_path: Path) -> None:
     assert slurm.slurm is not None
     assert slurm.slurm.partition == "debug"
     assert settings.machine_presets[0].id == "local"
+    assert settings.cmake_quick_selections == []
+
+
+def test_public_settings_load_old_document_without_quick_selections(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    path = public_settings_path(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "build_presets": [],
+                "machine_presets": [],
+                "env_presets": [],
+                "slurm_presets": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_execution_settings(cfg)
+
+    assert settings.cmake_quick_selections == []
+
+
+def test_public_settings_validate_and_round_trip_cmake_quick_selections(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    saved = save_execution_settings(
+        cfg,
+        ExecutionSettings(
+            cmake_quick_selections=[" IPPL_GIT_TAG ", "Kokkos_VERSION"],
+        ),
+    )
+
+    assert saved.cmake_quick_selections == ["IPPL_GIT_TAG", "Kokkos_VERSION"]
+    assert load_execution_settings(cfg).cmake_quick_selections == [
+        "IPPL_GIT_TAG",
+        "Kokkos_VERSION",
+    ]
+
+    with pytest.raises(ValueError, match="duplicate names"):
+        ExecutionSettings(cmake_quick_selections=["IPPL_GIT_TAG", "IPPL_GIT_TAG"])
+    with pytest.raises(ValueError, match="must start with a letter or underscore"):
+        ExecutionSettings(cmake_quick_selections=["-DIPPL_GIT_TAG="])
 
 
 def test_user_profiles_migrate_connections_without_touching_keys(tmp_path: Path) -> None:

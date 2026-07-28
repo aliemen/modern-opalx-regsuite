@@ -9,7 +9,7 @@ Modern, portable regression test orchestration and web dashboard for OPALX.
 - **Web UI**: React + Tailwind dashboard with login, run trigger, live log streaming (SSE), results browsing, dashboard statistics, and live queue display.
 - **Test catalog**: Browse the local `regression-tests-x` clone by branch without checking it out. The catalog shows enabled/disabled tests, `.rt` metric checks, reference data, multi-container references, last status, and flaky suspects.
 - **Re-run from results**: A run detail page can prefill Start a Run with the original branch, tests branch, build preset, execution snapshot, and run options.
-- **Advanced CMake overrides**: Manual triggers can add one-off CMake arguments such as `-DIPPL_GIT_TAG=master`; custom args force a clean build and override matching configured `-D` values.
+- **Advanced CMake overrides**: Manual triggers keep basic settings visible while advanced options expand inline. Shared quick selections can insert one-off CMake arguments such as `-DIPPL_GIT_TAG=`; custom args force a clean build and override matching configured `-D` values.
 - **Artifact integrity checks**: Runs carry an `artifact-manifest.json`; CLI and API checks verify required JSON, logs, plots, hashes, and referenced artifacts.
 - **Flakiness signals**: Dashboard and catalog surfaces flag simulations with mixed pass/fail outcomes in the recent history for the same OPALX branch, regression-tests branch, and architecture.
 - **Per-machine run queuing**: Runs are queued per machine instead of rejected. Local and remote machines can run in parallel; only one run per physical host at a time.
@@ -169,6 +169,7 @@ gpus_per_task = 1
 After first login, edit these definitions in **Settings -> Execution**. The
 public settings store contains:
 
+- CMake quick selections: shared cache-variable names shown as quick-add buttons on the run form
 - build presets: CMake args, build jobs, default/max MPI ranks, OPALX info level
 - machine presets: local or SSH targets, public host/port/gateway shape, queue key
 - environment presets: `none`, `modules`, `prologue`, or `uenv`
@@ -246,6 +247,7 @@ stored document.
 
 | Field | Example | Notes |
 |---|---|---|
+| CMake quick selection | `IPPL_GIT_TAG` | Variable name only; the run form inserts `-DIPPL_GIT_TAG=` |
 | Build preset | `cuda-daint` | CMake args, build jobs, default/max MPI ranks, OPALX info level |
 | Machine preset | `daint-gh200` | Local or SSH target, public host/port/gateway shape, queue key |
 | Environment preset | `daint-uenv` | `none`, `modules`, `prologue`, or `uenv` activation |

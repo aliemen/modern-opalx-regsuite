@@ -35,6 +35,7 @@ vi.mock("./RunProfilesSection", () => ({
 function settingsFixture(): ExecutionSettings {
   return {
     version: 1,
+    cmake_quick_selections: [],
     build_presets: [
       {
         id: "cpu-serial",
@@ -131,7 +132,7 @@ describe("Execution public settings UI", () => {
     vi.clearAllMocks();
   });
 
-  it("renders public settings as a sub-tab with the three primary cards", async () => {
+  it("renders public settings as a sub-tab with the shared settings cards", async () => {
     apiMocks.getExecutionSettings.mockResolvedValue(settingsFixture());
     const user = userEvent.setup();
     renderWithClient(<ExecutionSection />);
@@ -148,9 +149,55 @@ describe("Execution public settings UI", () => {
     await user.click(screen.getByLabelText("Yes I know what I'm doing"));
     expect(continueButton).toBeEnabled();
     await user.click(continueButton);
+    expect(await screen.findByText("CMake Quick Selections")).toBeInTheDocument();
     expect(await screen.findByText("Build Presets")).toBeInTheDocument();
     expect(screen.getByText("Machine Presets")).toBeInTheDocument();
     expect(screen.getByText("Environment Presets")).toBeInTheDocument();
+  });
+
+  it("adds and removes global CMake quick selections", async () => {
+    const user = userEvent.setup();
+    renderPublicSettings();
+
+    const input = await screen.findByLabelText("CMake variable name");
+    await user.type(input, "IPPL_GIT_TAG{enter}");
+
+    await waitFor(() => expect(saveExecutionSettings).toHaveBeenCalledTimes(1));
+    expect(lastSavedSettings()).toEqual(
+      expect.objectContaining({
+        cmake_quick_selections: ["IPPL_GIT_TAG"],
+        build_presets: expect.arrayContaining([
+          expect.objectContaining({ id: "cpu-serial" }),
+        ]),
+      }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Remove CMake quick selection IPPL_GIT_TAG",
+      }),
+    );
+    await waitFor(() => expect(saveExecutionSettings).toHaveBeenCalledTimes(2));
+    expect(lastSavedSettings().cmake_quick_selections).toEqual([]);
+  });
+
+  it("rejects malformed and duplicate CMake quick selections", async () => {
+    const user = userEvent.setup();
+    renderPublicSettings();
+
+    const input = await screen.findByLabelText("CMake variable name");
+    await user.type(input, "-DIPPL_GIT_TAG=");
+    await user.click(screen.getByRole("button", { name: "Add selection" }));
+    expect(await screen.findByText(/Use a variable name starting/)).toBeInTheDocument();
+    expect(saveExecutionSettings).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, "IPPL_GIT_TAG{enter}");
+    await waitFor(() => expect(saveExecutionSettings).toHaveBeenCalledTimes(1));
+
+    await user.type(input, "IPPL_GIT_TAG{enter}");
+    expect(await screen.findByText("IPPL_GIT_TAG is already available.")).toBeInTheDocument();
+    expect(saveExecutionSettings).toHaveBeenCalledTimes(1);
   });
 
   it("adds a build preset and converts CMake args from one line per argument", async () => {

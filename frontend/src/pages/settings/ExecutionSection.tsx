@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { AlertTriangle, Database, PlaySquare, X } from "lucide-react";
+import { AlertTriangle, Database, ListX, PlaySquare, X } from "lucide-react";
 import { ExecutionSettingsSection } from "./ExecutionSettingsSection";
 import { RunProfilesSection } from "./RunProfilesSection";
+import { TestSkipConfigsSection } from "./TestSkipConfigsSection";
 
-type ExecutionTab = "profiles" | "public";
+type ExecutionTab = "profiles" | "public" | "skips";
 
 function tabCls(active: boolean): string {
   return active
@@ -53,8 +54,22 @@ export function ExecutionSection() {
           <Database size={15} />
           Public Settings
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("skips")}
+          className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition ${tabCls(tab === "skips")}`}
+        >
+          <ListX size={15} />
+          Test Skips
+        </button>
       </div>
-      {tab === "profiles" ? <RunProfilesSection /> : <ExecutionSettingsSection />}
+      {tab === "profiles" ? (
+        <RunProfilesSection />
+      ) : tab === "public" ? (
+        <ExecutionSettingsSection />
+      ) : (
+        <TestSkipConfigsSection />
+      )}
       {confirmOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"

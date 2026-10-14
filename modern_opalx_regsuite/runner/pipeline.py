@@ -361,7 +361,7 @@ def run_pipeline(
                 if excluded_cmd is None:
                     _append_pipeline_line(
                         paths.pipeline_log_path,
-                        "[unit] WARNING: skip config ignored, unit_test_command is not ctest.",
+                        "[unit] WARNING: skip config ignored, unit_test_command is not a plain ctest call.",
                     )
                 else:
                     unit_cmd = excluded_cmd

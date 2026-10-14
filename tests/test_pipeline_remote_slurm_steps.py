@@ -212,7 +212,7 @@ def test_pipeline_ignores_unit_skips_for_non_ctest_command(
         tmp_path / "data" / "runs" / "master" / "cpu-serial" / "custom-unit"
         / "logs" / "pipeline.log"
     ).read_text(encoding="utf-8")
-    assert "skip config ignored, unit_test_command is not ctest" in log
+    assert "skip config ignored, unit_test_command is not a plain ctest call" in log
 
 
 def test_phase_skip_switches_win_over_skip_config(tmp_path: Path, monkeypatch) -> None:

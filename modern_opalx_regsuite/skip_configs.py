@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 _TEST_NAME_RE = re.compile(r"^[A-Za-z0-9_.+-]+$")
 # Characters with special meaning in CMake/ctest regular expressions.
 _CMAKE_REGEX_SPECIALS = set("^$.[]*+?|()\\")
-_SHELL_OPERATORS = {"&&", "||", ";", "|"}
 
 
 def _normalize_names(values: list[str]) -> list[str]:
@@ -168,34 +167,86 @@ def _cmake_regex_escape(name: str) -> str:
     return "".join(f"\\{c}" if c in _CMAKE_REGEX_SPECIALS else c for c in name)
 
 
+def _shell_features(command: str) -> set[str]:
+    """Classify unquoted shell syntax in *command*.
+
+    ``chain``: ``;``, ``|``, ``&`` (not as part of a redirection) or a newline,
+    so text appended to the command would no longer belong to ctest.
+    ``comment``: an unquoted ``#`` at a word start; appended text would be
+    commented out. ``expansion``: variables, command substitution, globs,
+    ``~``, or redirections, whose meaning would change if the parsed tokens
+    were re-quoted with ``shlex.join``.
+    """
+    found: set[str] = set()
+    quote: Optional[str] = None
+    prev = " "
+    i = 0
+    while i < len(command):
+        c = command[i]
+        nxt = command[i + 1] if i + 1 < len(command) else ""
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            prev = "x"
+            i += 2
+            continue
+        elif quote == '"':
+            if c == '"':
+                quote = None
+            elif c in "$`":
+                found.add("expansion")
+        elif c in "'\"":
+            quote = c
+        elif c == "#" and prev.isspace():
+            found.add("comment")
+        elif c in ";|\n" or (c == "&" and prev != ">" and nxt != ">"):
+            found.add("chain")
+        elif c in "$`<>*?[{" or (c == "~" and prev.isspace()):
+            found.add("expansion")
+        prev = c
+        i += 1
+    return found
+
+
 def ctest_command_with_excludes(command: str, names: Sequence[str]) -> Optional[str]:
     """Return *command* with an anchored ctest ``-E`` regex excluding *names*.
 
-    An existing ``-E``/``--exclude-regex`` value is kept and OR-ed with the new
-    pattern. Returns ``None`` when *command* is not a direct ctest invocation
-    (env assignments, shell chains, wrapper scripts); callers then run all
-    tests. The result is shell-quoted, so it survives both the local
-    ``shlex.split`` launcher and the remote ``bash -c`` / ``srun`` wrapping.
+    Without an existing exclusion the quoted ``-E`` is appended to the
+    unchanged command, so shell syntax such as ``-j$(nproc)`` or ``2>&1``
+    keeps working on the remote ``bash -c`` / ``srun`` path. An existing
+    ``-E``/``--exclude-regex`` value (the last one) is OR-ed with the new
+    pattern; that requires re-serializing the command and is refused when the
+    command relies on shell expansions. Returns ``None`` when the skips cannot
+    be applied safely (not a direct ctest call, chained commands, comments);
+    callers then run all tests.
     """
     if not names:
         return command
+    features = _shell_features(command)
+    if "chain" in features or "comment" in features:
+        return None
     try:
         tokens = shlex.split(command)
     except ValueError:
         return None
     if not tokens or Path(tokens[0]).name != "ctest":
         return None
-    if any(t in _SHELL_OPERATORS for t in tokens):
-        return None
     pattern = "^(" + "|".join(_cmake_regex_escape(n) for n in names) + ")$"
-    for flag in ("-E", "--exclude-regex"):
-        if flag in tokens:
-            i = tokens.index(flag)
-            if i + 1 < len(tokens):
-                tokens[i + 1] = f"({tokens[i + 1]})|{pattern}"
-                return shlex.join(tokens)
-    return shlex.join([*tokens, "-E", pattern])
-
+    target: Optional[tuple[int, str]] = None
+    for i, token in enumerate(tokens):
+        if token in ("-E", "--exclude-regex") and i + 1 < len(tokens):
+            target = (i + 1, "")
+        elif token.startswith("--exclude-regex="):
+            target = (i, "--exclude-regex=")
+    if target is None:
+        return f"{command.rstrip()} -E {shlex.quote(pattern)}"
+    if "expansion" in features:
+        return None
+    index, prefix = target
+    existing = tokens[index][len(prefix):]
+    tokens[index] = prefix + (f"({existing})|{pattern}" if existing else pattern)
+    return shlex.join(tokens)
 
 class SkipCandidate(BaseModel):
     name: str

@@ -319,3 +319,51 @@ def test_suite_duration_excludes_runs_with_skip_config(tmp_path: Path) -> None:
     report = stats_developer.suite_duration(_user="u", cfg=cfg, view="active")
 
     assert report.cells[0].current_seconds == 1800.0
+
+
+def test_ctest_excludes_keep_shell_syntax_of_the_original_command() -> None:
+    assert ctest_command_with_excludes("ctest -j$(nproc) --output-on-failure", ["TestA"]) == (
+        "ctest -j$(nproc) --output-on-failure -E '^(TestA)$'"
+    )
+    assert ctest_command_with_excludes("ctest --output-on-failure 2>&1", ["TestA"]) == (
+        "ctest --output-on-failure 2>&1 -E '^(TestA)$'"
+    )
+    assert ctest_command_with_excludes("ctest --x&&echo hi", ["TestA"]) is None
+
+
+def test_ctest_excludes_merge_last_and_equals_form_or_give_up() -> None:
+    assert ctest_command_with_excludes("ctest --exclude-regex=Slow", ["TestA"]) == (
+        "ctest '--exclude-regex=(Slow)|^(TestA)$'"
+    )
+    assert ctest_command_with_excludes("ctest -E A -E B", ["TestA"]) == (
+        "ctest -E A -E '(B)|^(TestA)$'"
+    )
+    assert ctest_command_with_excludes("ctest -E ''", ["TestA"]) == (
+        "ctest -E '^(TestA)$'"
+    )
+    # Merging requires re-serializing the command; refuse when that would
+    # quote shell syntax the user relies on.
+    assert ctest_command_with_excludes("ctest -j$(nproc) -E Slow", ["TestA"]) is None
+
+
+def test_static_site_run_page_does_not_count_skipped_unit_tests_as_failed() -> None:
+    import modern_opalx_regsuite
+    from modern_opalx_regsuite import sitegen
+
+    env = sitegen._load_jinja_env(Path(modern_opalx_regsuite.__file__).parent)
+    html = env.get_template("run.html.j2").render(
+        meta={"branch": "master", "arch": "cpu-serial", "run_id": "r", "status": "passed"},
+        unit={
+            "tests": [
+                {"name": "TestFast", "status": "passed"},
+                {"name": "TestOrbitThreader", "status": "skipped"},
+            ]
+        },
+        regression={"simulations": []},
+        branch="master",
+        arch="cpu-serial",
+        run_id="r",
+    )
+
+    assert "failed</span>" not in html
+    assert "1 skipped" in html

@@ -180,6 +180,9 @@ export function RunDetailPage() {
     rerunParams.set("slurm_preset_id", executionSnapshot.slurm?.id ?? "");
   }
   addSlurmRerunParams(rerunParams, slurmResources);
+  if (meta.run_options?.skip_config?.id) {
+    rerunParams.set("skip_config_id", meta.run_options.skip_config.id);
+  }
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">

@@ -13,6 +13,7 @@ import {
   getExecutionSettings,
   getRunProfilesForTrigger,
 } from "../api/executionProfiles";
+import { listSkipConfigs, skipSummary } from "../api/skipConfigs";
 import { InteractiveGatewayFields } from "./trigger/InteractiveGatewayFields";
 import { RuntimeFields } from "./trigger/RuntimeFields";
 import {
@@ -54,6 +55,10 @@ export function TriggerPage() {
     searchParams.get("regtests_branch") ?? "master"
   );
   const [profileId, setProfileId] = useState(searchParams.get("profile_id") ?? "");
+  const [skipConfigId, setSkipConfigId] = useState(
+    searchParams.get("skip_config_id") ?? ""
+  );
+  const [skipConfigNote, setSkipConfigNote] = useState<string | null>(null);
   const [skipUnit, setSkipUnit] = useState(searchParams.get("skip_unit") === "true");
   const [skipRegression, setSkipRegression] = useState(
     searchParams.get("skip_regression") === "true"
@@ -105,6 +110,23 @@ export function TriggerPage() {
     queryKey: ["execution-settings"],
     queryFn: getExecutionSettings,
   });
+
+  const { data: skipConfigs } = useQuery({
+    queryKey: ["skip-configs"],
+    queryFn: listSkipConfigs,
+  });
+  const selectedSkipConfig =
+    skipConfigs?.find((config) => config.id === skipConfigId) ?? null;
+
+  // "Run again" may point at a skip config that was deleted since; fall back
+  // to running every test and say so instead of failing at trigger time.
+  useEffect(() => {
+    if (!skipConfigs || skipConfigId === "" || selectedSkipConfig) return;
+    setSkipConfigId("");
+    setSkipConfigNote(
+      "The skip config used by the source run no longer exists; all tests will run."
+    );
+  }, [skipConfigs, skipConfigId, selectedSkipConfig]);
 
   useEffect(() => {
     if (!opalxBranches || opalxBranches.includes(opalxBranch)) return;
@@ -289,6 +311,9 @@ export function TriggerPage() {
       if (slurmOverrideDirty) {
         body.slurm_resources = slurmResourcesFromForm(slurmForm);
       }
+      if (selectedSkipConfig) {
+        body.skip_config_id = selectedSkipConfig.id;
+      }
       const rerunBranch = searchParams.get("rerun_branch");
       const rerunArch = searchParams.get("rerun_arch");
       const rerunId = searchParams.get("rerun_id");
@@ -424,6 +449,41 @@ export function TriggerPage() {
             <p className="text-failed text-xs mt-1">
               {selectedRunConfig.validation_errors.join("; ")}
             </p>
+          )}
+        </div>
+
+        {/* Test skip config */}
+        <div>
+          <label htmlFor="skip-config" className="block text-sm text-muted mb-1">
+            Test skip config
+          </label>
+          <select
+            id="skip-config"
+            value={skipConfigId}
+            onChange={(e) => {
+              setSkipConfigId(e.target.value);
+              setSkipConfigNote(null);
+            }}
+            className="w-full bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+          >
+            <option value="">None (run all tests)</option>
+            {(skipConfigs ?? []).map((config) => (
+              <option key={config.id} value={config.id}>
+                {config.name}
+              </option>
+            ))}
+          </select>
+          {selectedSkipConfig && (
+            <p className="text-muted text-xs mt-1 break-words">
+              {skipSummary(selectedSkipConfig)}:{" "}
+              {[
+                ...selectedSkipConfig.regression_tests,
+                ...selectedSkipConfig.unit_tests,
+              ].join(", ")}
+            </p>
+          )}
+          {skipConfigNote && (
+            <p className="text-broken text-xs mt-1">{skipConfigNote}</p>
           )}
         </div>
 

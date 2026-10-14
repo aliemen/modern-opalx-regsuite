@@ -86,6 +86,24 @@ vi.mock("../api/executionProfiles", async () => {
   };
 });
 
+vi.mock("../api/skipConfigs", async () => {
+  const actual = await vi.importActual<typeof import("../api/skipConfigs")>(
+    "../api/skipConfigs",
+  );
+  return {
+    ...actual,
+    listSkipConfigs: vi.fn(async () => [
+      {
+        id: "slow",
+        name: "Slow on CPU",
+        description: null,
+        unit_tests: ["TestOrbitThreader"],
+        regression_tests: ["DBA-COF-Gauss"],
+      },
+    ]),
+  };
+});
+
 function renderPage(url: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -420,5 +438,37 @@ describe("TriggerPage rerun prefill", () => {
         expect.not.objectContaining({ slurm_resources: expect.anything() })
       );
     });
+  });
+
+  it("sends the chosen skip config id", async () => {
+    vi.mocked(triggerRun).mockResolvedValue({
+      run_id: "r",
+      queued: true,
+      queue_id: "q",
+      position: 1,
+    });
+    const user = userEvent.setup();
+    renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial");
+
+    const select = await screen.findByLabelText("Test skip config");
+    await screen.findByRole("option", { name: "Slow on CPU" });
+    await user.selectOptions(select, "slow");
+    expect(screen.getByText(/skips 1 regression, 1 unit/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+
+    await waitFor(() =>
+      expect(triggerRun).toHaveBeenCalledWith(
+        expect.objectContaining({ skip_config_id: "slow" }),
+      ),
+    );
+  });
+
+  it("falls back to no skips when the rerun skip config was deleted", async () => {
+    renderPage(
+      "/trigger?branch=master&regtests_branch=master&arch=cpu-serial&skip_config_id=deleted",
+    );
+
+    expect(await screen.findByText(/no longer exists/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Test skip config")).toHaveValue("");
   });
 });

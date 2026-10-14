@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunDetailPage } from "./RunDetailPage";
-import { getRunDetail } from "../../api/results";
+import { getRunDetail, type RunDetail } from "../../api/results";
 import { getRunIntegrity } from "../../api/integrity";
 
 vi.mock("../../api/results", async () => {
@@ -42,79 +42,84 @@ function renderPage() {
   );
 }
 
+function detailFixture(): RunDetail {
+  return {
+    meta: {
+      branch: "master",
+      arch: "cpu-serial",
+      run_id: "source",
+      started_at: "2026-04-01T00:00:00+00:00",
+      finished_at: "2026-04-01T00:01:00+00:00",
+      status: "passed",
+      opalx_commit: "abc",
+      tests_repo_commit: "def",
+      regtest_branch: "master",
+      connection_name: "local",
+      triggered_by: "demo-user",
+      unit_tests_total: 1,
+      unit_tests_failed: 0,
+      regression_total: 1,
+      regression_passed: 1,
+      regression_failed: 0,
+      regression_broken: 0,
+      archived: false,
+      public: false,
+      run_options: {
+        skip_unit: true,
+        skip_regression: false,
+        clean_build: true,
+        custom_cmake_args: ["-DIPPL_GIT_TAG=master"],
+        mpi_ranks: 2,
+        opalx_info_level: 4,
+        slurm_resources: {
+          partition: "debug",
+          nodes: 1,
+          tasks_per_node: 2,
+          cpus_per_task: 16,
+          gpus: 1,
+          gpus_per_task: null,
+        },
+      },
+      execution_snapshot: {
+        build: {
+          id: "cpu-serial",
+          name: "CPU serial",
+          cmake_args: ["-DBUILD_TYPE=Release"],
+          build_jobs: 8,
+          mpi_ranks: 1,
+          max_mpi_ranks: 4,
+          opalx_info_level: 2,
+        },
+        machine: {
+          id: "local",
+          name: "Local",
+          kind: "local",
+          host: null,
+          port: 22,
+          gateway_host: null,
+          gateway_port: null,
+          gateway_auth_method: null,
+          queue_key: "local",
+        },
+        environment: null,
+        slurm: null,
+      },
+      rerun_of: null,
+    },
+    unit: { tests: [] },
+    regression: { simulations: [] },
+    archived_on_cold_storage: false,
+  };
+}
+
 describe("RunDetailPage", () => {
   afterEach(() => {
+    cleanup();
     vi.clearAllMocks();
   });
 
   it("links Run again with source run parameters", async () => {
-    vi.mocked(getRunDetail).mockResolvedValue({
-      meta: {
-        branch: "master",
-        arch: "cpu-serial",
-        run_id: "source",
-        started_at: "2026-04-01T00:00:00+00:00",
-        finished_at: "2026-04-01T00:01:00+00:00",
-        status: "passed",
-        opalx_commit: "abc",
-        tests_repo_commit: "def",
-        regtest_branch: "master",
-        connection_name: "local",
-        triggered_by: "demo-user",
-        unit_tests_total: 1,
-        unit_tests_failed: 0,
-        regression_total: 1,
-        regression_passed: 1,
-        regression_failed: 0,
-        regression_broken: 0,
-        archived: false,
-        public: false,
-        run_options: {
-          skip_unit: true,
-          skip_regression: false,
-          clean_build: true,
-          custom_cmake_args: ["-DIPPL_GIT_TAG=master"],
-          mpi_ranks: 2,
-          opalx_info_level: 4,
-          slurm_resources: {
-            partition: "debug",
-            nodes: 1,
-            tasks_per_node: 2,
-            cpus_per_task: 16,
-            gpus: 1,
-            gpus_per_task: null,
-          },
-        },
-        execution_snapshot: {
-          build: {
-            id: "cpu-serial",
-            name: "CPU serial",
-            cmake_args: ["-DBUILD_TYPE=Release"],
-            build_jobs: 8,
-            mpi_ranks: 1,
-            max_mpi_ranks: 4,
-            opalx_info_level: 2,
-          },
-          machine: {
-            id: "local",
-            name: "Local",
-            kind: "local",
-            host: null,
-            port: 22,
-            gateway_host: null,
-            gateway_port: null,
-            gateway_auth_method: null,
-            queue_key: "local",
-          },
-          environment: null,
-          slurm: null,
-        },
-        rerun_of: null,
-      },
-      unit: { tests: [] },
-      regression: { simulations: [] },
-      archived_on_cold_storage: false,
-    });
+    vi.mocked(getRunDetail).mockResolvedValue(detailFixture());
     vi.mocked(getRunIntegrity).mockResolvedValue({
       status: "ok",
       issues: [],
@@ -145,5 +150,26 @@ describe("RunDetailPage", () => {
     expect(await screen.findByText("Custom CMake Args")).toBeInTheDocument();
     expect(screen.getByText("-DIPPL_GIT_TAG=master")).toBeInTheDocument();
     expect(screen.getByText("master · CPU serial")).toBeInTheDocument();
+  });
+
+  it("prefills the skip config on Run again", async () => {
+    const detail = detailFixture();
+    detail.meta.run_options.skip_config = {
+      id: "slow",
+      name: "Slow on CPU",
+      unit_tests: ["TestOrbitThreader"],
+      regression_tests: ["DBA-COF-Gauss"],
+    };
+    vi.mocked(getRunDetail).mockResolvedValue(detail);
+    vi.mocked(getRunIntegrity).mockResolvedValue({
+      status: "ok",
+      issues: [],
+      manifest: null,
+    });
+
+    renderPage();
+    const link = await screen.findByRole("link", { name: /Run again/i });
+
+    expect(link.getAttribute("href") ?? "").toContain("skip_config_id=slow");
   });
 });

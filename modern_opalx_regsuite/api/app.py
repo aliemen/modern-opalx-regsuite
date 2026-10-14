@@ -317,6 +317,10 @@ def create_app() -> FastAPI:
     from .execution_settings import router as execution_settings_router
     app.include_router(execution_settings_router)
 
+    # Global test skip configs, picked per run on Start Run.
+    from .skip_configs import router as skip_configs_router
+    app.include_router(skip_configs_router)
+
     # API-key management router (per-user). JWT-only; the keys themselves are
     # scoped to the SSH-keys endpoints above.
     from .api_keys import router as api_keys_router

@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from modern_opalx_regsuite import skip_configs as skip_module
+from modern_opalx_regsuite.catalog import CatalogReport, CatalogTestEntry
 from modern_opalx_regsuite.config import SuiteConfig
 from modern_opalx_regsuite.data_model import (
     RegressionSimulation,
@@ -18,6 +20,7 @@ from modern_opalx_regsuite.data_model import (
 )
 from modern_opalx_regsuite.skip_configs import (
     SkipConfigInput,
+    collect_skip_candidates,
     create_skip_config,
     ctest_command_with_excludes,
     delete_skip_config,
@@ -181,3 +184,105 @@ def test_ctest_excludes_return_none_for_non_ctest_commands() -> None:
         "/usr/bin/ctest -E '^(TestA)$'"
     )
     assert ctest_command_with_excludes("./run-unit.sh", []) == "./run-unit.sh"
+
+
+def _write(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _seed_run(
+    data: Path, run_id: str, started: str, unit: dict, sims: dict, archived=False
+) -> dict:
+    root = data / "runs" / "master" / "cpu-serial" / run_id
+    _write(
+        root / "unit-tests.json",
+        {
+            "tests": [
+                {"name": n, "status": s, "duration_seconds": d}
+                for n, (s, d) in unit.items()
+            ]
+        },
+    )
+    _write(
+        root / "regression-tests.json",
+        {
+            "simulations": [
+                {"name": n, "state": s, "duration_seconds": d}
+                for n, (s, d) in sims.items()
+            ]
+        },
+    )
+    return {
+        "branch": "master",
+        "arch": "cpu-serial",
+        "run_id": run_id,
+        "started_at": started,
+        "finished_at": started,
+        "status": "passed",
+        "archived": archived,
+    }
+
+
+def test_candidates_rank_by_median_duration_and_ignore_skips(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = _cfg(tmp_path)
+    data = tmp_path / "data"
+    entries = [
+        _seed_run(
+            data,
+            "r2",
+            "2026-10-02T00:00:00+00:00",
+            {"TestOrbitThreader": ("skipped", None), "TestFast": ("passed", 1.0)},
+            {"DBA-COF-Gauss": ("skipped", None), "FodoCell": ("passed", 10.0)},
+        ),
+        _seed_run(
+            data,
+            "r1",
+            "2026-10-01T00:00:00+00:00",
+            {"TestOrbitThreader": ("passed", 46.0), "TestFast": ("passed", 3.0)},
+            {"DBA-COF-Gauss": ("passed", 289.0), "FodoCell": ("passed", 12.0)},
+        ),
+        _seed_run(
+            data,
+            "old",
+            "2026-09-01T00:00:00+00:00",
+            {"TestArchivedOnly": ("passed", 999.0)},
+            {},
+            archived=True,
+        ),
+    ]
+    _write(data / "runs-index" / "master" / "cpu-serial.json", entries)
+    monkeypatch.setattr(
+        skip_module,
+        "list_catalog_tests",
+        lambda *_a, **_k: CatalogReport(
+            branch="master",
+            tests=[
+                CatalogTestEntry(
+                    name="FodoCell", enabled=True, path="RegressionTests/FodoCell"
+                ),
+                CatalogTestEntry(
+                    name="DBA-COF-Gauss",
+                    enabled=True,
+                    path="RegressionTests/DBA-COF-Gauss",
+                ),
+                CatalogTestEntry(
+                    name="NeverRun", enabled=True, path="RegressionTests/NeverRun"
+                ),
+            ],
+        ),
+    )
+
+    result = collect_skip_candidates(cfg)
+
+    assert [(c.name, c.median_seconds) for c in result.regression] == [
+        ("DBA-COF-Gauss", 289.0),
+        ("FodoCell", 11.0),
+        ("NeverRun", None),
+    ]
+    assert [(c.name, c.median_seconds) for c in result.unit] == [
+        ("TestOrbitThreader", 46.0),
+        ("TestFast", 2.0),
+    ]

@@ -9,12 +9,15 @@ import json
 import logging
 import re
 import shlex
+import statistics
 from pathlib import Path
 from typing import Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .data_model import SkipConfigSnapshot
+from .archive_service import filter_entries_by_view
+from .catalog import list_catalog_tests
+from .data_model import SkipConfigSnapshot, run_dir
 from .execution_profiles import _slug, _validate_id, _write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -192,3 +195,93 @@ def ctest_command_with_excludes(command: str, names: Sequence[str]) -> Optional[
                 tokens[i + 1] = f"({tokens[i + 1]})|{pattern}"
                 return shlex.join(tokens)
     return shlex.join([*tokens, "-E", pattern])
+
+
+class SkipCandidate(BaseModel):
+    name: str
+    median_seconds: Optional[float] = None
+
+
+class SkipCandidates(BaseModel):
+    regression: list[SkipCandidate] = Field(default_factory=list)
+    unit: list[SkipCandidate] = Field(default_factory=list)
+
+
+def _recent_finished_entries(data_root: Path, limit: int) -> list[dict]:
+    entries: list[dict] = []
+    index_root = data_root / "runs-index"
+    if not index_root.is_dir():
+        return entries
+    for path in index_root.rglob("*.json"):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(raw, list):
+            entries.extend(
+                e
+                for e in filter_entries_by_view(raw, "active")
+                if e.get("status") in {"passed", "failed"}
+            )
+    entries.sort(key=lambda e: str(e.get("started_at", "")), reverse=True)
+    return entries[:limit]
+
+
+def _durations(
+    data_root: Path, entries: list[dict], filename: str, key: str
+) -> dict[str, list[float]]:
+    out: dict[str, list[float]] = {}
+    for e in entries:
+        try:
+            path = run_dir(data_root, e["branch"], e["arch"], e["run_id"]) / filename
+            items = json.loads(path.read_text(encoding="utf-8")).get(key, [])
+        except (KeyError, OSError, ValueError, AttributeError):
+            continue
+        for item in items:
+            name = item.get("name")
+            if not name:
+                continue
+            # Skipped entries register the name but contribute no duration.
+            durations = out.setdefault(name, [])
+            state = (item.get("status") or item.get("state") or "").lower()
+            if state != "skipped" and isinstance(
+                item.get("duration_seconds"), (int, float)
+            ):
+                durations.append(float(item["duration_seconds"]))
+    return out
+
+
+def _ranked(names: list[str], durations: dict[str, list[float]]) -> list[SkipCandidate]:
+    candidates = [
+        SkipCandidate(
+            name=n,
+            median_seconds=statistics.median(durations[n]) if durations.get(n) else None,
+        )
+        for n in names
+    ]
+    return sorted(
+        candidates,
+        key=lambda c: (c.median_seconds is None, -(c.median_seconds or 0.0), c.name.lower()),
+    )
+
+
+def collect_skip_candidates(cfg: "SuiteConfig", recent_runs: int = 10) -> SkipCandidates:  # type: ignore[name-defined]
+    """Names to offer in the skip config editor, slowest first.
+
+    Regression names come from the catalog of the configured regtests branch
+    (enabled tests only), falling back to recently run simulations. Unit names
+    have no catalog, so they are the names seen in the most recent finished,
+    non-archived runs. Medians ignore skipped entries.
+    """
+    data_root = cfg.resolved_data_root
+    entries = _recent_finished_entries(data_root, recent_runs)
+    reg_durations = _durations(data_root, entries, "regression-tests.json", "simulations")
+    unit_durations = _durations(data_root, entries, "unit-tests.json", "tests")
+    catalog = list_catalog_tests(
+        cfg.resolved_regtests_repo_root, cfg.regtests_branch, include_disabled=False
+    )
+    reg_names = [t.name for t in catalog.tests] or sorted(reg_durations)
+    return SkipCandidates(
+        regression=_ranked(reg_names, reg_durations),
+        unit=_ranked(sorted(unit_durations), unit_durations),
+    )

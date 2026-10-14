@@ -14,9 +14,12 @@ from ..data_model import (
     RerunReference,
     RunMeta,
     RunOptions,
+    SkipConfigSnapshot,
+    UnitTestCase,
     UnitTestsReport,
     RegressionTestsReport,
 )
+from ..skip_configs import ctest_command_with_excludes
 from .cmake import build_cmake_command, merge_cmake_args, normalize_custom_cmake_args
 from .execution import (
     _append_pipeline_line,
@@ -56,6 +59,7 @@ def run_pipeline(
     opalx_info_level: Optional[int] = None,
     slurm_resources: Optional[SlurmResources] = None,
     execution_snapshot: Optional[ExecutionSnapshot] = None,
+    skip_config: Optional[SkipConfigSnapshot] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
 ) -> RunMeta:
@@ -115,12 +119,22 @@ def run_pipeline(
             mpi_ranks=run_options.mpi_ranks,
             opalx_info_level=run_options.opalx_info_level,
             slurm_resources=run_options.persisted_slurm_resources,
+            skip_config=skip_config,
         ),
         execution_snapshot=execution_snapshot,
         rerun_of=rerun_of,
     )
     meta.regtest_branch = cfg.regtests_branch
     _write_json(paths.meta_path, meta.model_dump())
+    if skip_config is not None:
+        _append_pipeline_line(
+            paths.pipeline_log_path,
+            f"[skip-config] Using test skip config '{skip_config.name}': "
+            f"{len(skip_config.unit_tests)} unit, "
+            f"{len(skip_config.regression_tests)} regression.",
+        )
+    skip_unit_names = list(skip_config.unit_tests) if skip_config else []
+    skip_regression_names = list(skip_config.regression_tests) if skip_config else []
 
     base_cmake_args = ac.cmake_args if ac.cmake_args is not None else cfg.cmake_args
     effective_cmake_args = merge_cmake_args(
@@ -340,9 +354,25 @@ def run_pipeline(
         # ── Phase: unit ───────────────────────────────────────────────────────
         _phase(paths.pipeline_log_path, "unit")
         if build_ok and not skip_unit and cfg.unit_test_command:
+            unit_cmd = cfg.unit_test_command
+            unit_skips_applied = False
+            if skip_unit_names:
+                excluded_cmd = ctest_command_with_excludes(unit_cmd, skip_unit_names)
+                if excluded_cmd is None:
+                    _append_pipeline_line(
+                        paths.pipeline_log_path,
+                        "[unit] WARNING: skip config ignored, unit_test_command is not ctest.",
+                    )
+                else:
+                    unit_cmd = excluded_cmd
+                    unit_skips_applied = True
+                    _append_pipeline_line(
+                        paths.pipeline_log_path,
+                        f"[unit] Skipping by config: {', '.join(skip_unit_names)}",
+                    )
             if is_remote and remote is not None:
                 rc = remote.run_command(
-                    cfg.unit_test_command,
+                    unit_cmd,
                     remote_cwd=remote_build,  # type: ignore[arg-type]
                     log_path=paths.unit_log_path,
                     cancel_event=cancel_event,
@@ -358,7 +388,7 @@ def run_pipeline(
                 output = paths.unit_log_path.read_text(encoding="utf-8", errors="replace")
             else:
                 rc, output = _run_command(
-                    cfg.unit_test_command,
+                    unit_cmd,
                     cwd=build_dir,
                     log_path=paths.unit_log_path,
                     pipeline_log_path=paths.pipeline_log_path,
@@ -366,12 +396,21 @@ def run_pipeline(
                     cancel_event=cancel_event,
                 )
             unit_report = _parse_unit_output(output)
+            if unit_skips_applied:
+                unit_report.tests.extend(
+                    UnitTestCase(name=name, status="skipped") for name in skip_unit_names
+                )
             meta.unit_tests_total = unit_report.total
             meta.unit_tests_failed = unit_report.failed
+            meta.unit_tests_skipped = unit_report.skipped
+            skipped_note = (
+                f", {unit_report.skipped} skipped" if unit_report.skipped else ""
+            )
             _append_pipeline_line(
                 paths.pipeline_log_path,
                 f"[{connection_name}] Unit tests done: "
-                f"{unit_report.total - unit_report.failed}/{unit_report.total} passed.",
+                f"{unit_report.total - unit_report.failed}/{unit_report.total} passed"
+                f"{skipped_note}.",
             )
             if rc != 0 and meta.status == "running":
                 meta.status = "failed"
@@ -407,6 +446,7 @@ def run_pipeline(
                     run_id=run_id,
                     pipeline_log_path=paths.pipeline_log_path,
                     cancel_event=cancel_event,
+                    skip_tests=skip_regression_names,
                 )
             else:
                 reg_report = _run_regression_suite(
@@ -418,11 +458,13 @@ def run_pipeline(
                     opalx_info_level=run_options.opalx_info_level,
                     cancel_event=cancel_event,
                     base_env=module_env,
+                    skip_tests=skip_regression_names,
                 )
             meta.regression_total = reg_report.total
             meta.regression_passed = reg_report.passed
             meta.regression_failed = reg_report.failed
             meta.regression_broken = reg_report.broken
+            meta.regression_skipped = reg_report.skipped
             if (
                 meta.regression_failed > 0 or meta.regression_broken > 0
             ) and meta.status == "running":

@@ -10,6 +10,7 @@ import {
 } from "../api/runs";
 import { LogViewer } from "../components/LogViewer";
 import { StatusBadge } from "../components/StatusBadge";
+import { applyTrackerLine, type TestInfo } from "./live/testTracker";
 
 // ── Elapsed timer ────────────────────────────────────────────────────────────
 
@@ -28,15 +29,6 @@ function useElapsed(startedAt: string | undefined) {
 }
 
 // ── Test tracker ─────────────────────────────────────────────────────────────
-
-type TestStatus = "running" | "passed" | "failed" | "broken" | "cancelled";
-
-interface TestInfo {
-  name: string;
-  status: TestStatus;
-  startTime: number;
-  durationMs: number | null;
-}
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -68,7 +60,8 @@ function TestTrackerPanel({
   const failedCount = tests.filter((t) => t.status === "failed").length;
   const brokenCount = tests.filter((t) => t.status === "broken").length;
   const runningCount = tests.filter((t) => t.status === "running").length;
-  const totalCount = tests.length;
+  const skippedCount = tests.filter((t) => t.status === "skipped").length;
+  const executedCount = tests.length - skippedCount;
 
   return (
     <div className="flex flex-col h-[60vh]">
@@ -88,6 +81,9 @@ function TestTrackerPanel({
             {runningCount > 0 && (
               <span className="text-accent ml-1.5">{runningCount} running</span>
             )}
+            {skippedCount > 0 && (
+              <span className="text-muted ml-1.5">{skippedCount} skipped</span>
+            )}
           </p>
         )}
       </div>
@@ -101,13 +97,14 @@ function TestTrackerPanel({
           }`}
         >
           <span className="font-medium">
-            {passedCount}/{totalCount} passed
+            {passedCount}/{executedCount} passed
           </span>
           <span className="text-muted tabular-nums">
             {failedCount > 0 && `${failedCount} failed`}
             {failedCount > 0 && brokenCount > 0 && " · "}
             {brokenCount > 0 && `${brokenCount} broken`}
             {failedCount === 0 && brokenCount === 0 && "all passed"}
+            {skippedCount > 0 && ` · ${skippedCount} skipped`}
           </span>
         </div>
       )}
@@ -126,6 +123,8 @@ function TestTrackerPanel({
             const el =
               test.status === "running"
                 ? fmtMs(now - test.startTime)
+                : test.status === "skipped"
+                ? "skipped"
                 : test.durationMs != null
                 ? fmtMs(test.durationMs)
                 : "—";
@@ -141,6 +140,8 @@ function TestTrackerPanel({
                 ? "bg-broken"
                 : test.status === "cancelled"
                 ? "bg-cancelled"
+                : test.status === "skipped"
+                ? "bg-muted/40"
                 : "bg-muted";
 
             return (
@@ -347,64 +348,10 @@ export function LiveRunPage() {
     });
   }, [tests, phase, finalStatus, cancelling, runId, cachedBranch, cachedArch]);
 
-  // Parse regression test START/END lines from the log stream.
-  const handleLogLine = useCallback(
-    (line: string) => {
-      const startMatch = line.match(/\[regression\] START (\S+)/);
-      if (startMatch) {
-        const name = startMatch[1];
-        setTests((prev) => {
-          if (prev.some((t) => t.name === name)) return prev;
-          return [
-            ...prev,
-            { name, status: "running", startTime: Date.now(), durationMs: null },
-          ];
-        });
-        return;
-      }
-      const endMatch = line.match(/\[regression\] END (\S+) state=(\S+)/);
-      if (endMatch) {
-        const name = endMatch[1];
-        const state = endMatch[2] as TestStatus;
-        // Backend now embeds duration_ms=... in the END line so late-arriving
-        // subscribers can still show the correct elapsed time. Fall back to
-        // the local Date.now() diff only if the field is missing (older runs).
-        const durationMatch = line.match(/\bduration_ms=(\d+)\b/);
-        const authoritativeMs = durationMatch
-          ? parseInt(durationMatch[1], 10)
-          : null;
-        setTests((prev) => {
-          const existing = prev.find((t) => t.name === name);
-          if (!existing) {
-            // Late subscriber: START scrolled off before we connected.
-            // Synthesize a row so the user sees it as a completed entry.
-            return [
-              ...prev,
-              {
-                name,
-                status: state,
-                startTime: Date.now(),
-                durationMs: authoritativeMs,
-              },
-            ];
-          }
-          return prev.map((t) =>
-            t.name === name && t.status === "running"
-              ? {
-                  ...t,
-                  status: state,
-                  durationMs:
-                    authoritativeMs !== null
-                      ? authoritativeMs
-                      : Date.now() - t.startTime,
-                }
-              : t
-          );
-        });
-      }
-    },
-    []
-  );
+  // Parse regression test SKIP/START/END lines from the log stream.
+  const handleLogLine = useCallback((line: string) => {
+    setTests((prev) => applyTrackerLine(prev, line, Date.now()));
+  }, []);
 
   async function handleCancel() {
     if (!runId) return;

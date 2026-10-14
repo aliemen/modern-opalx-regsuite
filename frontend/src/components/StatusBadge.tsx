@@ -10,6 +10,7 @@ const MAP: Record<string, string> = {
   crashed: "bg-crashed/20 text-crashed border border-crashed/40",
   running: "bg-accent/20 text-accent border border-accent/40 animate-pulse",
   cancelled: "bg-cancelled/20 text-cancelled border border-cancelled/40",
+  skipped: "bg-muted/10 text-muted border border-dashed border-muted/50",
   unknown: "bg-muted/20 text-muted border border-muted/40",
 };
 

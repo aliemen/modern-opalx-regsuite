@@ -37,6 +37,8 @@ export interface TriggerRequest {
   gateway_password?: string;
   gateway_otp?: string;
   rerun_of?: RerunReference;
+  /** Test skip config id; resolved and frozen by the backend at trigger time. */
+  skip_config_id?: string | null;
 }
 
 export interface SlurmResources {

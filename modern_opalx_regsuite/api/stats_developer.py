@@ -321,6 +321,8 @@ def suite_duration(
 
     Only considers runs with ``branch="master"`` AND ``regtest_branch="master"``.
     Pre-regtest-branch-tracking runs (``regtest_branch=None``) are excluded.
+    Runs that used a test skip config are excluded, so shortened runs do not
+    read as a speed-up.
     """
     data_root = cfg.resolved_data_root
     out: list[SuiteDurationCell] = []
@@ -329,7 +331,10 @@ def suite_duration(
             _load_index(data_root, "master", arch, view)
         )
         completed = [
-            e for e in entries if e.get("status") in ("passed", "failed")
+            e
+            for e in entries
+            if e.get("status") in ("passed", "failed")
+            and not (e.get("run_options") or {}).get("skip_config")
         ]
         if not completed:
             out.append(SuiteDurationCell(arch=arch))

@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from modern_opalx_regsuite import skip_configs as skip_module
+from modern_opalx_regsuite.api import stats_developer
 from modern_opalx_regsuite.catalog import CatalogReport, CatalogTestEntry
 from modern_opalx_regsuite.config import SuiteConfig
 from modern_opalx_regsuite.data_model import (
@@ -286,3 +287,35 @@ def test_candidates_rank_by_median_duration_and_ignore_skips(
         ("TestOrbitThreader", 46.0),
         ("TestFast", 2.0),
     ]
+
+
+def test_suite_duration_excludes_runs_with_skip_config(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    data = tmp_path / "data"
+    _write(data / "branches.json", {"master": ["cpu-serial"]})
+
+    def entry(run_id: str, start: str, end: str, skip: bool) -> dict:
+        return {
+            "branch": "master",
+            "arch": "cpu-serial",
+            "run_id": run_id,
+            "started_at": start,
+            "finished_at": end,
+            "status": "passed",
+            "regtest_branch": "master",
+            "run_options": (
+                {"skip_config": {"id": "slow", "name": "Slow"}} if skip else {}
+            ),
+        }
+
+    _write(
+        data / "runs-index" / "master" / "cpu-serial.json",
+        [
+            entry("fast", "2026-10-03T00:00:00+00:00", "2026-10-03T00:10:00+00:00", True),
+            entry("full", "2026-10-02T00:00:00+00:00", "2026-10-02T00:30:00+00:00", False),
+        ],
+    )
+
+    report = stats_developer.suite_duration(_user="u", cfg=cfg, view="active")
+
+    assert report.cells[0].current_seconds == 1800.0

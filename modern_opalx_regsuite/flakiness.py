@@ -156,6 +156,8 @@ def compute_flakiness(
             continue
         for sim in report.simulations:
             outcome = simulation_outcome(sim)
+            if outcome == "skipped":
+                continue  # skipped by a test skip config; not an observation
             bucket = counts.setdefault(
                 sim.name,
                 {

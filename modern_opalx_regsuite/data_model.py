@@ -73,7 +73,8 @@ class UnitTestsReport(BaseModel):
 
     @property
     def total(self) -> int:
-        return len(self.tests)
+        """Executed tests only; ``skipped`` placeholders are excluded."""
+        return sum(1 for t in self.tests if t.status.lower() != "skipped")
 
     @property
     def passed(self) -> int:
@@ -82,6 +83,10 @@ class UnitTestsReport(BaseModel):
     @property
     def failed(self) -> int:
         return sum(1 for t in self.tests if t.status.lower() == "failed")
+
+    @property
+    def skipped(self) -> int:
+        return sum(1 for t in self.tests if t.status.lower() == "skipped")
 
 
 class RegressionTestsReport(BaseModel):
@@ -114,6 +119,24 @@ class RegressionTestsReport(BaseModel):
     def crashed(self) -> int:
         return sum(1 for m in self.all_metrics if m.state.lower() == "crashed")
 
+    @property
+    def skipped(self) -> int:
+        """Simulations skipped by a test skip config (they carry no metrics)."""
+        return sum(1 for s in self.simulations if (s.state or "").lower() == "skipped")
+
+
+class SkipConfigSnapshot(BaseModel):
+    """Test skip config frozen at trigger time.
+
+    Stored under ``data_root`` with the run, so it holds only the config id,
+    display name, and test names. Later edits to the config never change it.
+    """
+
+    id: str
+    name: str
+    unit_tests: List[str] = Field(default_factory=list)
+    regression_tests: List[str] = Field(default_factory=list)
+
 
 class RunOptions(BaseModel):
     """User-visible switches that affect what the runner executes."""
@@ -125,6 +148,7 @@ class RunOptions(BaseModel):
     mpi_ranks: int = Field(1, ge=1)
     opalx_info_level: int = Field(2, ge=0)
     slurm_resources: Optional[SlurmResources] = None
+    skip_config: Optional[SkipConfigSnapshot] = None
 
 
 class BuildPresetSnapshot(BaseModel):
@@ -224,11 +248,13 @@ class RunMeta(BaseModel):
 
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
+    unit_tests_skipped: int = 0
 
     regression_total: int = 0
     regression_passed: int = 0
     regression_failed: int = 0
     regression_broken: int = 0
+    regression_skipped: int = 0
 
     # Soft-delete flag. False for newly written runs and for any historical
     # run-meta.json file that predates this field (default applies). Flipped
@@ -275,10 +301,12 @@ class RunIndexEntry(BaseModel):
     regtest_branch: Optional[str] = None
     unit_tests_total: int = 0
     unit_tests_failed: int = 0
+    unit_tests_skipped: int = 0
     regression_total: int = 0
     regression_passed: int = 0
     regression_failed: int = 0
     regression_broken: int = 0
+    regression_skipped: int = 0
     archived: bool = False
     public: bool = False
     run_options: RunOptions = Field(default_factory=RunOptions)

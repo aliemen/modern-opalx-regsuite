@@ -8,6 +8,7 @@ import { getRunIntegrity } from "../../api/integrity";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { SimCard } from "./RunSimulationCard";
+import { SkipConfigInfo, SkippedSimulationsGroup } from "./SkippedTests";
 import { duration, fmtDate } from "./runDetailFormat";
 import { SlurmResourceSummary, addSlurmRerunParams } from "./SlurmResourceSummary";
 
@@ -144,6 +145,15 @@ export function RunDetailPage() {
     return <div className="p-8 text-failed">Failed to load run data.</div>;
 
   const { meta, unit, regression } = data;
+  const executedSims = regression.simulations.filter((s) => s.state !== "skipped");
+  const skippedSimNames = regression.simulations
+    .filter((s) => s.state === "skipped")
+    .map((s) => s.name);
+  const unitRows = [...unit.tests].sort(
+    (a, b) => Number(a.status === "skipped") - Number(b.status === "skipped"),
+  );
+  const unitSkipped = meta.unit_tests_skipped ?? 0;
+  const regressionSkipped = meta.regression_skipped ?? 0;
   const runPath = `runs/${branch}/${arch}/${runId}`;
   const qs = searchParams.toString();
   const listHref = `/results/${branch}/${arch}${qs ? `?${qs}` : ""}`;
@@ -440,6 +450,9 @@ export function RunDetailPage() {
             </p>
           </div>
         )}
+        {meta.run_options?.skip_config && (
+          <SkipConfigInfo snapshot={meta.run_options.skip_config} />
+        )}
         {(meta.run_options?.custom_cmake_args?.length ?? 0) > 0 && (
           <div className="space-y-1 sm:col-span-2">
             <p className="text-muted text-xs">Custom CMake Args</p>
@@ -476,6 +489,9 @@ export function RunDetailPage() {
               {meta.unit_tests_failed > 0 && (
                 <span className="text-failed ml-2">{meta.unit_tests_failed} failed</span>
               )}
+              {unitSkipped > 0 && (
+                <span className="text-muted ml-2">· {unitSkipped} skipped</span>
+              )}
             </span>
           </button>
           {showUnitDetails && (
@@ -489,7 +505,7 @@ export function RunDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {unit.tests.map((t) => (
+                  {unitRows.map((t) => (
                     <tr key={t.name} className="border-t border-border/40">
                       <td className="py-1.5 font-mono text-fg">{t.name}</td>
                       <td className="py-1.5">
@@ -520,11 +536,15 @@ export function RunDetailPage() {
               {meta.regression_broken > 0 && (
                 <span className="text-broken ml-1">· {meta.regression_broken} broken</span>
               )}
+              {regressionSkipped > 0 && (
+                <span className="text-muted ml-1">· {regressionSkipped} skipped</span>
+              )}
             </span>
           </h2>
-          {regression.simulations.map((sim) => (
+          {executedSims.map((sim) => (
             <SimCard key={sim.name} sim={sim} runPath={runPath} />
           ))}
+          <SkippedSimulationsGroup names={skippedSimNames} />
         </div>
       )}
     </div>

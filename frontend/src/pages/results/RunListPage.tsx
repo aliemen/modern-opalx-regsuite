@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Clock } from "lucide-react";
 import { getRuns, type RunIndexEntry } from "../../api/results";
+import { SkippedChip } from "../../components/SkippedChip";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Pagination } from "../../components/Pagination";
 import { Breadcrumb } from "../../components/Breadcrumb";
@@ -131,6 +132,9 @@ export function RunListPage() {
                       {run.regression_broken > 0 && (
                         <span className="text-broken ml-1">({run.regression_broken} broken)</span>
                       )}
+                      <span className="ml-1">
+                        <SkippedChip unit={run.unit_tests_skipped} regression={run.regression_skipped} />
+                      </span>
                     </td>
                   </tr>
                 ))}

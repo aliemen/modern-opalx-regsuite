@@ -152,13 +152,43 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("master · CPU serial")).toBeInTheDocument();
   });
 
-  it("prefills the skip config on Run again", async () => {
+  it("shows skip config details and prefills it on Run again", async () => {
     const detail = detailFixture();
     detail.meta.run_options.skip_config = {
       id: "slow",
       name: "Slow on CPU",
       unit_tests: ["TestOrbitThreader"],
       regression_tests: ["DBA-COF-Gauss"],
+    };
+    detail.meta.unit_tests_skipped = 1;
+    detail.meta.regression_skipped = 1;
+    detail.unit = {
+      tests: [
+        {
+          name: "TestOrbitThreader",
+          status: "skipped",
+          duration_seconds: null,
+          output_snippet: null,
+        },
+        { name: "TestFast", status: "passed", duration_seconds: 0.1, output_snippet: null },
+      ],
+    };
+    detail.regression = {
+      simulations: [
+        {
+          name: "DBA-COF-Gauss",
+          description: null,
+          state: "skipped",
+          log_file: null,
+          containers: [],
+          duration_seconds: null,
+          beamline_plot: null,
+          beamline_3d_data: null,
+          exit_code: null,
+          crash_signal: null,
+          crash_summary: null,
+        },
+      ],
     };
     vi.mocked(getRunDetail).mockResolvedValue(detail);
     vi.mocked(getRunIntegrity).mockResolvedValue({
@@ -171,5 +201,9 @@ describe("RunDetailPage", () => {
     const link = await screen.findByRole("link", { name: /Run again/i });
 
     expect(link.getAttribute("href") ?? "").toContain("skip_config_id=slow");
+    expect(screen.getByText("Test Skip Config")).toBeInTheDocument();
+    expect(screen.getByText("Slow on CPU")).toBeInTheDocument();
+    expect(screen.getByText("Skipped (1)")).toBeInTheDocument();
+    expect(screen.getAllByText(/· 1 skipped/)).toHaveLength(2); // unit + regression headers
   });
 });

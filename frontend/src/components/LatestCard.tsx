@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Clock, Cpu, FlaskConical, GitBranch, TestTube2 } from "lucide-react";
 import type { RunIndexEntry } from "../api/results";
 import type { GroupBy } from "../lib/grouping";
+import { SkippedChip } from "./SkippedChip";
 import { StatusBadge } from "./StatusBadge";
 
 function fmtDate(d: string | null) {
@@ -140,6 +141,7 @@ export function LatestCard({
               Unit: {run.unit_tests_total - run.unit_tests_failed}/
               {run.unit_tests_total} passed
             </p>
+            <SkippedChip unit={run.unit_tests_skipped} regression={run.regression_skipped} />
           </div>
         ) : (
           <p className="text-xs text-muted">No runs yet.</p>

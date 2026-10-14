@@ -6,6 +6,7 @@ import { getAllRuns, type RunIndexEntry } from "../api/results";
 import { getUsersLeaderboard } from "../api/stats";
 import { Pagination } from "../components/Pagination";
 import { RunSummaryCard } from "../components/RunSummaryCard";
+import { SkippedChip } from "../components/SkippedChip";
 
 function fmtDate(d: string | null) {
   if (!d) return "\u2014";
@@ -205,6 +206,12 @@ export function ActivityPage() {
                           ({run.regression_broken} broken)
                         </span>
                       )}
+                      <span className="ml-1">
+                        <SkippedChip
+                          unit={run.unit_tests_skipped}
+                          regression={run.regression_skipped}
+                        />
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       {run.public && (

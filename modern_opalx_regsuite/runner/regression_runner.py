@@ -11,10 +11,10 @@ import shutil
 import time
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Collection, Optional
 
 from ..config import Connection, SuiteConfig
-from ..data_model import RegressionTestsReport
+from ..data_model import RegressionSimulation, RegressionTestsReport
 from .execution import RunPaths, _append_pipeline_line, _run_command
 from .parsing.regression import (
     _discover_regression_tests,
@@ -66,6 +66,30 @@ def _build_opalx_run_command(
     raise ValueError(f"Unknown OPALX launcher: {launcher}")
 
 
+def _active_skips(
+    tests: list[str], skip_tests: Collection[str], pipeline_log_path: Path
+) -> set[str]:
+    """Return the configured skips present on this branch; log the others once."""
+    wanted = set(skip_tests)
+    for name in sorted(wanted - set(tests)):
+        _append_pipeline_line(
+            pipeline_log_path,
+            f"[regression] Skip config lists {name}, not present on this branch.",
+        )
+    return wanted & set(tests)
+
+
+def _record_skipped(
+    report: RegressionTestsReport,
+    reg_lines: list[str],
+    test_name: str,
+    pipeline_log_path: Path,
+) -> None:
+    _append_pipeline_line(pipeline_log_path, f"[regression] SKIP {test_name}")
+    report.simulations.append(RegressionSimulation(name=test_name, state="skipped"))
+    reg_lines.append(f"{test_name}: skipped")
+
+
 def _run_regression_suite(
     cfg: SuiteConfig,
     paths: RunPaths,
@@ -75,10 +99,12 @@ def _run_regression_suite(
     opalx_info_level: int = 2,
     cancel_event: Optional[threading.Event] = None,
     base_env: Optional[dict[str, str]] = None,
+    skip_tests: Collection[str] = (),
 ) -> RegressionTestsReport:
     """Run regression tests locally."""
     tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
     tests = _discover_regression_tests(tests_root)
+    skip = _active_skips(tests, skip_tests, pipeline_log_path)
     report = RegressionTestsReport(simulations=[])
 
     opalx_exe = _find_opalx_executable(build_dir, cfg.opalx_executable_relpath)
@@ -90,11 +116,13 @@ def _run_regression_suite(
         return report
 
     reg_lines: list[str] = [
-        f"Running {len(tests)} regression tests from {tests_root}",
+        f"Running {len(tests) - len(skip)} regression tests from {tests_root}",
         f"OPALX executable: {opalx_exe}",
         f"MPI ranks: {mpi_ranks}",
         f"OPALX --info: {opalx_info_level}",
     ]
+    if skip:
+        reg_lines.append(f"Skipped by test skip config: {len(skip)}")
 
     for test_name in tests:
         if cancel_event is not None and cancel_event.is_set():
@@ -103,6 +131,9 @@ def _run_regression_suite(
                 "[regression] CANCELLED by user — stopping regression tests.",
             )
             break
+        if test_name in skip:
+            _record_skipped(report, reg_lines, test_name, pipeline_log_path)
+            continue
 
         src_test_dir = tests_root / test_name
         work_test_dir = paths.work_dir / test_name
@@ -192,6 +223,7 @@ def _run_regression_suite_remote(
     run_id: str,
     pipeline_log_path: Path,
     cancel_event: Optional[threading.Event] = None,
+    skip_tests: Collection[str] = (),
 ) -> RegressionTestsReport:
     """Run regression tests on a remote host via SSH.
 
@@ -211,6 +243,7 @@ def _run_regression_suite_remote(
     remote_tests_root = f"{remote_base}/regtests/{cfg.regtests_subdir}"
 
     tests = _discover_regression_tests_remote(remote, remote_tests_root)
+    skip = _active_skips(tests, skip_tests, pipeline_log_path)
     report = RegressionTestsReport(simulations=[])
 
     # Scratch area for fetched metadata (rt/in/reference) so _build_simulation
@@ -220,10 +253,12 @@ def _run_regression_suite_remote(
     meta_root.mkdir(parents=True, exist_ok=True)
 
     reg_lines: list[str] = [
-        f"Running {len(tests)} regression tests remotely via [{connection.name}]",
+        f"Running {len(tests) - len(skip)} regression tests remotely via [{connection.name}]",
         f"MPI ranks: {mpi_ranks}",
         f"OPALX --info: {opalx_info_level}",
     ]
+    if skip:
+        reg_lines.append(f"Skipped by test skip config: {len(skip)}")
 
     # Ensure the per-run work directory exists on the remote before any cp -r calls.
     remote_run_work_dir = f"{remote_base}/work/{run_id}"
@@ -250,6 +285,9 @@ def _run_regression_suite_remote(
                 "[regression] CANCELLED by user — stopping regression tests.",
             )
             break
+        if test_name in skip:
+            _record_skipped(report, reg_lines, test_name, pipeline_log_path)
+            continue
 
         work_test_dir = paths.work_dir / test_name
         if work_test_dir.exists():

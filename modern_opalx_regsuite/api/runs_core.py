@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import Connection, SlurmResources, SuiteConfig
-from ..data_model import ExecutionSnapshot, RerunReference
+from ..data_model import ExecutionSnapshot, RerunReference, SkipConfigSnapshot
 from ..execution_profiles import (
     resolved_profile_key_paths,
     resolve_run_profile,
@@ -125,6 +125,7 @@ async def start_run(
     rerun_of: Optional[RerunReference] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
+    skip_config: Optional[SkipConfigSnapshot] = None,
 ) -> StartRunResult:
     """Acquire a machine slot and start (or enqueue) a pipeline run.
 
@@ -152,6 +153,8 @@ async def start_run(
         ``owner_for_connection``'s store.
     gateway_password, gateway_otp
         Only used for interactive 2FA gateways (HTTP trigger path).
+    skip_config
+        Test skip config frozen at trigger time; ``None`` runs every test.
     """
     effective_custom_cmake_args = [
         arg.strip()
@@ -268,6 +271,7 @@ async def start_run(
         opalx_info_level=opalx_info_level,
         slurm_resources=slurm_resources,
         execution_snapshot=execution_snapshot,
+        skip_config=skip_config,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,
@@ -325,6 +329,7 @@ async def start_run(
         opalx_info_level=opalx_info_level,
         slurm_resources=slurm_resources,
         execution_snapshot=execution_snapshot,
+        skip_config=skip_config,
         connection=connection,
         target_key_path=target_key_path,
         gateway_key_path=gateway_key_path,

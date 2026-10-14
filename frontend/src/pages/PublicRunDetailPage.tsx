@@ -11,6 +11,7 @@ import {
   duration,
   fmtDate,
 } from "./results/RunDetailPage";
+import { SkipConfigInfo, SkippedSimulationsGroup } from "./results/SkippedTests";
 
 /**
  * Read-only public run detail. Mounted OUTSIDE the auth fence so anonymous
@@ -58,6 +59,12 @@ export function PublicRunDetailPage() {
   }
 
   const { meta, regression } = data;
+  const executedSims = regression.simulations.filter((s) => s.state !== "skipped");
+  const skippedSimNames = regression.simulations
+    .filter((s) => s.state === "skipped")
+    .map((s) => s.name);
+  const unitSkipped = meta.unit_tests_skipped ?? 0;
+  const regressionSkipped = meta.regression_skipped ?? 0;
   const runPath = `runs/${branch}/${arch}/${runId}`;
 
   return (
@@ -136,10 +143,13 @@ export function PublicRunDetailPage() {
               </p>
             </div>
           </div>
+          {meta.run_options?.skip_config && (
+            <SkipConfigInfo snapshot={meta.run_options.skip_config} />
+          )}
         </div>
 
         {/* Unit tests summary — public surface shows counts only, not per-test names. */}
-        {meta.unit_tests_total > 0 && (
+        {(meta.unit_tests_total > 0 || unitSkipped > 0) && (
           <div className="bg-surface border border-border rounded-xl p-5">
             <h2 className="text-fg font-medium mb-1">Unit Tests</h2>
             <p className="text-muted text-sm">
@@ -149,6 +159,9 @@ export function PublicRunDetailPage() {
                 <span className="text-failed ml-2">
                   {meta.unit_tests_failed} failed
                 </span>
+              )}
+              {unitSkipped > 0 && (
+                <span className="text-muted ml-2">· {unitSkipped} skipped</span>
               )}
             </p>
           </div>
@@ -171,11 +184,17 @@ export function PublicRunDetailPage() {
                     · {meta.regression_broken} broken
                   </span>
                 )}
+                {regressionSkipped > 0 && (
+                  <span className="text-muted ml-1">
+                    · {regressionSkipped} skipped
+                  </span>
+                )}
               </span>
             </h2>
-            {regression.simulations.map((sim) => (
+            {executedSims.map((sim) => (
               <SimCard key={sim.name} sim={sim} runPath={runPath} />
             ))}
+            <SkippedSimulationsGroup names={skippedSimNames} />
           </div>
         )}
 

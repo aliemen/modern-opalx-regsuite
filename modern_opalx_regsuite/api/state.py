@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from ..data_model import ExecutionSnapshot
+    from ..data_model import ExecutionSnapshot, SkipConfigSnapshot
     from ..config import Connection, SlurmResources
     from ..data_model import RerunReference
 
@@ -51,6 +51,8 @@ class ActiveRun:
     opalx_info_level: Optional[int] = None
     slurm_resources: Optional["SlurmResources"] = None
     execution_snapshot: Optional["ExecutionSnapshot"] = None
+    # Test skip config frozen at trigger time.
+    skip_config: Optional["SkipConfigSnapshot"] = None
     # Identity-bearing fields kept in memory only — never serialized to disk.
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
@@ -82,6 +84,7 @@ class QueuedRun:
     opalx_info_level: Optional[int] = None
     slurm_resources: Optional["SlurmResources"] = None
     execution_snapshot: Optional["ExecutionSnapshot"] = None
+    skip_config: Optional["SkipConfigSnapshot"] = None
     connection: Optional["Connection"] = None
     target_key_path: Optional[Path] = None
     gateway_key_path: Optional[Path] = None
@@ -157,6 +160,7 @@ async def acquire_run_slot(
     opalx_info_level: Optional[int] = None,
     slurm_resources: Optional["SlurmResources"] = None,
     execution_snapshot: Optional["ExecutionSnapshot"] = None,
+    skip_config: Optional["SkipConfigSnapshot"] = None,
     connection: Optional["Connection"] = None,
     target_key_path: Optional[Path] = None,
     gateway_key_path: Optional[Path] = None,
@@ -187,6 +191,7 @@ async def acquire_run_slot(
             opalx_info_level=opalx_info_level,
             slurm_resources=slurm_resources,
             execution_snapshot=execution_snapshot,
+            skip_config=skip_config,
             connection=connection,
             target_key_path=target_key_path,
             gateway_key_path=gateway_key_path,

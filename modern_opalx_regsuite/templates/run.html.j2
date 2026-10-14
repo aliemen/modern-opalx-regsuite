@@ -160,14 +160,18 @@
       <h2 style="font-size: 1rem">Unit tests</h2>
       {% if unit.tests %}
       {% set ut_passed = unit.tests|selectattr("status", "equalto", "passed")|list|length %}
-      {% set ut_failed = unit.tests|length - ut_passed %}
+      {% set ut_failed = unit.tests|selectattr("status", "equalto", "failed")|list|length %}
+      {% set ut_skipped = unit.tests|selectattr("status", "equalto", "skipped")|list|length %}
       <details>
         <summary>
           <span class="status-badge status-passed">{{ ut_passed }} passed</span>
           {% if ut_failed %}
           <span class="status-badge status-failed">{{ ut_failed }} failed</span>
           {% endif %}
-          <span class="muted">({{ unit.tests|length }} total)</span>
+          {% if ut_skipped %}
+          <span class="muted">{{ ut_skipped }} skipped</span>
+          {% endif %}
+          <span class="muted">({{ unit.tests|length - ut_skipped }} run)</span>
         </summary>
         <table>
           <thead>

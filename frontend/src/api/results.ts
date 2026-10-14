@@ -18,10 +18,12 @@ export interface RunIndexEntry {
   connection_name: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
+  unit_tests_skipped?: number;
   regression_total: number;
   regression_passed: number;
   regression_failed: number;
   regression_broken: number;
+  regression_skipped?: number;
   archived: boolean;
   public: boolean;
   run_options: RunOptions;
@@ -90,10 +92,12 @@ export interface RunMeta {
   triggered_by: string | null;
   unit_tests_total: number;
   unit_tests_failed: number;
+  unit_tests_skipped?: number;
   regression_total: number;
   regression_passed: number;
   regression_failed: number;
   regression_broken: number;
+  regression_skipped?: number;
   archived: boolean;
   public: boolean;
   run_options: RunOptions;
@@ -109,6 +113,15 @@ export interface RunOptions {
   mpi_ranks: number;
   opalx_info_level: number;
   slurm_resources: SlurmResources | null;
+  skip_config?: SkipConfigSnapshot | null;
+}
+
+/** Test skip config frozen at trigger time (stored with the run). */
+export interface SkipConfigSnapshot {
+  id: string;
+  name: string;
+  unit_tests: string[];
+  regression_tests: string[];
 }
 
 export interface RerunReference {

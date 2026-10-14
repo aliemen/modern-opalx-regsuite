@@ -90,3 +90,18 @@ def test_flakiness_requires_mixed_outcomes_in_same_context(tmp_path: Path) -> No
     assert [sim.name for sim in report.simulations] == ["SometimesBad"]
     assert report.simulations[0].passed == 2
     assert report.simulations[0].failed == 1
+
+
+def test_flakiness_ignores_skipped_observations(tmp_path: Path) -> None:
+    entries = [
+        _run(tmp_path, "r3", "passed", "2026-04-03T00:00:00+00:00"),
+        _run(tmp_path, "r2", "skipped", "2026-04-02T00:00:00+00:00"),
+        _run(tmp_path, "r1", "failed", "2026-04-01T00:00:00+00:00"),
+    ]
+    _write_json(tmp_path / "runs-index" / "master" / "cpu-serial.json", entries)
+
+    report = compute_flakiness(
+        tmp_path, "master", "cpu-serial", "master", limit=20, min_observations=3
+    )
+
+    assert report.simulations == []  # only 2 real observations

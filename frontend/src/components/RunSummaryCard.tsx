@@ -1,6 +1,7 @@
 import { Clock, Cpu, FlaskConical, GitBranch, Globe2, TestTube2, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { RunIndexEntry } from "../api/results";
+import { SkippedChip } from "./SkippedChip";
 import { StatusBadge } from "./StatusBadge";
 
 function fmtDate(d: string | null) {
@@ -99,6 +100,9 @@ export function RunSummaryCard({
                   ({run.regression_broken} broken)
                 </span>
               )}
+              <span className="ml-1">
+                <SkippedChip unit={run.unit_tests_skipped} regression={run.regression_skipped} />
+              </span>
             </span>
           </p>
         </div>

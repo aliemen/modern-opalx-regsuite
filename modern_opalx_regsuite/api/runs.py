@@ -18,6 +18,7 @@ from ..execution_profiles import (
     summarize_profile,
 )
 from ..runner.pipeline_options import resolve_effective_run_options
+from ..skip_configs import skip_config_snapshot
 from ..user_store import get_connection
 from .deps import get_config, require_auth
 from .runs_core import start_run
@@ -57,6 +58,8 @@ class TriggerRequest(BaseModel):
     gateway_otp: Optional[str] = None
     # Optional source run pointer for "Run again" workflows.
     rerun_of: Optional[RerunReference] = None
+    # Test skip config id; resolved to a frozen snapshot here, at trigger time.
+    skip_config_id: Optional[str] = None
 
 
 class TriggerResponse(BaseModel):
@@ -298,6 +301,16 @@ async def trigger_run(
     username: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
 ):
+    skip_config = None
+    if body.skip_config_id:
+        try:
+            skip_config = skip_config_snapshot(cfg, body.skip_config_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Test skip config '{body.skip_config_id}' not found.",
+            )
+
     run_id = _run_id_from_time()
     validation_cfg, effective_arch, resolved_profile = _resolve_validation_config(
         cfg, username, body
@@ -371,6 +384,7 @@ async def trigger_run(
         rerun_of=body.rerun_of,
         gateway_password=body.gateway_password,
         gateway_otp=body.gateway_otp,
+        skip_config=skip_config,
     )
 
     if result.outcome == "started":

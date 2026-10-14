@@ -3,9 +3,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+
+from modern_opalx_regsuite.api import runs as runs_api
 from modern_opalx_regsuite.api import runs_core
 from modern_opalx_regsuite.api.state import ActiveRun
 from modern_opalx_regsuite.config import ArchConfig, SlurmResources, SuiteConfig
+from modern_opalx_regsuite.data_model import SkipConfigSnapshot
 from modern_opalx_regsuite.execution_profiles import (
     RunProfile,
     load_execution_settings,
@@ -221,3 +226,84 @@ def test_start_run_resolves_profile_and_persists_snapshot(
     assert snapshot is not None
     assert snapshot.build.id == "cpu-serial"
     assert captured["active_snapshot"] == snapshot
+
+
+_SNAP = SkipConfigSnapshot(id="slow", name="Slow", regression_tests=["DBA-COF-Gauss"])
+
+
+def _plain_cfg(tmp_path: Path) -> SuiteConfig:
+    return SuiteConfig(
+        opalx_repo_root=tmp_path / "opalx",
+        builds_root=tmp_path / "builds",
+        data_root=tmp_path / "data",
+        users_root=tmp_path / "users",
+        regtests_repo_root=tmp_path / "regtests",
+    )
+
+
+def _start(cfg: SuiteConfig) -> None:
+    async def run() -> None:
+        await runs_core.start_run(
+            cfg,
+            run_id="skip",
+            triggered_by="demo-user",
+            owner_for_connection="demo-user",
+            branch="master",
+            arch="cpu-serial",
+            regtests_branch=None,
+            skip_unit=False,
+            skip_regression=False,
+            connection_name="local",
+            skip_config=_SNAP,
+        )
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+
+def test_start_run_passes_skip_snapshot_to_active_run(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_acquire_run_slot(**kwargs):
+        captured["skip_config"] = kwargs["skip_config"]
+        return ActiveRun(**kwargs)
+
+    class FakeCoordinator:
+        async def run_pipeline_async(self, _cfg, active, *_args, **_kwargs):
+            captured["active_skip_config"] = active.skip_config
+
+    monkeypatch.setattr(runs_core, "acquire_run_slot", fake_acquire_run_slot)
+    monkeypatch.setattr(runs_core, "get_coordinator", lambda: FakeCoordinator())
+    _start(_plain_cfg(tmp_path))
+
+    assert captured["skip_config"] == _SNAP
+    assert captured["active_skip_config"] == _SNAP
+
+
+def test_queued_run_keeps_skip_snapshot(tmp_path: Path, monkeypatch) -> None:
+    queued: list = []
+
+    async def busy(**_kwargs):
+        return None
+
+    async def fake_enqueue(run):
+        queued.append(run)
+        return 1
+
+    monkeypatch.setattr(runs_core, "acquire_run_slot", busy)
+    monkeypatch.setattr(runs_core, "enqueue_run", fake_enqueue)
+    _start(_plain_cfg(tmp_path))
+
+    assert queued[0].skip_config == _SNAP
+
+
+def test_trigger_rejects_unknown_skip_config(tmp_path: Path) -> None:
+    body = runs_api.TriggerRequest(
+        branch="master", arch="cpu-serial", skip_config_id="deleted"
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(runs_api.trigger_run(body, "demo-user", _plain_cfg(tmp_path)))
+    assert exc.value.status_code == 422
+    assert "deleted" in exc.value.detail

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from modern_opalx_regsuite.config import SuiteConfig
 from modern_opalx_regsuite.data_model import (
     RegressionSimulation,
     RegressionTestsReport,
@@ -8,6 +15,16 @@ from modern_opalx_regsuite.data_model import (
     SkipConfigSnapshot,
     UnitTestCase,
     UnitTestsReport,
+)
+from modern_opalx_regsuite.skip_configs import (
+    SkipConfigInput,
+    create_skip_config,
+    ctest_command_with_excludes,
+    delete_skip_config,
+    load_skip_configs,
+    skip_config_snapshot,
+    skip_configs_path,
+    update_skip_config,
 )
 
 
@@ -70,3 +87,97 @@ def test_run_options_round_trip_skip_snapshot() -> None:
         }
     )
     assert meta.run_options.skip_config == snapshot
+
+
+
+def _cfg(tmp_path: Path) -> SuiteConfig:
+    return SuiteConfig(
+        opalx_repo_root=tmp_path / "opalx",
+        builds_root=tmp_path / "builds",
+        data_root=tmp_path / "data",
+        users_root=tmp_path / "users",
+        regtests_repo_root=tmp_path / "regtests",
+    )
+
+
+def test_input_normalizes_and_validates_test_names() -> None:
+    body = SkipConfigInput(
+        name="  Slow on CPU ",
+        regression_tests=[" DBA-COF-Gauss", "", "DBA-COF-Gauss", "AWAGun-1"],
+        unit_tests=["TestOrbitThreader"],
+    )
+    assert body.name == "Slow on CPU"
+    assert body.regression_tests == ["AWAGun-1", "DBA-COF-Gauss"]
+    with pytest.raises(ValidationError):
+        SkipConfigInput(name="bad", unit_tests=["Test Orbit; rm -rf /"])
+    with pytest.raises(ValidationError):
+        SkipConfigInput(name="   ")
+
+
+def test_store_create_update_delete_and_snapshot(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    created = create_skip_config(
+        cfg, SkipConfigInput(name="Slow on CPU", regression_tests=["DBA-COF-Gauss"])
+    )
+    assert created.id == "Slow-on-CPU"
+    assert skip_configs_path(cfg).is_file()
+
+    second = create_skip_config(cfg, SkipConfigInput(name="Slow-on-CPU"))
+    assert second.id == "Slow-on-CPU-2"
+
+    with pytest.raises(ValueError):
+        create_skip_config(cfg, SkipConfigInput(name="slow on cpu"))
+
+    updated = update_skip_config(
+        cfg,
+        created.id,
+        SkipConfigInput(name="Slow on CPU", unit_tests=["TestOrbitThreader"]),
+    )
+    assert updated.unit_tests == ["TestOrbitThreader"]
+    assert updated.regression_tests == []
+
+    snap = skip_config_snapshot(cfg, created.id)
+    assert snap.name == "Slow on CPU"
+    assert snap.unit_tests == ["TestOrbitThreader"]
+
+    with pytest.raises(KeyError):
+        update_skip_config(cfg, "missing", SkipConfigInput(name="x"))
+    with pytest.raises(KeyError):
+        skip_config_snapshot(cfg, "missing")
+
+    assert delete_skip_config(cfg, second.id) is True
+    assert delete_skip_config(cfg, second.id) is False
+    assert [c.id for c in load_skip_configs(cfg).configs] == ["Slow-on-CPU"]
+
+
+def test_corrupt_store_file_loads_as_empty(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = skip_configs_path(cfg)
+    path.parent.mkdir(parents=True)
+    path.write_text("{not json", encoding="utf-8")
+    assert load_skip_configs(cfg).configs == []
+
+
+def test_ctest_excludes_are_anchored_escaped_and_quoted() -> None:
+    cmd = ctest_command_with_excludes(
+        "ctest --output-on-failure", ["TestOrbitThreader", "Test.Scaling+FFA"]
+    )
+    assert cmd == (
+        "ctest --output-on-failure -E "
+        "'^(TestOrbitThreader|Test\\.Scaling\\+FFA)$'"
+    )
+
+
+def test_ctest_excludes_merge_existing_exclude_regex() -> None:
+    cmd = ctest_command_with_excludes("ctest -E Slow --output-on-failure", ["TestA"])
+    assert cmd == "ctest -E '(Slow)|^(TestA)$' --output-on-failure"
+
+
+def test_ctest_excludes_return_none_for_non_ctest_commands() -> None:
+    assert ctest_command_with_excludes("FOO=1 ctest", ["TestA"]) is None
+    assert ctest_command_with_excludes("cd build && ctest", ["TestA"]) is None
+    assert ctest_command_with_excludes("./run-unit.sh", ["TestA"]) is None
+    assert ctest_command_with_excludes("/usr/bin/ctest", ["TestA"]) == (
+        "/usr/bin/ctest -E '^(TestA)$'"
+    )
+    assert ctest_command_with_excludes("./run-unit.sh", []) == "./run-unit.sh"

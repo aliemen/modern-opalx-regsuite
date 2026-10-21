@@ -291,6 +291,32 @@ def is_run_queued(run_id: str) -> bool:
     return False
 
 
+def _preset_names(snapshot: Optional["ExecutionSnapshot"]) -> dict[str, Optional[str]]:
+    """Public build/machine preset names for display (never credentials)."""
+    build = snapshot.build if snapshot is not None else None
+    machine = snapshot.machine if snapshot is not None else None
+    return {
+        "build_name": build.name if build is not None else None,
+        "machine_name": machine.name if machine is not None else None,
+    }
+
+
+def active_run_status(run: ActiveRun) -> dict:
+    """Serialisable status of an active run, shared by the runs endpoints."""
+    return {
+        "run_id": run.run_id,
+        "branch": run.branch,
+        "arch": run.arch,
+        "status": run.status,
+        "phase": run.phase,
+        "started_at": run.started_at.isoformat(),
+        "machine_id": run.machine_id,
+        "connection_name": run.connection_name,
+        "triggered_by": run.triggered_by or None,
+        **_preset_names(run.execution_snapshot),
+    }
+
+
 def get_queue_snapshot() -> list[dict]:
     """Return a serialisable snapshot of all machines with activity."""
     result = []
@@ -300,16 +326,7 @@ def get_queue_snapshot() -> list[dict]:
             continue
         active_dict = None
         if active is not None and active.status == "running":
-            active_dict = {
-                "run_id": active.run_id,
-                "branch": active.branch,
-                "arch": active.arch,
-                "status": active.status,
-                "phase": active.phase,
-                "started_at": active.started_at.isoformat(),
-                "machine_id": active.machine_id,
-                "connection_name": active.connection_name,
-            }
+            active_dict = active_run_status(active)
         queue_list = [
             {
                 "queue_id": qr.queue_id,
@@ -318,6 +335,8 @@ def get_queue_snapshot() -> list[dict]:
                 "arch": qr.arch,
                 "queued_at": qr.queued_at.isoformat(),
                 "connection_name": qr.connection_name,
+                "triggered_by": qr.triggered_by or None,
+                **_preset_names(qr.execution_snapshot),
             }
             for qr in mq.queue
         ]
@@ -328,8 +347,6 @@ def get_queue_snapshot() -> list[dict]:
         })
     return result
 
-
-# ── SSE subscription ────────────────────────────────────────────────────────
 
 def subscribe_sse(run_id: Optional[str] = None) -> asyncio.Queue:
     """Register a new SSE client queue on the active run matching *run_id*.

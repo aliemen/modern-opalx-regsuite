@@ -23,6 +23,7 @@ from ..user_store import get_connection
 from .deps import get_config, require_auth
 from .runs_core import start_run
 from .state import (
+    active_run_status,
     cancel_active_run,
     cancel_queued_run,
     get_active_run,
@@ -88,6 +89,9 @@ class CurrentRunStatus(BaseModel):
     started_at: datetime
     machine_id: Optional[str] = None
     connection_name: Optional[str] = None
+    triggered_by: Optional[str] = None
+    build_name: Optional[str] = None
+    machine_name: Optional[str] = None
 
 
 class QueuedRunInfo(BaseModel):
@@ -97,6 +101,9 @@ class QueuedRunInfo(BaseModel):
     arch: str
     queued_at: datetime
     connection_name: Optional[str] = None
+    triggered_by: Optional[str] = None
+    build_name: Optional[str] = None
+    machine_name: Optional[str] = None
 
 
 class MachineStatus(BaseModel):
@@ -247,34 +254,13 @@ def get_current_run(_user: Annotated[str, Depends(require_auth)]):
     run = get_active_run()
     if run is None:
         return None
-    return CurrentRunStatus(
-        run_id=run.run_id,
-        branch=run.branch,
-        arch=run.arch,
-        status=run.status,
-        phase=run.phase,
-        started_at=run.started_at,
-        machine_id=run.machine_id,
-        connection_name=run.connection_name,
-    )
+    return CurrentRunStatus(**active_run_status(run))
 
 
 @router.get("/active", response_model=list[CurrentRunStatus])
 def list_active_runs(_user: Annotated[str, Depends(require_auth)]):
     """Return all currently running runs."""
-    return [
-        CurrentRunStatus(
-            run_id=r.run_id,
-            branch=r.branch,
-            arch=r.arch,
-            status=r.status,
-            phase=r.phase,
-            started_at=r.started_at,
-            machine_id=r.machine_id,
-            connection_name=r.connection_name,
-        )
-        for r in get_all_active_runs()
-    ]
+    return [CurrentRunStatus(**active_run_status(r)) for r in get_all_active_runs()]
 
 
 @router.get("/queue", response_model=QueueStateResponse)

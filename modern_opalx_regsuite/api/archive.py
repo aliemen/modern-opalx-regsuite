@@ -26,7 +26,7 @@ from ..archive_service import (
     set_archived_for_runs,
 )
 from ..config import SuiteConfig
-from .deps import get_config, require_auth
+from .deps import BranchPath, get_config, require_auth
 from .state import get_all_active_runs, get_queue_snapshot
 
 router = APIRouter(prefix="/api/archive", tags=["archive"])
@@ -51,47 +51,12 @@ def _protected_run_ids() -> set[str]:
     return protected
 
 
-# ── Branch-scope ────────────────────────────────────────────────────────────
-
-
-@router.post("/branches/{branch}", response_model=ArchiveResult)
-def archive_branch(
-    branch: str,
-    _user: Annotated[str, Depends(require_auth)],
-    cfg: SuiteConfig = Depends(get_config),
-) -> ArchiveResult:
-    """Soft-delete every run on *branch* (across all archs)."""
-    return set_archived_for_branch(
-        cfg.resolved_data_root,
-        branch,
-        archived=True,
-        protect_run_ids=_protected_run_ids(),
-        archive_root=cfg.resolved_archive_root,
-    )
-
-
-@router.delete("/branches/{branch}", response_model=ArchiveResult)
-def unarchive_branch(
-    branch: str,
-    _user: Annotated[str, Depends(require_auth)],
-    cfg: SuiteConfig = Depends(get_config),
-) -> ArchiveResult:
-    """Restore every archived run on *branch*."""
-    return set_archived_for_branch(
-        cfg.resolved_data_root,
-        branch,
-        archived=False,
-        protect_run_ids=_protected_run_ids(),
-        archive_root=cfg.resolved_archive_root,
-    )
-
-
 # ── Branch+arch scope ───────────────────────────────────────────────────────
 
 
-@router.post("/branches/{branch}/archs/{arch}", response_model=ArchiveResult)
+@router.post("/branches/{branch:path}/archs/{arch}", response_model=ArchiveResult)
 def archive_arch(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
@@ -106,9 +71,9 @@ def archive_arch(
     )
 
 
-@router.delete("/branches/{branch}/archs/{arch}", response_model=ArchiveResult)
+@router.delete("/branches/{branch:path}/archs/{arch}", response_model=ArchiveResult)
 def unarchive_arch(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
@@ -126,9 +91,9 @@ def unarchive_arch(
 # ── Per-run scope ───────────────────────────────────────────────────────────
 
 
-@router.post("/branches/{branch}/archs/{arch}/runs", response_model=ArchiveResult)
+@router.post("/branches/{branch:path}/archs/{arch}/runs", response_model=ArchiveResult)
 def archive_runs(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     payload: RunIdsPayload,
     _user: Annotated[str, Depends(require_auth)],
@@ -145,9 +110,9 @@ def archive_runs(
     )
 
 
-@router.delete("/branches/{branch}/archs/{arch}/runs", response_model=ArchiveResult)
+@router.delete("/branches/{branch:path}/archs/{arch}/runs", response_model=ArchiveResult)
 def unarchive_runs(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     payload: RunIdsPayload,
     _user: Annotated[str, Depends(require_auth)],
@@ -165,11 +130,11 @@ def unarchive_runs(
 
 
 @router.post(
-    "/branches/{branch}/archs/{arch}/runs/{run_id}/restore",
+    "/branches/{branch:path}/archs/{arch}/runs/{run_id}/restore",
     response_model=ArchiveResult,
 )
 def restore_run(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     run_id: str,
     _user: Annotated[str, Depends(require_auth)],
@@ -190,11 +155,11 @@ def restore_run(
 
 
 @router.post(
-    "/branches/{branch}/archs/{arch}/runs/hard-delete",
+    "/branches/{branch:path}/archs/{arch}/runs/hard-delete",
     response_model=ArchiveResult,
 )
 def hard_delete(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     payload: RunIdsPayload,
     _user: Annotated[str, Depends(require_auth)],
@@ -217,11 +182,11 @@ def hard_delete(
 
 
 @router.post(
-    "/branches/{branch}/archs/{arch}/hard-delete-arch",
+    "/branches/{branch:path}/archs/{arch}/hard-delete-arch",
     response_model=ArchiveResult,
 )
 def hard_delete_archived_cell(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
@@ -236,6 +201,45 @@ def hard_delete_archived_cell(
         cfg.resolved_data_root,
         branch,
         arch,
+        protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
+    )
+
+
+# ── Branch-scope ────────────────────────────────────────────────────────────
+#
+# Registered last: ``{branch:path}`` matches any suffix, so these routes would
+# otherwise capture ``/branches/<b>/archs/<a>/...`` requests as a branch
+# literally named ``<b>/archs/<a>/...``. Starlette matches in order.
+
+
+@router.post("/branches/{branch:path}", response_model=ArchiveResult)
+def archive_branch(
+    branch: BranchPath,
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> ArchiveResult:
+    """Soft-delete every run on *branch* (across all archs)."""
+    return set_archived_for_branch(
+        cfg.resolved_data_root,
+        branch,
+        archived=True,
+        protect_run_ids=_protected_run_ids(),
+        archive_root=cfg.resolved_archive_root,
+    )
+
+
+@router.delete("/branches/{branch:path}", response_model=ArchiveResult)
+def unarchive_branch(
+    branch: BranchPath,
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> ArchiveResult:
+    """Restore every archived run on *branch*."""
+    return set_archived_for_branch(
+        cfg.resolved_data_root,
+        branch,
+        archived=False,
         protect_run_ids=_protected_run_ids(),
         archive_root=cfg.resolved_archive_root,
     )

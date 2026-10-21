@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Clock } from "lucide-react";
 import { getDashboardStats } from "../api/runs";
+import { resultsPath } from "../lib/paths";
 import { LatestMasterMatrix } from "./stats/LatestMasterMatrix";
 import { NewlyBrokenCard } from "./stats/NewlyBrokenCard";
 import { SuiteDurationCard } from "./stats/SuiteDurationCard";
@@ -36,9 +37,9 @@ function LastRunTile() {
   // index files written before `last_run_id` was added to /api/stats).
   const href =
     stats.last_run_branch && stats.last_run_arch && stats.last_run_id
-      ? `/results/${stats.last_run_branch}/${stats.last_run_arch}/${stats.last_run_id}`
+      ? resultsPath(stats.last_run_branch, stats.last_run_arch, stats.last_run_id)
       : stats.last_run_branch && stats.last_run_arch
-        ? `/results/${stats.last_run_branch}/${stats.last_run_arch}`
+        ? resultsPath(stats.last_run_branch, stats.last_run_arch)
         : null;
 
   const inner = (

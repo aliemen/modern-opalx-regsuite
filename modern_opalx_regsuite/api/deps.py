@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Callable
 
 from fastapi import Depends, HTTPException, status
+from pydantic import AfterValidator
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..api_keys import ApiKeyScope, TOKEN_PREFIX, service as api_keys_service
@@ -15,6 +16,28 @@ from ..user_store import ensure_user_dir
 from .tokens import verify_access_token
 
 _bearer = HTTPBearer(auto_error=False)
+
+
+def _validate_branch_path(branch: str) -> str:
+    """Reject branch names that would escape their directory under ``runs/``.
+
+    Branch names map directly onto nested directories
+    (``runs/<branch>/<arch>/<run_id>``), and routes accept them through a
+    ``{branch:path}`` converter so names like ``fix/foo`` work. Every ``/``
+    separated segment must therefore be a plain name: no empty, ``.``, or
+    ``..`` segments, no backslash or NUL.
+    """
+    segments = branch.split("/")
+    if any(seg in ("", ".", "..") for seg in segments) or any(
+        c in branch for c in ("\\", "\x00")
+    ):
+        raise ValueError(f"invalid branch name: {branch!r}")
+    return branch
+
+
+# Path parameter type for git branch names, which may contain ``/``. Use with
+# a ``{branch:path}`` route converter.
+BranchPath = Annotated[str, AfterValidator(_validate_branch_path)]
 
 
 @lru_cache(maxsize=1)

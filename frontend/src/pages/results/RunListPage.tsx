@@ -8,6 +8,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { Pagination } from "../../components/Pagination";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { RunSummaryCard } from "../../components/RunSummaryCard";
+import { resultsPath } from "../../lib/paths";
 
 function fmtDate(d: string | null) {
   if (!d) return "\u2014";
@@ -72,7 +73,7 @@ export function RunListPage() {
               <RunSummaryCard
                 key={run.run_id}
                 run={run}
-                to={`/results/${branch}/${arch}/${run.run_id}${qs ? `?${qs}` : ""}`}
+                to={`${resultsPath(branch!, arch!, run.run_id)}${qs ? `?${qs}` : ""}`}
               />
             ))}
           </div>
@@ -102,7 +103,7 @@ export function RunListPage() {
                   >
                     <td className="px-4 py-3">
                       <Link
-                        to={`/results/${branch}/${arch}/${run.run_id}${qs ? `?${qs}` : ""}`}
+                        to={`${resultsPath(branch!, arch!, run.run_id)}${qs ? `?${qs}` : ""}`}
                         className="text-accent hover:underline font-mono text-xs"
                       >
                         {run.run_id}

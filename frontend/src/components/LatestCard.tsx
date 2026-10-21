@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Clock, Cpu, FlaskConical, GitBranch, TestTube2 } from "lucide-react";
 import type { RunIndexEntry } from "../api/results";
 import type { GroupBy } from "../lib/grouping";
+import { resultsPath } from "../lib/paths";
 import { SkippedChip } from "./SkippedChip";
 import { StatusBadge } from "./StatusBadge";
 
@@ -54,8 +55,8 @@ export function LatestCard({
 }: LatestCardProps) {
   const qs = fromGroup ? `?group=${encodeURIComponent(fromGroup)}` : "";
   const href = run
-    ? `/results/${branch}/${arch}/${run.run_id}${qs}`
-    : `/results/${branch}/${arch}${qs}`;
+    ? `${resultsPath(branch, arch, run.run_id)}${qs}`
+    : `${resultsPath(branch, arch)}${qs}`;
 
   return (
     <div

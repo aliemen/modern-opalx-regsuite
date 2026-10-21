@@ -6,6 +6,7 @@ import { Archive, ChevronDown, ChevronRight, ExternalLink, Globe2, Lock, RotateC
 import { archiveRun, deleteRun, getRunDetail, restoreRun, setRunVisibility } from "../../api/results";
 import { getRunIntegrity } from "../../api/integrity";
 import { StatusBadge } from "../../components/StatusBadge";
+import { resultsPath } from "../../lib/paths";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { SimCard } from "./RunSimulationCard";
 import { SkipConfigInfo, SkippedSimulationsGroup } from "./SkippedTests";
@@ -60,7 +61,7 @@ export function RunDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
       queryClient.invalidateQueries({ queryKey: ["archive-summary"] });
-      navigate(`/results/${branch}/${arch}`);
+      navigate(resultsPath(branch!, arch!));
     },
   });
 
@@ -156,7 +157,7 @@ export function RunDetailPage() {
   const regressionSkipped = meta.regression_skipped ?? 0;
   const runPath = `runs/${branch}/${arch}/${runId}`;
   const qs = searchParams.toString();
-  const listHref = `/results/${branch}/${arch}${qs ? `?${qs}` : ""}`;
+  const listHref = `${resultsPath(branch!, arch!)}${qs ? `?${qs}` : ""}`;
   const regtestLabel = meta.regtest_branch ?? "\u2014";
   const isColdStored = meta.archived && data.archived_on_cold_storage;
   const executionSnapshot = meta.execution_snapshot ?? null;

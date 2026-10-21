@@ -26,7 +26,7 @@ from ..data_model import (
     resolve_run_dir,
     runs_index_path,
 )
-from .deps import get_config, require_auth
+from .deps import BranchPath, get_config, require_auth
 from .state import get_active_run
 
 router = APIRouter(prefix="/api/results", tags=["results"])
@@ -107,9 +107,10 @@ def archive_summary(
     total = 0
     by_branch: dict[str, int] = {}
     by_regtest_branch: dict[str, int] = {}
-    for idx_path in sorted(index_root.glob("*/*.json")):
-        branch = idx_path.parent.name
-        if not branch:
+    # rglob: branch names containing "/" are stored as nested directories.
+    for idx_path in sorted(index_root.rglob("*.json")):
+        branch = idx_path.parent.relative_to(index_root).as_posix()
+        if branch == ".":
             continue
         try:
             with idx_path.open("r", encoding="utf-8") as f:
@@ -137,9 +138,9 @@ def archive_summary(
     )
 
 
-@router.get("/branches/{branch}/archs/{arch}/runs", response_model=list[RunIndexEntry])
+@router.get("/branches/{branch:path}/archs/{arch}/runs", response_model=list[RunIndexEntry])
 def list_runs(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     response: Response,
     _user: Annotated[str, Depends(require_auth)],
@@ -208,9 +209,9 @@ def list_all_runs(
     )
 
 
-@router.get("/branches/{branch}/archs/{arch}/runs/{run_id}", response_model=RunDetail)
+@router.get("/branches/{branch:path}/archs/{arch}/runs/{run_id}", response_model=RunDetail)
 def get_run(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     run_id: str,
     _user: Annotated[str, Depends(require_auth)],
@@ -250,11 +251,11 @@ def get_run(
 
 
 @router.patch(
-    "/branches/{branch}/archs/{arch}/runs/{run_id}/visibility",
+    "/branches/{branch:path}/archs/{arch}/runs/{run_id}/visibility",
     response_model=RunIndexEntry,
 )
 def set_run_visibility(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     run_id: str,
     body: VisibilityBody,
@@ -319,9 +320,9 @@ def set_run_visibility(
     )
 
 
-@router.delete("/branches/{branch}/archs/{arch}/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/branches/{branch:path}/archs/{arch}/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_run(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     run_id: str,
     _user: Annotated[str, Depends(require_auth)],

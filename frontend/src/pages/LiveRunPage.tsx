@@ -10,6 +10,7 @@ import {
 } from "../api/runs";
 import { LogViewer } from "../components/LogViewer";
 import { StatusBadge } from "../components/StatusBadge";
+import { resultsPath } from "../lib/paths";
 import { applyTrackerLine, type TestInfo } from "./live/testTracker";
 
 // ── Elapsed timer ────────────────────────────────────────────────────────────
@@ -440,7 +441,11 @@ export function LiveRunPage() {
           <button
             onClick={() =>
               navigate(
-                `/results/${effectiveRun?.branch ?? cachedBranch}/${effectiveRun?.arch ?? cachedArch}/${runId}`
+                resultsPath(
+                  (effectiveRun?.branch ?? cachedBranch)!,
+                  (effectiveRun?.arch ?? cachedArch)!,
+                  runId
+                )
               )
             }
             className="px-4 py-2 text-sm bg-accent text-bg font-medium rounded-md hover:brightness-110 transition"

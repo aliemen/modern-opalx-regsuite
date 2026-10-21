@@ -39,7 +39,7 @@ from ..data_model import (
     run_dir,
     runs_index_path,
 )
-from .deps import get_config
+from .deps import BranchPath, get_config
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 
@@ -154,11 +154,11 @@ def public_activity(
 
 
 @router.get(
-    "/runs/{branch}/{arch}/{run_id}",
+    "/runs/{branch:path}/{arch}/{run_id}",
     response_model=PublicRunDetail,
 )
 def get_public_run(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     run_id: str,
     cfg: SuiteConfig = Depends(get_config),

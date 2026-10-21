@@ -274,10 +274,11 @@ def _migrate_run_usernames(
 
     index_changed = 0
     meta_changed = 0
-    for idx_path in sorted(index_root.glob("*/*.json")):
-        branch = idx_path.parent.name
+    # rglob: branch names containing "/" are stored as nested directories.
+    for idx_path in sorted(index_root.rglob("*.json")):
+        branch = idx_path.parent.relative_to(index_root).as_posix()
         arch = idx_path.stem
-        if not branch or not arch:
+        if branch == "." or not arch:
             continue
         with locked_index(idx_path):
             try:

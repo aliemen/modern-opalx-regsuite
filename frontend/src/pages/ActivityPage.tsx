@@ -4,6 +4,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Clock, Globe2, History, User as UserIcon } from "lucide-react";
 import { getAllRuns, type RunIndexEntry } from "../api/results";
 import { getUsersLeaderboard } from "../api/stats";
+import { resultsPath } from "../lib/paths";
 import { Pagination } from "../components/Pagination";
 import { RunSummaryCard } from "../components/RunSummaryCard";
 import { SkippedChip } from "../components/SkippedChip";
@@ -117,7 +118,7 @@ export function ActivityPage() {
               <RunSummaryCard
                 key={`${run.branch}-${run.arch}-${run.run_id}`}
                 run={run}
-                to={`/results/${run.branch}/${run.arch}/${run.run_id}`}
+                to={resultsPath(run.branch, run.arch, run.run_id)}
                 userLink={
                   run.triggered_by
                     ? `/activity?user=${encodeURIComponent(run.triggered_by)}`
@@ -151,7 +152,7 @@ export function ActivityPage() {
                 {runs.map((run: RunIndexEntry, i: number) => (
                   <tr
                     key={`${run.branch}-${run.arch}-${run.run_id}`}
-                    onClick={() => navigate(`/results/${run.branch}/${run.arch}/${run.run_id}`)}
+                    onClick={() => navigate(resultsPath(run.branch, run.arch, run.run_id))}
                     className={`border-t border-border hover:bg-accent/10 transition-colors cursor-pointer ${
                       i % 2 === 0 ? "" : "bg-surface/30"
                     }`}

@@ -113,7 +113,10 @@ def _heal_stale_runs(data_root: Path) -> None:
     runs_root = data_root / "runs"
     if not runs_root.is_dir():
         return
-    for meta_path in runs_root.glob("*/*/*/run-meta.json"):
+    # rglob: branch names containing "/" add directory levels.
+    for meta_path in runs_root.rglob("run-meta.json"):
+        if any(part.endswith(".staging") for part in meta_path.parts):
+            continue
         try:
             with meta_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)

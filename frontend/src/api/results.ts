@@ -226,7 +226,7 @@ export async function getRuns(
   triggeredBy: string | null = null
 ): Promise<{ runs: RunIndexEntry[]; total: number }> {
   const res = await api.get<RunIndexEntry[]>(
-    `/api/results/branches/${branch}/archs/${arch}/runs`,
+    `/api/results/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs`,
     { params: paramsWithUser({ limit, offset, view }, triggeredBy) }
   );
   const total = parseInt(res.headers["x-total-count"] ?? "0", 10);
@@ -251,7 +251,7 @@ export async function getRunDetail(
   runId: string
 ): Promise<RunDetail> {
   const res = await api.get<RunDetail>(
-    `/api/results/branches/${branch}/archs/${arch}/runs/${runId}`
+    `/api/results/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs/${encodeURIComponent(runId)}`
   );
   return res.data;
 }
@@ -261,7 +261,9 @@ export async function deleteRun(
   arch: string,
   runId: string
 ): Promise<void> {
-  await api.delete(`/api/results/branches/${branch}/archs/${arch}/runs/${runId}`);
+  await api.delete(
+    `/api/results/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs/${encodeURIComponent(runId)}`
+  );
 }
 
 export async function setRunVisibility(

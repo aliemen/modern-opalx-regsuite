@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ..artifacts import RunIntegrityReport, check_run_integrity
 from ..config import SuiteConfig
 from ..data_model import resolve_run_dir, runs_index_path
-from .deps import get_config, require_auth
+from .deps import BranchPath, get_config, require_auth
 
 
 router = APIRouter(prefix="/api/integrity", tags=["integrity"])
@@ -32,11 +32,11 @@ def _index_entry(cfg: SuiteConfig, branch: str, arch: str, run_id: str) -> dict 
 
 
 @router.get(
-    "/runs/{branch}/{arch}/{run_id}",
+    "/runs/{branch:path}/{arch}/{run_id}",
     response_model=RunIntegrityReport,
 )
 def run_integrity(
-    branch: str,
+    branch: BranchPath,
     arch: str,
     run_id: str,
     _user: Annotated[str, Depends(require_auth)],

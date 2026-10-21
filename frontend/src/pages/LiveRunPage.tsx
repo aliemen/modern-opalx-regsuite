@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/purity, react-hooks/set-state-in-effect */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, XCircle } from "lucide-react";
 import {
@@ -297,6 +297,12 @@ export function LiveRunPage() {
     initSnap?.branch
   );
   const [cachedArch, setCachedArch] = useState<string | undefined>(initSnap?.arch);
+  // Links from the dashboard pass branch/arch as router state, so a run that
+  // finishes before this page sees it in the queue state still has a header
+  // and a "View results" target.
+  const navState = useLocation().state as { branch?: string; arch?: string } | null;
+  const knownBranch = effectiveRun?.branch ?? cachedBranch ?? navState?.branch;
+  const knownArch = effectiveRun?.arch ?? cachedArch ?? navState?.arch;
 
   const elapsed = useElapsed(effectiveRun?.started_at || undefined);
   const displayStatus = finalStatus ?? effectiveRun?.status ?? "running";
@@ -380,7 +386,7 @@ export function LiveRunPage() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-fg text-xl font-semibold">
-            {effectiveRun?.branch ?? "…"} / {effectiveRun?.arch ?? "…"}
+            {knownBranch ?? "…"} / {knownArch ?? "…"}
           </h1>
           <p className="text-muted text-sm">
             {runId} · phase: <span className="text-accent">{phase}</span> ·{" "}
@@ -436,14 +442,14 @@ export function LiveRunPage() {
       </div>
 
       {/* Post-run actions */}
-      {finalStatus && finalStatus !== "running" && runId && (effectiveRun?.branch ?? cachedBranch) && (effectiveRun?.arch ?? cachedArch) && (
+      {finalStatus && finalStatus !== "running" && runId && knownBranch && knownArch && (
         <div className="mt-4 flex gap-3">
           <button
             onClick={() =>
               navigate(
                 resultsPath(
-                  (effectiveRun?.branch ?? cachedBranch)!,
-                  (effectiveRun?.arch ?? cachedArch)!,
+                  knownBranch,
+                  knownArch,
                   runId
                 )
               )

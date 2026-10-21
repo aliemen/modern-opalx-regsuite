@@ -1,89 +1,77 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Radio } from "lucide-react";
+import { Play } from "lucide-react";
+import { getLatestMatrix } from "../api/results";
 import { getQueueState } from "../api/runs";
-import { useLatestRuns } from "../hooks/useLatestRuns";
 import { useRunSelection } from "../hooks/useRunSelection";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
-import { useGroupBy } from "../hooks/useGroupBy";
-import { AccordionList } from "../components/AccordionList";
+import { useRunCompletionRefresh } from "../hooks/useRunCompletionRefresh";
+import { secondsBetween } from "../lib/time";
 import { BulkActionBar } from "../components/BulkActionBar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { GroupingControl } from "../components/GroupingControl";
 import { TrendsPanel } from "../components/TrendsPanel";
 import { StatsPanel } from "../components/StatsPanel";
-import { QueuePanel } from "../components/QueuePanel";
-import type { Group } from "../lib/grouping";
+import { RecentRunsTable } from "../components/dashboard/RecentRunsTable";
+import { BranchMatrix } from "../components/dashboard/BranchMatrix";
 
 export function DashboardPage() {
-  const { cells, branches, runCounts, isLoading } = useLatestRuns("active");
-
   const { data: queueState } = useQuery({
     queryKey: ["queue-state"],
     queryFn: getQueueState,
     refetchInterval: 5000,
   });
+  const machines = queueState?.machines;
+  useRunCompletionRefresh(machines);
+
+  // Under the ["branches"] prefix so every existing archive/delete
+  // invalidation refreshes it too.
+  const { data: matrixRows, isLoading: matrixLoading } = useQuery({
+    queryKey: ["branches", "matrix"],
+    queryFn: () => getLatestMatrix("active"),
+    refetchInterval: 60_000,
+  });
+  const rows = useMemo(() => matrixRows ?? [], [matrixRows]);
 
   const selection = useRunSelection();
   const mutations = useArchiveMutations();
-  const [groupBy, setGroupBy] = useGroupBy();
-
-  // Confirmation state for the per-group "Archive branch" shortcut.
-  const [pendingBranchArchive, setPendingBranchArchive] = useState<string | null>(
-    null
-  );
   // Confirmation for the bulk-bar "Archive selected" action.
   const [pendingBulkArchive, setPendingBulkArchive] = useState(false);
   // Toast for "N runs skipped (currently running)".
   const [skippedToast, setSkippedToast] = useState<string | null>(null);
 
-  if (isLoading && Object.keys(branches).length === 0) {
-    return <div className="p-8 text-muted">Loading…</div>;
-  }
+  // Master's archs, most-run first, drive the trends and flakiness cards.
+  const masterArchs = useMemo(() => {
+    const master = rows.find((r) => r.branch === "master");
+    if (!master) return [];
+    return Object.entries(master.cells)
+      .sort((a, b) => b[1].run_count - a[1].run_count)
+      .map(([arch]) => arch);
+  }, [rows]);
 
-  const masterArchs = [...(branches?.["master"] ?? [])].sort(
-    (a, b) => (runCounts.get(`master/${b}`) ?? 0) - (runCounts.get(`master/${a}`) ?? 0)
+  // "last 41m" hint for running rows: duration of the newest finished run of
+  // the same branch and arch, when it ran to a verdict.
+  const lastDurations = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const row of rows) {
+      for (const [arch, cell] of Object.entries(row.cells)) {
+        if (cell.run.status !== "passed" && cell.run.status !== "failed") continue;
+        const secs = secondsBetween(cell.run.started_at, cell.run.finished_at);
+        if (secs !== null) out.set(`${row.branch}::${arch}`, secs);
+      }
+    }
+    return out;
+  }, [rows]);
+
+  const runningCells = useMemo(
+    () =>
+      new Set(
+        (machines ?? []).flatMap((m) =>
+          m.active_run ? [`${m.active_run.branch}::${m.active_run.arch}`] : []
+        )
+      ),
+    [machines]
   );
-
-  // Active/queued counts from queue state.
-  const machines = queueState?.machines ?? [];
-  const activeRuns = machines.flatMap((m) =>
-    m.active_run ? [m.active_run] : []
-  );
-  const totalQueued = machines.reduce((s, m) => s + m.queue.length, 0);
-
-  function groupAction(group: Group) {
-    if (group.kind !== "branch") return undefined;
-    return {
-      label: "Archive branch",
-      onClick: () => setPendingBranchArchive(group.label),
-    };
-  }
-
-  async function confirmBranchArchive() {
-    const branch = pendingBranchArchive;
-    setPendingBranchArchive(null);
-    if (!branch) return;
-    const result = await mutations.archiveBranch.mutateAsync({
-      branch,
-      archived: true,
-    });
-    const messages: string[] = [];
-    if (result.skipped_active.length > 0) {
-      messages.push(
-        `${result.skipped_active.length} run${result.skipped_active.length !== 1 ? "s" : ""} skipped (currently running)`
-      );
-    }
-    if (result.failed_move.length > 0) {
-      messages.push(
-        `${result.failed_move.length} run${result.failed_move.length !== 1 ? "s" : ""} failed to move`
-      );
-    }
-    if (messages.length > 0) {
-      setSkippedToast(messages.join("; "));
-    }
-  }
 
   async function confirmBulkArchive() {
     setPendingBulkArchive(false);
@@ -112,93 +100,46 @@ export function DashboardPage() {
     }
   }
 
-  const busy =
-    mutations.archiveBranch.isPending || mutations.archiveCells.isPending;
-  const hasEntries = Object.keys(branches).length > 0;
-
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto">
-      {activeRuns.length > 0 ? (
+      <div className="flex items-center gap-3 mb-6">
+        <h1 className="text-fg text-2xl font-semibold">Dashboard</h1>
         <Link
-          to={`/live/${activeRuns[0].run_id}`}
-          className="flex flex-wrap items-center gap-3 bg-accent/10 border border-accent/30 rounded-xl px-4 py-3 mb-6 text-accent text-sm hover:bg-accent/20 transition-colors sm:px-5"
+          to="/trigger"
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-bg font-medium rounded-md hover:brightness-110 transition"
         >
-          <span className="w-2 h-2 rounded-full bg-accent animate-ping inline-block" />
-          {activeRuns.length === 1 ? (
-            <>
-              Run in progress — {activeRuns[0].branch} / {activeRuns[0].arch} —
-              phase: {activeRuns[0].phase}
-            </>
-          ) : (
-            <>
-              {activeRuns.length} runs in progress
-              {totalQueued > 0 && <>, {totalQueued} queued</>}
-            </>
-          )}
-          <span className="sm:ml-auto text-xs underline">View live output →</span>
+          <Play size={14} />
+          Start run
         </Link>
-      ) : (
-        <Link
-          to="/live"
-          className="flex items-center gap-2 text-muted hover:text-fg text-sm mb-6 w-fit transition-colors"
-        >
-          <Radio size={13} /> Latest run log
-        </Link>
-      )}
+      </div>
 
-      <h1 className="text-fg text-2xl font-semibold mb-6">Dashboard</h1>
+      <RecentRunsTable machines={machines} lastDurations={lastDurations} />
 
-      {!hasEntries ? (
-        <div className="text-muted text-sm">
-          No results yet.{" "}
-          <Link to="/trigger" className="text-accent hover:underline">
-            Start a run
-          </Link>{" "}
-          to get started.
-        </div>
-      ) : (
+      {matrixLoading ? (
+        <div className="text-muted text-sm">Loading branches&hellip;</div>
+      ) : rows.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Left: grouping control + bulk action bar + accordion */}
-          <div className="lg:col-span-3">
-            <GroupingControl value={groupBy} onChange={setGroupBy} />
+          <div className="lg:col-span-3 min-w-0">
             <BulkActionBar
               selection={selection}
               view="active"
               onArchiveToggle={() => setPendingBulkArchive(true)}
-              busy={busy}
+              busy={mutations.archiveCells.isPending}
             />
-            <AccordionList
-              cells={cells}
-              groupBy={groupBy}
-              storageNamespace="opalx-dashboard-open"
-              selection={selection}
-              groupAction={groupAction}
-              fromGroup={groupBy}
-            />
+            <BranchMatrix rows={rows} runningCells={runningCells} selection={selection} />
           </div>
 
-          {/* Right: trends + stats + queue */}
-          <div className="lg:col-span-2 space-y-4">
+          <div className="lg:col-span-2 space-y-4 min-w-0">
             {masterArchs.length > 0 && <TrendsPanel archs={masterArchs} />}
             <StatsPanel flakinessArchs={masterArchs} />
-            <QueuePanel />
           </div>
         </div>
-      )}
-
-      <ConfirmDialog
-        open={pendingBranchArchive !== null}
-        title={`Archive branch "${pendingBranchArchive}"?`}
-        message={`This will hide every run for "${pendingBranchArchive}" from the dashboard. You can restore them from the Archive tab at any time. Currently-running runs are skipped.`}
-        confirmLabel="Archive"
-        onConfirm={confirmBranchArchive}
-        onCancel={() => setPendingBranchArchive(null)}
-      />
+      ) : null}
 
       <ConfirmDialog
         open={pendingBulkArchive}
-        title={`Archive ${selection.count} cell${selection.count !== 1 ? "s" : ""}?`}
-        message="The selected branch+arch cells (every run in each) will be hidden from the dashboard. You can restore them from the Archive tab at any time."
+        title={`Archive ${selection.count} branch/build cell${selection.count !== 1 ? "s" : ""}?`}
+        message="Every run in the selected branch/build cells will be hidden from the dashboard. You can restore them from the Archive tab at any time. Currently-running runs are skipped."
         confirmLabel="Archive"
         onConfirm={confirmBulkArchive}
         onCancel={() => setPendingBulkArchive(false)}

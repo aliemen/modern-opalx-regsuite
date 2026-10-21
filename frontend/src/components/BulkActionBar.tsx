@@ -37,7 +37,7 @@ export function BulkActionBar({
     <div className="sticky top-0 z-20 mb-4">
       <div className="bg-surface border border-accent/40 rounded-xl px-4 py-3 flex flex-col gap-3 shadow-md sm:px-5 sm:flex-row sm:items-center">
         <span className="text-fg text-sm font-medium min-w-0">
-          {selection.count} run{selection.count !== 1 ? "s" : ""} selected
+          {selection.count} selected
         </span>
 
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">

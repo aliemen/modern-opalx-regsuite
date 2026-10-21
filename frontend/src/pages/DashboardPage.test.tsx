@@ -3,98 +3,40 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RunIndexEntry } from "../api/results";
+import { getAllRuns, getLatestMatrix } from "../api/results";
 import { getQueueState } from "../api/runs";
+import { getCurrentUser } from "../api/user";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
-import { useLatestRuns } from "../hooks/useLatestRuns";
+import { installLocalStorageMock, makeRun } from "../test/fixtures";
 import { DashboardPage } from "./DashboardPage";
 
 vi.mock("../api/runs", () => ({
-  getQueueState: vi.fn(async () => ({ machines: [] })),
+  getQueueState: vi.fn(),
+  cancelQueuedRun: vi.fn(),
 }));
 
-vi.mock("../hooks/useLatestRuns", () => ({
-  useLatestRuns: vi.fn(),
+vi.mock("../api/results", () => ({
+  getAllRuns: vi.fn(),
+  getLatestMatrix: vi.fn(),
 }));
+
+vi.mock("../api/user", () => ({ getCurrentUser: vi.fn() }));
 
 vi.mock("../hooks/useArchiveMutations", () => ({
   useArchiveMutations: vi.fn(),
 }));
 
 vi.mock("../components/TrendsPanel", () => ({
-  TrendsPanel: () => <div data-testid="trends-panel" />,
+  TrendsPanel: ({ archs }: { archs: string[] }) => (
+    <div data-testid="trends-panel">{archs.join(",")}</div>
+  ),
 }));
 
 vi.mock("../components/StatsPanel", () => ({
   StatsPanel: () => <div data-testid="stats-panel" />,
 }));
 
-vi.mock("../components/QueuePanel", () => ({
-  QueuePanel: () => <div data-testid="queue-panel" />,
-}));
-
-const localStorageStore = new Map<string, string>();
-const localStorageMock: Storage = {
-  get length() {
-    return localStorageStore.size;
-  },
-  clear() {
-    localStorageStore.clear();
-  },
-  getItem(key: string) {
-    return localStorageStore.get(key) ?? null;
-  },
-  key(index: number) {
-    return Array.from(localStorageStore.keys())[index] ?? null;
-  },
-  removeItem(key: string) {
-    localStorageStore.delete(key);
-  },
-  setItem(key: string, value: string) {
-    localStorageStore.set(key, value);
-  },
-};
-
-Object.defineProperty(window, "localStorage", {
-  value: localStorageMock,
-  configurable: true,
-});
-Object.defineProperty(globalThis, "localStorage", {
-  value: localStorageMock,
-  configurable: true,
-});
-
-function run(branch: string, arch: string, runId: string): RunIndexEntry {
-  return {
-    branch,
-    arch,
-    run_id: runId,
-    started_at: "2026-05-18T10:00:00Z",
-    finished_at: "2026-05-18T10:01:00Z",
-    status: "passed",
-    triggered_by: "demo-user",
-    regtest_branch: "master",
-    connection_name: "local",
-    unit_tests_total: 1,
-    unit_tests_failed: 0,
-    regression_total: 1,
-    regression_passed: 1,
-    regression_failed: 0,
-    regression_broken: 0,
-    archived: false,
-    public: false,
-    run_options: {
-      skip_unit: false,
-      skip_regression: false,
-      clean_build: false,
-      custom_cmake_args: [],
-      mpi_ranks: 1,
-      opalx_info_level: 2,
-      slurm_resources: null,
-    },
-    rerun_of: null,
-  };
-}
+installLocalStorageMock();
 
 const archiveResult = {
   changed: 0,
@@ -103,8 +45,11 @@ const archiveResult = {
   failed_move: [],
 };
 
-let archiveBranchMutate: ReturnType<typeof vi.fn>;
 let archiveCellsMutate: ReturnType<typeof vi.fn>;
+
+function cell(branch: string, arch: string, runCount: number) {
+  return { run: makeRun({ branch, arch, run_id: `${arch}-run` }), run_count: runCount };
+}
 
 function renderDashboard() {
   const client = new QueryClient({
@@ -112,51 +57,42 @@ function renderDashboard() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/?group=branch"]}>
+      <MemoryRouter initialEntries={["/"]}>
         <DashboardPage />
       </MemoryRouter>
     </QueryClientProvider>
   );
 }
 
-describe("DashboardPage archive policy", () => {
+describe("DashboardPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.mocked(getQueueState).mockResolvedValue({ machines: [] });
-    vi.mocked(useLatestRuns).mockReturnValue({
-      cells: [
-        { branch: "master", arch: "cpu-serial", run: run("master", "cpu-serial", "master-run") },
-        {
-          branch: "feature/archive",
-          arch: "cpu-serial",
-          run: run("feature/archive", "cpu-serial", "feature-run"),
-        },
-      ],
-      branches: {
-        master: ["cpu-serial"],
-        "feature/archive": ["cpu-serial"],
-      },
-      runCounts: new Map([
-        ["master/cpu-serial", 1],
-        ["feature/archive/cpu-serial", 1],
-      ]),
-      isLoading: false,
+    vi.mocked(getCurrentUser).mockResolvedValue({ username: "demo-user" });
+    vi.mocked(getAllRuns).mockResolvedValue({
+      runs: [makeRun({ branch: "feature/archive", run_id: "recent-run" })],
+      total: 1,
     });
-    archiveBranchMutate = vi.fn(async () => archiveResult);
+    vi.mocked(getLatestMatrix).mockResolvedValue([
+      {
+        branch: "master",
+        last_activity: "2026-05-18T10:00:00Z",
+        cells: {
+          "cpu-serial": cell("master", "cpu-serial", 1),
+          "cuda-daint": cell("master", "cuda-daint", 4),
+        },
+      },
+      {
+        branch: "feature/archive",
+        last_activity: "2026-05-18T10:00:00Z",
+        cells: { "cpu-serial": cell("feature/archive", "cpu-serial", 1) },
+      },
+    ]);
     archiveCellsMutate = vi.fn(async () => [archiveResult]);
     vi.mocked(useArchiveMutations).mockReturnValue({
-      archiveBranch: {
-        mutateAsync: archiveBranchMutate,
-        isPending: false,
-      },
-      archiveCells: {
-        mutateAsync: archiveCellsMutate,
-        isPending: false,
-      },
-      hardDeleteCells: {
-        mutateAsync: vi.fn(),
-        isPending: false,
-      },
+      archiveBranch: { mutateAsync: vi.fn(), isPending: false },
+      archiveCells: { mutateAsync: archiveCellsMutate, isPending: false },
+      hardDeleteCells: { mutateAsync: vi.fn(), isPending: false },
       collectSkippedActive: () => [],
       collectFailedMove: () => [],
     } as unknown as ReturnType<typeof useArchiveMutations>);
@@ -168,39 +104,36 @@ describe("DashboardPage archive policy", () => {
     window.localStorage.clear();
   });
 
-  it("shows the branch archive action for master", async () => {
-    const user = userEvent.setup();
+  it("shows recent runs above the branch matrix", async () => {
     renderDashboard();
-
-    const archiveButtons = await screen.findAllByRole("button", {
-      name: "Archive branch",
-    });
-    await user.click(archiveButtons[0]);
-
-    expect(
-      await screen.findByText('Archive branch "master"?')
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Archive" }));
-
-    await waitFor(() => {
-      expect(archiveBranchMutate).toHaveBeenCalledWith({
-        branch: "master",
-        archived: true,
-      });
-    });
+    expect(await screen.findByRole("heading", { name: "Recent runs" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Branches/ })).toBeInTheDocument();
+    // [0] is the desktop table; the mobile list repeats the row.
+    const [recentLink] = await screen.findAllByRole("link", { name: "feature/archive · cpu-serial" });
+    expect(recentLink).toHaveAttribute("href", "/results/feature%2Farchive/cpu-serial/recent-run");
+    // Trends get master's archs, most-run first.
+    expect(screen.getByTestId("trends-panel")).toHaveTextContent("cuda-daint,cpu-serial");
   });
 
-  it("allows master cells to be selected for bulk archive", async () => {
-    const user = userEvent.setup();
+  it("archives every build of a selected branch, master included", async () => {
     renderDashboard();
+    await userEvent.click(await screen.findByRole("button", { name: "Select" }));
+    await userEvent.click(screen.getByLabelText("Select all builds of master"));
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
 
-    const checkboxes = await screen.findAllByRole("checkbox");
-    expect(checkboxes[0]).toBeEnabled();
-    await user.click(checkboxes[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(screen.getByText("Archive 2 branch/build cells?")).toBeInTheDocument();
+    const confirm = screen.getAllByRole("button", { name: "Archive" }).at(-1)!;
+    await userEvent.click(confirm);
 
-    expect(await screen.findByText("1 run selected")).toBeInTheDocument();
-    for (const checkbox of checkboxes) {
-      expect(checkbox).toBeEnabled();
-    }
+    await waitFor(() =>
+      expect(archiveCellsMutate).toHaveBeenCalledWith({
+        cells: [
+          { branch: "master", arch: "cpu-serial" },
+          { branch: "master", arch: "cuda-daint" },
+        ],
+        archived: true,
+      })
+    );
   });
 });

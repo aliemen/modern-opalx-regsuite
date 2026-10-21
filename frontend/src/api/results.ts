@@ -233,6 +233,28 @@ export async function getRuns(
   return { runs: res.data, total };
 }
 
+/** Newest run of one (branch, arch) cell plus how many runs the cell holds. */
+export interface MatrixCell {
+  run: RunIndexEntry;
+  run_count: number;
+}
+
+export interface MatrixRow {
+  branch: string;
+  last_activity: string;
+  /** Keyed by arch; cells without a run in the requested view are absent. */
+  cells: Record<string, MatrixCell>;
+}
+
+export async function getLatestMatrix(
+  view: ViewMode = "active"
+): Promise<MatrixRow[]> {
+  const res = await api.get<{ rows: MatrixRow[] }>("/api/results/latest-matrix", {
+    params: { view },
+  });
+  return res.data.rows;
+}
+
 export async function getAllRuns(
   limit = 25,
   offset = 0,

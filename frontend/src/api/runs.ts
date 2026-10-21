@@ -10,6 +10,10 @@ export interface CurrentRunStatus {
   started_at: string;
   machine_id: string | null;
   connection_name?: string | null;
+  triggered_by?: string | null;
+  /** Public build / machine preset names from the execution snapshot. */
+  build_name?: string | null;
+  machine_name?: string | null;
 }
 
 export interface TriggerRequest {
@@ -63,6 +67,10 @@ export interface QueuedRunItem {
   branch: string;
   arch: string;
   queued_at: string;
+  connection_name?: string | null;
+  triggered_by?: string | null;
+  build_name?: string | null;
+  machine_name?: string | null;
 }
 
 export interface MachineStatus {

@@ -51,7 +51,7 @@ export function ActivityPage() {
   const total = data?.total ?? 0;
 
   function copyPublicLink(run: RunIndexEntry) {
-    const url = `${window.location.origin}/public/runs/${run.branch}/${run.arch}/${run.run_id}`;
+    const url = `${window.location.origin}/public/runs/${encodeURIComponent(run.branch)}/${encodeURIComponent(run.arch)}/${encodeURIComponent(run.run_id)}`;
     navigator.clipboard.writeText(url).then(() => {
       setCopiedId(run.run_id);
       setTimeout(() => setCopiedId(null), 2000);

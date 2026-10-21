@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { resultsPath } from "../../lib/paths";
 import { Cpu } from "lucide-react";
 import { getLatestMaster } from "../../api/stats";
 import { StatusBadge } from "../StatusBadge";
@@ -31,8 +32,8 @@ export function LatestMasterMatrix() {
           {data.cells.map((cell) => {
             const unitPassed = cell.unit_total - cell.unit_failed;
             const href = cell.run_id
-              ? `/results/master/${cell.arch}/${cell.run_id}`
-              : `/results/master/${cell.arch}`;
+              ? resultsPath("master", cell.arch, cell.run_id)
+              : resultsPath("master", cell.arch);
             return (
               <Link
                 key={cell.arch}

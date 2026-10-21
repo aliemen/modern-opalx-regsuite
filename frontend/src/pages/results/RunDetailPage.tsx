@@ -60,6 +60,8 @@ export function RunDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["runs", branch, arch] });
       queryClient.invalidateQueries({ queryKey: ["branches"] });
+      queryClient.invalidateQueries({ queryKey: ["all-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       queryClient.invalidateQueries({ queryKey: ["archive-summary"] });
       navigate(resultsPath(branch!, arch!));
     },

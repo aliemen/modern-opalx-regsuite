@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
 
@@ -54,6 +55,21 @@ class ArchiveSummary(BaseModel):
 
 class VisibilityBody(BaseModel):
     public: bool
+
+
+class MatrixCell(BaseModel):
+    run: RunIndexEntry  # newest run in this (branch, arch) for the view
+    run_count: int
+
+
+class MatrixRow(BaseModel):
+    branch: str
+    last_activity: datetime
+    cells: dict[str, MatrixCell]  # keyed by arch
+
+
+class LatestMatrix(BaseModel):
+    rows: list[MatrixRow]
 
 
 def _index_entry_for_run(
@@ -207,6 +223,50 @@ def list_all_runs(
         runs=all_entries[offset : offset + limit],
         total=len(all_entries),
     )
+
+
+@router.get("/latest-matrix", response_model=LatestMatrix)
+def latest_matrix(
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+    view: ViewMode = Query("active"),
+) -> LatestMatrix:
+    """Return the newest run per (branch, arch) for the dashboard matrix.
+
+    One read per index file, instead of one request per cell from the
+    frontend. Cells without a run in *view* are omitted, and so are branches
+    left with no cells. Rows are unordered; the client sorts them.
+    """
+    data_root = cfg.resolved_data_root
+    branches_path = branches_index_path(data_root)
+    if not branches_path.is_file():
+        return LatestMatrix(rows=[])
+    with branches_path.open("r", encoding="utf-8") as f:
+        branches: dict[str, list[str]] = json.load(f)
+
+    rows: list[MatrixRow] = []
+    for branch, archs in branches.items():
+        cells: dict[str, MatrixCell] = {}
+        for arch in archs:
+            idx_path = runs_index_path(data_root, branch, arch)
+            if not idx_path.is_file():
+                continue
+            try:
+                with idx_path.open("r", encoding="utf-8") as f:
+                    raw = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+            if not isinstance(raw, list):
+                continue
+            entries = [RunIndexEntry.model_validate(e) for e in filter_entries_by_view(raw, view)]
+            if not entries:
+                continue
+            newest = max(entries, key=lambda e: e.started_at)
+            cells[arch] = MatrixCell(run=newest, run_count=len(entries))
+        if cells:
+            last_activity = max(c.run.started_at for c in cells.values())
+            rows.append(MatrixRow(branch=branch, last_activity=last_activity, cells=cells))
+    return LatestMatrix(rows=rows)
 
 
 @router.get("/branches/{branch:path}/archs/{arch}/runs/{run_id}", response_model=RunDetail)

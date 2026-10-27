@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { resultsPath } from "../../lib/paths";
 import { Cpu } from "lucide-react";
-import { getLatestMaster } from "../../api/stats";
+import { RECENT_ARCH_DAYS, getLatestMaster } from "../../api/stats";
 import { StatusBadge } from "../StatusBadge";
 
 /**
@@ -26,7 +26,7 @@ export function LatestMasterMatrix() {
       {isLoading && !data ? (
         <p className="text-muted text-xs py-2">Loading…</p>
       ) : !data || data.cells.length === 0 ? (
-        <p className="text-muted text-xs py-2">No master runs yet.</p>
+        <p className="text-muted text-xs py-2">No master runs in the last {RECENT_ARCH_DAYS} days.</p>
       ) : (
         <div className="space-y-2">
           {data.cells.map((cell) => {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Shuffle } from "lucide-react";
-import { getFlakiness, getLatestMaster } from "../../api/stats";
+import { RECENT_ARCH_DAYS, getFlakiness, getLatestMaster } from "../../api/stats";
 
 export function FlakinessCard({ archs: sortedArchs }: { archs?: string[] }) {
   const [selectedArch, setSelectedArch] = useState<string | null>(null);
@@ -49,7 +49,7 @@ export function FlakinessCard({ archs: sortedArchs }: { archs?: string[] }) {
       </div>
 
       {!arch ? (
-        <p className="text-muted text-xs py-2">No master archs yet.</p>
+        <p className="text-muted text-xs py-2">No master runs in the last {RECENT_ARCH_DAYS} days.</p>
       ) : isLoading && !data ? (
         <p className="text-muted text-xs py-2">Loading…</p>
       ) : !data || data.simulations.length === 0 ? (

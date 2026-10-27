@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Check } from "lucide-react";
-import { getNewlyBroken } from "../../api/stats";
+import { RECENT_ARCH_DAYS, getNewlyBroken } from "../../api/stats";
 
 /**
  * "Newly broken (master)" — diff of failing regression simulations between
@@ -26,7 +26,7 @@ export function NewlyBrokenCard() {
       {isLoading && !data ? (
         <p className="text-muted text-xs py-2">Loading…</p>
       ) : !data || data.entries.length === 0 ? (
-        <p className="text-muted text-xs py-2">No master runs yet.</p>
+        <p className="text-muted text-xs py-2">No master runs in the last {RECENT_ARCH_DAYS} days.</p>
       ) : (
         <div className="space-y-3">
           {data.entries.map((entry) => (

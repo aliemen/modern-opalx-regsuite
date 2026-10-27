@@ -88,6 +88,9 @@ export interface FlakinessReport {
 
 // ── Endpoints ──────────────────────────────────────────────────────────────
 
+/** Archs without a master run in this many days drop out of the per-arch master cards (server default). */
+export const RECENT_ARCH_DAYS = 30;
+
 export async function getLatestMaster(
   view: ViewMode = "active"
 ): Promise<LatestMasterMatrix> {

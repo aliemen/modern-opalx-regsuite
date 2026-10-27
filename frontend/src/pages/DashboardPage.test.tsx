@@ -47,8 +47,11 @@ const archiveResult = {
 
 let archiveCellsMutate: ReturnType<typeof vi.fn>;
 
-function cell(branch: string, arch: string, runCount: number) {
-  return { run: makeRun({ branch, arch, run_id: `${arch}-run` }), run_count: runCount };
+const DAY = 24 * 3600 * 1000;
+
+function cell(branch: string, arch: string, runCount: number, daysAgo = 2) {
+  const started_at = new Date(Date.now() - daysAgo * DAY).toISOString();
+  return { run: makeRun({ branch, arch, run_id: `${arch}-run`, started_at }), run_count: runCount };
 }
 
 function renderDashboard() {
@@ -113,6 +116,21 @@ describe("DashboardPage", () => {
     expect(recentLink).toHaveAttribute("href", "/results/feature%2Farchive/cpu-serial/recent-run");
     // Trends get master's archs, most-run first.
     expect(screen.getByTestId("trends-panel")).toHaveTextContent("cuda-daint,cpu-serial");
+  });
+
+  it("leaves master archs without a run in the last 30 days out of the trends", async () => {
+    vi.mocked(getLatestMatrix).mockResolvedValue([
+      {
+        branch: "master",
+        last_activity: "2026-05-18T10:00:00Z",
+        cells: {
+          "cpu-serial": cell("master", "cpu-serial", 1),
+          "cuda-ampere80": cell("master", "cuda-ampere80", 13, 120),
+        },
+      },
+    ]);
+    renderDashboard();
+    expect(await screen.findByTestId("trends-panel")).toHaveTextContent(/^cpu-serial$/);
   });
 
   it("archives every build of a selected branch, master included", async () => {

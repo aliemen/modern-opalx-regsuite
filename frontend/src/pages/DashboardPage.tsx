@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Play } from "lucide-react";
 import { getLatestMatrix } from "../api/results";
 import { getQueueState } from "../api/runs";
+import { RECENT_ARCH_DAYS } from "../api/stats";
 import { useRunSelection } from "../hooks/useRunSelection";
 import { useArchiveMutations } from "../hooks/useArchiveMutations";
 import { useRunCompletionRefresh } from "../hooks/useRunCompletionRefresh";
@@ -40,11 +41,14 @@ export function DashboardPage() {
   // Toast for "N runs skipped (currently running)".
   const [skippedToast, setSkippedToast] = useState<string | null>(null);
 
-  // Master's archs, most-run first, drive the trends and flakiness cards.
+  // Master's archs with a run in the last RECENT_ARCH_DAYS days, most-run first,
+  // drive the trends and flakiness cards (same rule as the master stats cards).
   const masterArchs = useMemo(() => {
     const master = rows.find((r) => r.branch === "master");
     if (!master) return [];
+    const cutoff = Date.now() - RECENT_ARCH_DAYS * 24 * 3600 * 1000;
     return Object.entries(master.cells)
+      .filter(([, cell]) => new Date(cell.run.started_at).getTime() >= cutoff)
       .sort((a, b) => b[1].run_count - a[1].run_count)
       .map(([arch]) => arch);
   }, [rows]);

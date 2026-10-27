@@ -5,6 +5,7 @@ import { FlakinessCard } from "./FlakinessCard";
 import { getFlakiness, getLatestMaster } from "../../api/stats";
 
 vi.mock("../../api/stats", () => ({
+  RECENT_ARCH_DAYS: 30,
   getLatestMaster: vi.fn(),
   getFlakiness: vi.fn(),
 }));

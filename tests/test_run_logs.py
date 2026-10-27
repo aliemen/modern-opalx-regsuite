@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from modern_opalx_regsuite import series
-from modern_opalx_regsuite.api import results
+from modern_opalx_regsuite.api import public, results
 from modern_opalx_regsuite.api.app import RunDataFiles
 from modern_opalx_regsuite.api.deps import get_config, require_auth
 from modern_opalx_regsuite.artifacts import MANIFEST_NAME, check_run_integrity
@@ -122,6 +122,25 @@ def test_series_endpoint_requires_auth(tmp_path):
     app.dependency_overrides[get_config] = lambda: cfg
     r = TestClient(app).get("/api/results/branches/master/archs/cpu-serial/runs/r1/series")
     assert r.status_code == 401
+
+
+@pytest.mark.parametrize("meta_update, code", [
+    ({"public": True}, 200),
+    ({}, 404),  # not published
+    ({"public": True, "archived": True}, 404),
+])
+def test_public_series_endpoint_serves_only_published_runs(tmp_path, meta_update, code):
+    run = _run(tmp_path)
+    meta = json.loads((run / "run-meta.json").read_text())
+    (run / "run-meta.json").write_text(json.dumps({**meta, **meta_update}))
+    app = FastAPI()
+    app.include_router(public.router)  # no auth override: the route is outside the fence
+    app.dependency_overrides[get_config] = lambda: SimpleNamespace(resolved_data_root=tmp_path)
+    r = TestClient(app).get("/api/public/series/master/cpu-serial/r1")
+    assert r.status_code == code
+    if code == 200:
+        assert r.headers["content-encoding"] == "gzip" and r.json()["sims"] == {"Drift": {}}
+        assert TestClient(app).get("/api/public/runs/master/cpu-serial/r1").status_code == 200
 
 
 def test_read_log_text_reads_plain_or_gzip(tmp_path):

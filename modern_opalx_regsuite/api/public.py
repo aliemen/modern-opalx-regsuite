@@ -17,15 +17,18 @@ Security notes
   is the user's consent to surface that field.
 * Logs are intentionally not exposed by the public detail endpoint; only
   the run metadata, unit report, and regression report are returned, so
-  paths that may appear in ``logs/pipeline.log`` stay private.
+  paths that may appear in ``logs/pipeline.log`` stay private. The plot data
+  (``series.json.gz``) has its own route with the same visibility check.
 """
 from __future__ import annotations
 
 import json
 from datetime import datetime, date, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..archive_service import filter_public_entries
@@ -39,6 +42,7 @@ from ..data_model import (
     run_dir,
     runs_index_path,
 )
+from ..series import SERIES_FILE
 from .deps import BranchPath, get_config
 
 router = APIRouter(prefix="/api/public", tags=["public"])
@@ -153,6 +157,34 @@ def public_activity(
     )
 
 
+def _load_json(path: Path) -> Any:
+    if not path.is_file():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _public_run(cfg: SuiteConfig, branch: str, arch: str, run_id: str) -> tuple[Path, RunMeta]:
+    """Run directory and meta of a published, non-archived run, else 404.
+
+    Re-validates ``meta.public`` and ``not meta.archived`` directly from
+    ``run-meta.json``, so a stale runs-index entry cannot expose a private run.
+    Every failure is the same 404, so unauthenticated scrapers can't tell "not
+    published" from "does not exist".
+    """
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
+    if not rdir.is_dir():
+        raise not_found
+    try:
+        meta = RunMeta.model_validate(_load_json(rdir / "run-meta.json"))
+    except Exception as exc:  # noqa: BLE001
+        raise not_found from exc
+    if not meta.public or meta.archived:
+        raise not_found
+    return rdir, meta
+
+
 @router.get(
     "/runs/{branch:path}/{arch}/{run_id}",
     response_model=PublicRunDetail,
@@ -163,41 +195,10 @@ def get_public_run(
     run_id: str,
     cfg: SuiteConfig = Depends(get_config),
 ) -> PublicRunDetail:
-    """Return the public-facing run detail.
-
-    Re-validates ``meta.public`` and ``not meta.archived`` directly from
-    ``run-meta.json`` — a stale runs-index entry cannot expose a private run.
-    """
-    rdir = run_dir(cfg.resolved_data_root, branch, arch, run_id)
-    if not rdir.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found."
-        )
-
-    def _load(name: str) -> Any:
-        p = rdir / name
-        if not p.is_file():
-            return {}
-        with p.open("r", encoding="utf-8") as f:
-            return json.load(f)
-
-    meta_data = _load("run-meta.json")
-    try:
-        meta = RunMeta.model_validate(meta_data)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found."
-        ) from exc
-
-    if not meta.public or meta.archived:
-        # Uniform 404 so unauthenticated scrapers can't distinguish "not
-        # published" from "does not exist".
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found."
-        )
-
-    unit_data = _load("unit-tests.json")
-    reg_data = _load("regression-tests.json")
+    """Return the public-facing run detail."""
+    rdir, meta = _public_run(cfg, branch, arch, run_id)
+    unit_data = _load_json(rdir / "unit-tests.json")
+    reg_data = _load_json(rdir / "regression-tests.json")
 
     return PublicRunDetail(
         meta=meta,
@@ -205,4 +206,23 @@ def get_public_run(
         regression=RegressionTestsReport.model_validate(reg_data)
         if reg_data
         else RegressionTestsReport(),
+    )
+
+
+@router.get("/series/{branch:path}/{arch}/{run_id}")
+def get_public_run_series(
+    branch: BranchPath,
+    arch: str,
+    run_id: str,
+    cfg: SuiteConfig = Depends(get_config),
+) -> FileResponse:
+    """A published run's ``series.json.gz``, served like the authenticated route."""
+    rdir, _meta = _public_run(cfg, branch, arch, run_id)
+    path = rdir / SERIES_FILE
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run has no series data.")
+    return FileResponse(
+        path,
+        media_type="application/json",
+        headers={"Content-Encoding": "gzip", "Cache-Control": "no-cache"},
     )

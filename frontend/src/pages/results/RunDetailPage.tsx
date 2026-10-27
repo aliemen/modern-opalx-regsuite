@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Archive, ChevronDown, ChevronRight, FileText, Globe2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { Archive, FileText, Globe2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { archiveRun, deleteRun, getRunDetail, getRunSeries, restoreRun, setRunVisibility } from "../../api/results";
 import { getRunIntegrity } from "../../api/integrity";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -10,6 +10,7 @@ import { resultsPath } from "../../lib/paths";
 import { Breadcrumb } from "../../components/Breadcrumb";
 import { RegressionTestsBrowser, TEST_PARAM } from "./RegressionTestsBrowser";
 import { Fact, FactGrid } from "./RunFacts";
+import { UnitTestsPanel } from "./UnitTestsPanel";
 import { SkipConfigInfo } from "./SkippedTests";
 import { duration, fmtDate } from "./runDetailFormat";
 import { SlurmResourceSummary, addSlurmRerunParams } from "./SlurmResourceSummary";
@@ -140,7 +141,6 @@ export function RunDetailPage() {
     },
   });
 
-  const [showUnitDetails, setShowUnitDetails] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
 
@@ -149,9 +149,6 @@ export function RunDetailPage() {
     return <div className="p-8 text-failed">Failed to load run data.</div>;
 
   const { meta, unit, regression } = data;
-  const unitRows = [...unit.tests].sort(
-    (a, b) => Number(a.status === "skipped") - Number(b.status === "skipped"),
-  );
   const unitSkipped = meta.unit_tests_skipped ?? 0;
   const regressionSkipped = meta.regression_skipped ?? 0;
   const runPath = `runs/${branch}/${arch}/${runId}`;
@@ -473,55 +470,20 @@ export function RunDetailPage() {
 
       {/* Unit tests */}
       {!isColdStored && unit.tests.length > 0 && (
-        <section className="bg-surface border border-border rounded-xl overflow-hidden">
-          <h2>
-            <button
-              onClick={() => setShowUnitDetails(!showUnitDetails)}
-              aria-expanded={showUnitDetails}
-              aria-controls="unit-tests-panel"
-              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-border/30 transition-colors text-left"
-            >
-              {showUnitDetails ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-              <span className="text-fg font-medium">Unit Tests</span>
-              <span className="text-muted text-sm font-normal ml-auto">
-                {meta.unit_tests_total - meta.unit_tests_failed}/{meta.unit_tests_total} passed
-                {meta.unit_tests_failed > 0 && (
-                  <span className="text-failed ml-2">{meta.unit_tests_failed} failed</span>
-                )}
-                {unitSkipped > 0 && (
-                  <span className="text-muted ml-2">· {unitSkipped} skipped</span>
-                )}
-              </span>
-            </button>
-          </h2>
-          {showUnitDetails && (
-            <div id="unit-tests-panel" className="border-t border-border p-4 overflow-x-auto">
-              <table className="w-full text-xs">
-                <caption className="sr-only">Unit test results</caption>
-                <thead className="text-muted">
-                  <tr>
-                    <th scope="col" className="text-left pb-2">Test</th>
-                    <th scope="col" className="text-left pb-2">Status</th>
-                    <th scope="col" className="text-left pb-2">Duration</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unitRows.map((t) => (
-                    <tr key={t.name} className="border-t border-border/40">
-                      <td className="py-1.5 font-mono text-fg">{t.name}</td>
-                      <td className="py-1.5">
-                        <StatusBadge status={t.status} />
-                      </td>
-                      <td className="py-1.5 text-muted">
-                        {t.duration_seconds != null ? `${t.duration_seconds.toFixed(2)}s` : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+        <UnitTestsPanel
+          tests={unit.tests}
+          summary={
+            <>
+              {meta.unit_tests_total - meta.unit_tests_failed}/{meta.unit_tests_total} passed
+              {meta.unit_tests_failed > 0 && (
+                <span className="text-failed ml-2">{meta.unit_tests_failed} failed</span>
+              )}
+              {unitSkipped > 0 && (
+                <span className="text-muted ml-2">· {unitSkipped} skipped</span>
+              )}
+            </>
+          }
+        />
       )}
 
       {/* Regression tests */}

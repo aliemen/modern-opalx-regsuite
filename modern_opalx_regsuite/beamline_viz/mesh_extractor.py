@@ -18,6 +18,11 @@ test website.  Schema::
       ],
       "bounds": {"min": [x,y,z], "max": [x,y,z]}
     }
+
+Elements without vertices or triangles are dropped. OPALX writes such empty
+elements for some beamlines (and on-axis, zero-aperture ones for others); a mesh
+left with nothing to draw raises ``EmptyMeshError`` instead of producing a file,
+so the run falls back to the 2D beamline plot.
 """
 from __future__ import annotations
 
@@ -31,8 +36,15 @@ import zlib
 from pathlib import Path
 
 
+class EmptyMeshError(ValueError):
+    """The script holds no geometry a 3D view could show."""
+
+
 def extract_beamline_json(script_path: Path, out_path: Path) -> None:
-    """Read mesh data from *script_path* and write it to *out_path* as JSON."""
+    """Read mesh data from *script_path* and write it to *out_path* as JSON.
+
+    Raises ``EmptyMeshError`` (and writes nothing) when no element has a surface.
+    """
     module_name = f"_opalx_mesh_{abs(hash(str(script_path)))}"
     spec = importlib.util.spec_from_file_location(module_name, script_path)
     if spec is None or spec.loader is None:
@@ -62,6 +74,9 @@ def extract_beamline_json(script_path: Path, out_path: Path) -> None:
         end = cursor + 8 * floats_count
         floats = struct.unpack(f"={floats_count}d", raw[cursor:end])
         cursor = end
+        indices = [int(t) for t in triangles[i]]
+        if not floats or not indices:
+            continue
 
         # Update bounds along each axis (vertices are interleaved x,y,z).
         for axis in range(3):
@@ -76,13 +91,13 @@ def extract_beamline_json(script_path: Path, out_path: Path) -> None:
 
         elements.append({
             "vertices": list(floats),
-            "indices": [int(t) for t in triangles[i]],
+            "indices": indices,
             "colorIndex": int(color[i]),
         })
 
-    if not elements:
-        bounds_min = [0.0, 0.0, 0.0]
-        bounds_max = [0.0, 0.0, 0.0]
+    # Triangles need extent along at least two axes to have any area.
+    if not elements or sum(hi > lo for lo, hi in zip(bounds_min, bounds_max)) < 2:
+        raise EmptyMeshError(f"no visible beamline geometry in {script_path.name}")
 
     payload = {
         "elements": elements,

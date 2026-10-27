@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..beamline_viz import extract_beamline_json, generate_beamline_svg
+from ..beamline_viz.mesh_extractor import EmptyMeshError
 from ..data_model import (
     RegressionContainer,
     RegressionMetric,
@@ -364,6 +365,8 @@ def _build_simulation(
         try:
             extract_beamline_json(positions_script, mesh_out)
             beamline_3d_data = f"plots/{test_name}_beamline.json"
+        except EmptyMeshError as exc:
+            _append_pipeline_line(pipeline_log_path, f"[regression] no 3D beamline for {test_name}: {exc}")
         except Exception as exc:
             _append_pipeline_line(
                 pipeline_log_path,

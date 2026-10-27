@@ -1208,15 +1208,30 @@ def migrate_series_cmd(
     report: Optional[Path] = typer.Option(
         None, "--report", help="Write the full JSON report here."
     ),
+    prune: bool = typer.Option(
+        False,
+        "--prune",
+        help="Instead of converting: back up and delete converted runs' SVGs, gzip old logs.",
+    ),
+    backup_dir: Optional[Path] = typer.Option(
+        None, "--backup-dir", help="Where --prune writes the SVG archives (required)."
+    ),
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
 ) -> None:
-    """Convert legacy metric SVGs into series.json.gz (adds files only).
+    """Convert legacy metric SVGs into series.json.gz, or prune them afterwards.
 
-    Writes series.json.gz and sets ``series: true`` on converted metrics; SVGs,
-    ``plot`` paths and logs stay. Already converted and active runs are
-    skipped. Stop the web service first. Exits with status 1 if any plot failed
-    verification (those metrics keep their SVG).
+    Default mode adds files only: writes series.json.gz and sets ``series:
+    true`` on converted metrics; SVGs, ``plot`` paths and logs stay. Exits with
+    status 1 if any plot failed verification (those metrics keep their SVG).
+
+    ``--prune --backup-dir DIR`` is the later contract step: for runs whose
+    plots were all converted (or that have no regression report) it archives
+    the stat SVGs to DIR, verifies the archive, deletes them, clears ``plot``
+    paths, and gzips plain logs. Exits with status 1 if any run failed.
+
+    Already handled and active runs are skipped. Stop the web service first.
     """
+    from .migration.prune import prune_root
     from .migration.series_migration import convert_root
 
     cfg = _load_config_option(config)
@@ -1230,7 +1245,14 @@ def migrate_series_cmd(
             raise typer.BadParameter("no archive_root configured")
         roots.append(cfg.resolved_archive_root)
 
+    if prune and backup_dir is None:
+        raise typer.BadParameter("--prune needs --backup-dir")
+
     def _progress(r) -> None:
+        if prune:
+            detail = f"{r.svgs} SVGs ({r.svg_bytes / 1e6:.1f} MB), {r.logs} logs to gzip"
+            typer.echo(f"{r.status:9} {r.run}  {detail if r.status in ('pruned', 'dry-run') else ''}{r.reason}")
+            return
         detail = (
             f"{r.converted}/{r.plots} plots, {r.anchored} anchored, "
             f"{r.unverifiable} unverifiable, {len(r.failed)} failed"
@@ -1251,10 +1273,19 @@ def migrate_series_cmd(
                 candidate = current / "runs" / Path(*parts)
                 if candidate.is_dir():
                     only.append(candidate)
-        typer.echo(f"== {current}{' (dry run)' if dry_run else ''}")
-        rep = convert_root(
-            current, max_points=max_points, dry_run=dry_run, only=only, progress=_progress
-        )
+        typer.echo(f"== {current}{' (dry run)' if dry_run else ''}{' prune' if prune else ''}")
+        if prune:
+            rep = prune_root(
+                current,
+                backup_dir=backup_dir.expanduser().resolve(),
+                dry_run=dry_run,
+                only=only,
+                progress=_progress,
+            )
+        else:
+            rep = convert_root(
+                current, max_points=max_points, dry_run=dry_run, only=only, progress=_progress
+            )
         reports.append(rep)
         typer.echo(json.dumps(rep.totals(), indent=2))
 
@@ -1263,7 +1294,7 @@ def migrate_series_cmd(
             "[" + ",\n".join(r.to_json() for r in reports) + "]\n", encoding="utf-8"
         )
         typer.echo(f"Report written to {report}")
-    if any(r.totals().get("failed", 0) for r in reports):
+    if any(r.totals().get("failed", 0) or r.totals().get("runs_error", 0) for r in reports):
         raise typer.Exit(code=1)
 
 

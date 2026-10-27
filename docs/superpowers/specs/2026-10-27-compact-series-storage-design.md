@@ -1,7 +1,7 @@
 # Compact Series Storage - Design
 
 Date: 2026-10-27
-Status: approved; conversion step done on production, runner/API/frontend part pending
+Status: approved; conversion, runner, frontend and log gzip deployed; prune mode implemented
 
 ## Progress (2026-10-27)
 
@@ -23,11 +23,19 @@ Status: approved; conversion step done on production, runner/API/frontend part p
   migration finds runs by `run-meta.json` at any depth and converted them.
 - Skipped: 1 failed run with a leftover `work/` directory
   (`579-implement-dirichlet-bcs-source-plane-for-p3m/cpu-serial/20261018-202944`).
-- Next:
-  1. Runner, API, frontend, log gzip and settings, from this design.
-  2. Deploy.
-  3. Grace period.
-  4. Prune mode.
+- Runner, API, frontend, log gzip and settings: commits 85b76da and 4dd2843, deployed
+  on production the same day. The user checked the UI and new runs on Daint and Beverin.
+  - `series_max_points=None` is resolved to the global default at run start in
+    `run_pipeline`, not at trigger time, so triggers, schedules and the CLI share one
+    path. The effective value is still recorded in `run_options`.
+  - Metrics now also store the `.stat` column `unit`, used as the chart axis label.
+    Converted runs have no unit.
+- Prune mode (`migrate-series --prune --backup-dir DIR`) is implemented in
+  `migration/prune.py`.
+  - Local test on a migrated copy: 107 runs, 7,653 SVGs (379 MB) archived to 81 MB of
+    verified tarballs and deleted, 1,912 logs gzipped. Run data went from 739 MB to
+    90 MB, and integrity results were unchanged.
+  - Production backup directory: `/mnt/modern-regsuite-lxc/regsuite-svg-backup`.
 
 ## Intent
 

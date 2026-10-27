@@ -10,6 +10,9 @@ actionable signals computed from the existing on-disk data:
 
 All endpoints honour the ``view`` query param so the archive page can show
 its own historical context if we ever want it (default: active runs only).
+The per-arch master cards (latest-master, newly-broken, suite-duration) leave
+out archs whose newest master/master run is older than ``recent_days``
+(default 30), so retired or archived builds stop showing up as empty rows.
 Cost is bounded by O(archs) JSON file reads per request — well under the
 60-second polling cadence used by the StatsPanel cards.
 """
@@ -37,6 +40,12 @@ from .deps import get_config, require_auth
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
 ViewMode = Literal["active", "archived", "all"]
+
+RECENT_ARCH_DAYS = 30
+RecentDays = Annotated[
+    int,
+    Query(ge=0, le=3650, description="Leave out archs without a master/master run in this many days; 0 keeps all."),
+]
 
 
 # ── Schemas ─────────────────────────────────────────────────────────────────
@@ -157,6 +166,14 @@ def _parse_dt(raw) -> Optional[datetime]:
     return d
 
 
+def _ran_recently(entries: list[dict], days: int) -> bool:
+    """True when some entry started within the last *days* days (always, for 0)."""
+    if days <= 0:
+        return True
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return any((started := _parse_dt(e.get("started_at"))) is not None and started >= cutoff for e in entries)
+
+
 def _failing_sim_names(report: RegressionTestsReport) -> set[str]:
     """Return the set of regression simulation names that have at least one
     failing or broken metric, OR whose own ``state`` is failed/broken.
@@ -213,6 +230,7 @@ def latest_master(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
+    recent_days: RecentDays = RECENT_ARCH_DAYS,
 ) -> LatestMasterMatrix:
     """Latest master/master run per architecture (one row per arch).
 
@@ -227,6 +245,8 @@ def latest_master(
         entries = _master_regtest_only(
             _load_index(data_root, "master", arch, view)
         )
+        if not _ran_recently(entries, recent_days):
+            continue
         if not entries:
             cells.append(LatestMasterCell(arch=arch))
             continue
@@ -258,6 +278,7 @@ def newly_broken(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
+    recent_days: RecentDays = RECENT_ARCH_DAYS,
 ) -> NewlyBrokenReport:
     """Per arch, list regression sims failing in the latest master/master run
     that were passing in the previous master/master run.
@@ -271,6 +292,8 @@ def newly_broken(
         entries = _master_regtest_only(
             _load_index(data_root, "master", arch, view)
         )
+        if not _ran_recently(entries, recent_days):
+            continue
         # Need two completed runs to compute a diff. "Completed" = status in
         # passed/failed (not running, not cancelled, not unknown).
         completed = [
@@ -315,6 +338,7 @@ def suite_duration(
     _user: Annotated[str, Depends(require_auth)],
     cfg: SuiteConfig = Depends(get_config),
     view: ViewMode = Query("active"),
+    recent_days: RecentDays = RECENT_ARCH_DAYS,
 ) -> SuiteDurationReport:
     """Master/master suite duration: latest vs average of the previous 10
     completed runs.
@@ -330,6 +354,8 @@ def suite_duration(
         entries = _master_regtest_only(
             _load_index(data_root, "master", arch, view)
         )
+        if not _ran_recently(entries, recent_days):
+            continue
         completed = [
             e
             for e in entries

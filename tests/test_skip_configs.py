@@ -316,7 +316,7 @@ def test_suite_duration_excludes_runs_with_skip_config(tmp_path: Path) -> None:
         ],
     )
 
-    report = stats_developer.suite_duration(_user="u", cfg=cfg, view="active")
+    report = stats_developer.suite_duration(_user="u", cfg=cfg, view="active", recent_days=0)
 
     assert report.cells[0].current_seconds == 1800.0
 

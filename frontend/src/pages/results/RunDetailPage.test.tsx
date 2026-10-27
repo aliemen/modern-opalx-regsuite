@@ -256,9 +256,10 @@ describe("RunDetailPage", () => {
     });
 
     renderPage();
-    (await screen.findByText("Drift")).click();
 
+    // The only test opens without a click.
     expect(await screen.findByTestId("series-plot")).toHaveTextContent("rms_x:3");
+    expect(screen.getByRole("heading", { level: 3, name: "Drift" })).toBeInTheDocument();
     expect(getRunSeries).toHaveBeenCalledWith("master", "cpu-serial", "source");
     const img = screen.getByAltText("Drift energy");
     expect(img.getAttribute("src")).toBe("/data/runs/master/cpu-serial/source/plots/Drift_energy.svg");

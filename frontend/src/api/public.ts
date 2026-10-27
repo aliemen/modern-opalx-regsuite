@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import type { RegressionTestsReport, RunIndexEntry, RunMeta, UnitTestsReport } from "./results";
+import type { RegressionTestsReport, RunIndexEntry, RunMeta, RunSeries, UnitTestsReport } from "./results";
 
 // Bare axios client — no token interceptor — so requests to /api/public never
 // trigger the 401 refresh/redirect flow. Public endpoints are unauthenticated
@@ -57,6 +57,17 @@ export async function getPublicRunDetail(
 ): Promise<PublicRunDetail> {
   const res = await publicClient.get<PublicRunDetail>(
     `/api/public/runs/${encodeURIComponent(branch)}/${encodeURIComponent(arch)}/${encodeURIComponent(runId)}`,
+  );
+  return res.data;
+}
+
+export async function getPublicRunSeries(
+  branch: string,
+  arch: string,
+  runId: string,
+): Promise<RunSeries> {
+  const res = await publicClient.get<RunSeries>(
+    `/api/public/series/${encodeURIComponent(branch)}/${encodeURIComponent(arch)}/${encodeURIComponent(runId)}`,
   );
   return res.data;
 }

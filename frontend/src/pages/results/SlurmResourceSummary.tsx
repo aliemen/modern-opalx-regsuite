@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import type { SlurmResources } from "../../api/runs";
+import { Fact } from "./RunFacts";
 
 interface SlurmResourceSummaryProps {
   resources: SlurmResources | null;
@@ -41,9 +42,8 @@ export function SlurmResourceSummary({ resources }: SlurmResourceSummaryProps) {
   ].filter(Boolean);
 
   return (
-    <div className="space-y-1 sm:col-span-2">
-      <p className="text-muted text-xs">Slurm Resources</p>
-      <p className="text-fg text-xs">{parts.join(" / ")}</p>
-    </div>
+    <Fact label="Slurm Resources">
+      <span className="text-xs">{parts.join(" / ")}</span>
+    </Fact>
   );
 }

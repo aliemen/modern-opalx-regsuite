@@ -2,18 +2,7 @@ import { Suspense, useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
-import { useQuery } from "@tanstack/react-query";
-
-interface BeamlineElement {
-  vertices: number[];      // flat [x0,y0,z0, x1,y1,z1, ...]
-  indices: number[];       // flat triangle index list
-  colorIndex: number;
-}
-
-interface BeamlineMesh {
-  elements: BeamlineElement[];
-  bounds: { min: [number, number, number]; max: [number, number, number] };
-}
+import type { BeamlineElement, BeamlineMesh } from "../lib/beamlineMesh";
 
 // Element-type palette mirrors the legend hardcoded in OPALX's
 // MeshGenerator (Structure/MeshGenerator.cpp). Indices 0-8 must stay in sync.
@@ -108,20 +97,10 @@ function ColorLegend({ active }: { active: Set<number> }) {
   );
 }
 
-export function BeamlineViewer({ url }: { url: string }) {
-  const { data, isLoading, isError } = useQuery<BeamlineMesh>({
-    queryKey: ["beamline-mesh", url],
-    queryFn: async () => {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`mesh fetch failed (${res.status})`);
-      return res.json();
-    },
-    staleTime: Infinity,
-  });
-
-  const frame: SceneFrame | null = useMemo(() => {
-    if (!data) return null;
-    const { min, max } = data.bounds;
+/** Orbitable three.js view of a validated beamline mesh (see parseBeamlineMesh). */
+export function BeamlineViewer({ mesh }: { mesh: BeamlineMesh }) {
+  const frame: SceneFrame = useMemo(() => {
+    const { min, max } = mesh.bounds;
     const center: [number, number, number] = [
       (min[0] + max[0]) / 2,
       (min[1] + max[1]) / 2,
@@ -129,11 +108,10 @@ export function BeamlineViewer({ url }: { url: string }) {
     ];
     const span = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]) || 1;
     return { center, span };
-  }, [data]);
+  }, [mesh]);
 
-  const cameraParams = useMemo(() => {
-    if (!frame) return null;
-    return {
+  const cameraParams = useMemo(
+    () => ({
       position: [
         frame.center[0] + frame.span * 1.5,
         frame.center[1] + frame.span * 1.5,
@@ -142,31 +120,24 @@ export function BeamlineViewer({ url }: { url: string }) {
       fov: 45,
       near: frame.span / 1000,
       far: frame.span * 100,
-    };
-  }, [frame]);
+    }),
+    [frame]
+  );
 
-  const activeColors = useMemo(() => {
-    const s = new Set<number>();
-    if (data) for (const e of data.elements) s.add(e.colorIndex);
-    return s;
-  }, [data]);
-
-  if (isLoading) {
-    return <div className="aspect-video animate-pulse bg-surface rounded border border-border" />;
-  }
-  if (isError || !data || !frame || !cameraParams) {
-    return (
-      <div className="aspect-video rounded border border-border bg-surface flex items-center justify-center text-muted text-xs">
-        Could not load beamline mesh.
-      </div>
-    );
-  }
+  const activeColors = useMemo(() => new Set(mesh.elements.map((e) => e.colorIndex)), [mesh]);
+  const label = `3D view of the beamline: ${ELEMENT_PALETTE.filter((_, i) => activeColors.has(i))
+    .map((p) => p.label)
+    .join(", ")}. Drag to rotate, scroll to zoom.`;
 
   return (
-    <div className="relative aspect-video rounded border border-border bg-surface overflow-hidden">
+    <div
+      role="img"
+      aria-label={label}
+      className="relative aspect-video max-h-80 w-full rounded border border-border bg-surface overflow-hidden"
+    >
       <Canvas camera={cameraParams} dpr={[1, 2]}>
         <Suspense fallback={null}>
-          <Scene data={data} frame={frame} />
+          <Scene data={mesh} frame={frame} />
         </Suspense>
       </Canvas>
       <ColorLegend active={activeColors} />

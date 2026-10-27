@@ -2,18 +2,19 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Archive, ChevronDown, ChevronRight, ExternalLink, Globe2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
-import { archiveRun, deleteRun, getRunDetail, restoreRun, setRunVisibility } from "../../api/results";
+import { Archive, ChevronDown, ChevronRight, FileText, Globe2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { archiveRun, deleteRun, getRunDetail, getRunSeries, restoreRun, setRunVisibility } from "../../api/results";
 import { getRunIntegrity } from "../../api/integrity";
 import { StatusBadge } from "../../components/StatusBadge";
 import { resultsPath } from "../../lib/paths";
 import { Breadcrumb } from "../../components/Breadcrumb";
-import { SimCard } from "./RunSimulationCard";
-import { SkipConfigInfo, SkippedSimulationsGroup } from "./SkippedTests";
+import { RegressionTestsBrowser, TEST_PARAM } from "./RegressionTestsBrowser";
+import { Fact, FactGrid } from "./RunFacts";
+import { SkipConfigInfo } from "./SkippedTests";
 import { duration, fmtDate } from "./runDetailFormat";
 import { SlurmResourceSummary, addSlurmRerunParams } from "./SlurmResourceSummary";
 
-export { SimCard, duration, fmtDate };
+export { duration, fmtDate };
 
 export const OPALX_COMMIT_BASE = "https://github.com/OPALX-project/OPALX/commit";
 export const REGTESTS_COMMIT_BASE = "https://github.com/OPALX-project/regression-tests-x/commit";
@@ -148,17 +149,15 @@ export function RunDetailPage() {
     return <div className="p-8 text-failed">Failed to load run data.</div>;
 
   const { meta, unit, regression } = data;
-  const executedSims = regression.simulations.filter((s) => s.state !== "skipped");
-  const skippedSimNames = regression.simulations
-    .filter((s) => s.state === "skipped")
-    .map((s) => s.name);
   const unitRows = [...unit.tests].sort(
     (a, b) => Number(a.status === "skipped") - Number(b.status === "skipped"),
   );
   const unitSkipped = meta.unit_tests_skipped ?? 0;
   const regressionSkipped = meta.regression_skipped ?? 0;
   const runPath = `runs/${branch}/${arch}/${runId}`;
-  const qs = searchParams.toString();
+  const listParams = new URLSearchParams(searchParams);
+  listParams.delete(TEST_PARAM);
+  const qs = listParams.toString();
   const listHref = `${resultsPath(branch!, arch!)}${qs ? `?${qs}` : ""}`;
   const regtestLabel = meta.regtest_branch ?? "\u2014";
   const isColdStored = meta.archived && data.archived_on_cold_storage;
@@ -200,8 +199,11 @@ export function RunDetailPage() {
     rerunParams.set("skip_config_id", meta.run_options.skip_config.id);
   }
 
+  const actionClass =
+    "inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-sm text-muted transition-colors hover:text-accent disabled:opacity-50";
+
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+    <div className="mx-auto w-full max-w-[120rem] space-y-5 p-4 sm:p-6">
       <Breadcrumb
         crumbs={[
           {
@@ -219,7 +221,51 @@ export function RunDetailPage() {
           { label: runId ?? "", title: "Run ID" },
         ]}
       />
-      <div className="flex items-center justify-end">
+      <header className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="min-w-0 space-y-1.5">
+          <h1 className="text-xl font-semibold text-fg">
+            <span className="text-muted font-normal">Run </span>
+            <span className="font-mono">{meta.run_id}</span>
+          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={meta.status} size="md" />
+            {integrity && (
+              <span
+                className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
+                  integrity.status === "ok"
+                    ? "border-passed/40 text-passed bg-passed/10"
+                    : integrity.status === "warning"
+                      ? "border-broken/40 text-broken bg-broken/10"
+                      : "border-failed/40 text-failed bg-failed/10"
+                }`}
+                title={
+                  integrity.issues.length === 0
+                    ? "Artifacts verified"
+                    : integrity.issues.map((i) => `${i.code}: ${i.path ?? i.message}`).join("; ")
+                }
+              >
+                {integrity.status === "ok" ? (
+                  <ShieldCheck size={10} aria-hidden="true" />
+                ) : (
+                  <ShieldAlert size={10} aria-hidden="true" />
+                )}
+                {integrity.status === "ok" ? "Artifacts OK" : `Artifacts ${integrity.status}`}
+              </span>
+            )}
+            {meta.public ? (
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-accent/40 text-accent bg-accent/10">
+                <Globe2 size={10} aria-hidden="true" />
+                Public
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-border text-muted">
+                <Lock size={10} aria-hidden="true" />
+                Private
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="ml-auto">
         {confirmArchive ? (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">{meta.archived ? "Unarchive" : "Archive"} this run?</span>
@@ -255,21 +301,21 @@ export function RunDetailPage() {
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <Link
               to={`/trigger?${rerunParams.toString()}`}
-              className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
+              className={actionClass}
               title="Start a new run with this run's settings"
             >
-              <RotateCcw size={14} /> Run again
+              <RotateCcw size={14} aria-hidden="true" /> Run again
             </Link>
             <button
               onClick={() => publishMutation.mutate(!meta.public)}
               disabled={publishMutation.isPending}
-              className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors disabled:opacity-50"
+              className={actionClass}
               title={meta.public ? "Make this run private" : "Publish this run"}
             >
-              {meta.public ? <Lock size={14} /> : <Globe2 size={14} />}
+              {meta.public ? <Lock size={14} aria-hidden="true" /> : <Globe2 size={14} aria-hidden="true" />}
               {publishMutation.isPending
                 ? "Saving\u2026"
                 : meta.public
@@ -279,31 +325,32 @@ export function RunDetailPage() {
             {!isColdStored && (
               <button
                 onClick={() => setConfirmArchive(true)}
-                className="flex items-center gap-1.5 text-muted hover:text-accent text-sm transition-colors"
+                className={actionClass}
                 title={meta.archived ? "Unarchive run" : "Archive run"}
               >
-                <Archive size={14} /> {meta.archived ? "Unarchive run" : "Archive run"}
+                <Archive size={14} aria-hidden="true" /> {meta.archived ? "Unarchive run" : "Archive run"}
               </button>
             )}
             <button
               onClick={() => setConfirmDelete(true)}
-              className="flex items-center gap-1.5 text-muted hover:text-failed text-sm transition-colors"
+              className={`${actionClass} hover:!text-failed`}
               title="Delete run"
             >
-              <Trash2 size={14} /> Delete run
+              <Trash2 size={14} aria-hidden="true" /> Delete run
             </button>
           </div>
         )}
-      </div>
+        </div>
+      </header>
 
       {publishNotice && (
-        <div className="bg-accent/10 border border-accent/40 text-accent text-sm rounded-lg px-4 py-2">
+        <div role="status" className="bg-accent/10 border border-accent/40 text-accent text-sm rounded-lg px-4 py-2">
           {publishNotice}
         </div>
       )}
 
       {archiveNotice && (
-        <div className="bg-failed/10 border border-failed/40 text-failed text-sm rounded-lg px-4 py-2">
+        <div role="status" className="bg-failed/10 border border-failed/40 text-failed text-sm rounded-lg px-4 py-2">
           {archiveNotice}
         </div>
       )}
@@ -335,108 +382,47 @@ export function RunDetailPage() {
         </div>
       )}
 
-      {/* Meta card */}
-      <div className="bg-surface border border-border rounded-xl p-5 grid sm:grid-cols-2 gap-4 text-sm">
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Run ID</p>
-          <p className="font-mono text-fg">{meta.run_id}</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Status</p>
-          <div className="flex items-center gap-2">
-            <StatusBadge status={meta.status} size="md" />
-            {integrity && (
-              <span
-                className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
-                  integrity.status === "ok"
-                    ? "border-passed/40 text-passed bg-passed/10"
-                    : integrity.status === "warning"
-                      ? "border-broken/40 text-broken bg-broken/10"
-                      : "border-failed/40 text-failed bg-failed/10"
-                }`}
-                title={
-                  integrity.issues.length === 0
-                    ? "Artifacts verified"
-                    : integrity.issues.map((i) => `${i.code}: ${i.path ?? i.message}`).join("; ")
-                }
+      <section aria-label="Run details" className="bg-surface border border-border rounded-xl p-4 sm:p-5">
+        <FactGrid>
+          <Fact label="OPALX Branch">{meta.branch}</Fact>
+          <Fact label="Tests Branch">
+            <span className="font-mono">{meta.regtest_branch ?? "—"}</span>
+          </Fact>
+          <Fact label="Build / Executed On">
+            <span className="font-mono">
+              {executionSnapshot?.build?.name ?? meta.arch} /{" "}
+              {executionSnapshot?.machine?.name ??
+                (meta.connection_name && meta.connection_name !== "local"
+                  ? meta.connection_name
+                  : "local")}
+            </span>
+          </Fact>
+          <Fact label="Duration">{duration(meta.started_at, meta.finished_at)}</Fact>
+          <Fact label="Started">{fmtDate(meta.started_at)}</Fact>
+          <Fact label="Triggered By">
+            {meta.triggered_by ? (
+              <Link
+                to={`/activity?user=${encodeURIComponent(meta.triggered_by)}`}
+                className="text-accent hover:underline font-mono"
+                title={`Show all runs triggered by ${meta.triggered_by}`}
               >
-                {integrity.status === "ok" ? (
-                  <ShieldCheck size={10} />
-                ) : (
-                  <ShieldAlert size={10} />
-                )}
-                {integrity.status === "ok" ? "Artifacts OK" : `Artifacts ${integrity.status}`}
-              </span>
-            )}
-            {meta.public ? (
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-accent/40 text-accent bg-accent/10">
-                <Globe2 size={10} />
-                Public
-              </span>
+                {meta.triggered_by}
+              </Link>
             ) : (
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-border text-muted">
-                <Lock size={10} />
-                Private
-              </span>
+              <span className="font-mono">—</span>
             )}
-          </div>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">OPALX Branch</p>
-          <p className="text-fg">{meta.branch}</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Tests Branch</p>
-          <p className="text-fg font-mono text-sm">{meta.regtest_branch ?? "—"}</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Duration</p>
-          <p className="text-fg">{duration(meta.started_at, meta.finished_at)}</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Build / Executed On</p>
-          <p className="text-fg font-mono text-sm">
-            {executionSnapshot?.build?.name ?? meta.arch} /{" "}
-            {executionSnapshot?.machine?.name ??
-              (meta.connection_name && meta.connection_name !== "local"
-                ? meta.connection_name
-                : "local")}
-          </p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Triggered By</p>
-          {meta.triggered_by ? (
-            <Link
-              to={`/activity?user=${encodeURIComponent(meta.triggered_by)}`}
-              className="text-accent hover:underline font-mono text-sm"
-              title={`Show all runs triggered by ${meta.triggered_by}`}
-            >
-              {meta.triggered_by}
-            </Link>
-          ) : (
-            <p className="text-fg font-mono text-sm">—</p>
-          )}
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Started</p>
-          <p className="text-fg">{fmtDate(meta.started_at)}</p>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Commits</p>
-          <div className="text-xs space-y-0.5">
-            <p>
+          </Fact>
+          <Fact label="Commits">
+            <span className="block text-xs">
               <span className="text-muted">opalx: </span>
               <CommitLink hash={meta.opalx_commit} base={OPALX_COMMIT_BASE} />
-            </p>
-            <p>
+            </span>
+            <span className="block text-xs">
               <span className="text-muted">tests: </span>
               <CommitLink hash={meta.tests_repo_commit} base={REGTESTS_COMMIT_BASE} />
-            </p>
-          </div>
-        </div>
-        <div className="space-y-1">
-          <p className="text-muted text-xs">Regression Runtime</p>
-          <p className="text-fg text-sm">
+            </span>
+          </Fact>
+          <Fact label="Regression Runtime">
             {meta.run_options?.mpi_ranks ?? 1} rank
             {(meta.run_options?.mpi_ranks ?? 1) === 1 ? "" : "s"} / info{" "}
             {meta.run_options?.opalx_info_level ?? 2}
@@ -447,74 +433,76 @@ export function RunDetailPage() {
                   : `${meta.run_options.series_max_points} plot points`}
               </>
             )}
-          </p>
-        </div>
-        <SlurmResourceSummary resources={slurmResources} />
-        {executionSnapshot && (
-          <div className="space-y-1 sm:col-span-2">
-            <p className="text-muted text-xs">Execution Presets</p>
-            <p className="text-fg text-sm">
+          </Fact>
+          <SlurmResourceSummary resources={slurmResources} />
+          {executionSnapshot && (
+            <Fact label="Execution Presets">
               {executionSnapshot.build?.name ?? meta.arch}
               {executionSnapshot.machine ? ` / ${executionSnapshot.machine.name}` : ""}
               {executionSnapshot.environment
                 ? ` / ${executionSnapshot.environment.name}`
                 : ""}
               {executionSnapshot.slurm ? ` / ${executionSnapshot.slurm.name}` : ""}
-            </p>
-          </div>
-        )}
-        {meta.run_options?.skip_config && (
-          <SkipConfigInfo snapshot={meta.run_options.skip_config} />
-        )}
-        {(meta.run_options?.custom_cmake_args?.length ?? 0) > 0 && (
-          <div className="space-y-1 sm:col-span-2">
-            <p className="text-muted text-xs">Custom CMake Args</p>
-            <pre className="rounded-md border border-border bg-bg px-3 py-2 text-xs text-fg overflow-x-auto">
-              {meta.run_options.custom_cmake_args.join("\n")}
-            </pre>
-          </div>
-        )}
-        {!isColdStored && (
-          <div className="sm:col-span-2">
-            <a
-              href={`/data/${runPath}/logs/pipeline.log`}
-              target="_blank"
-              rel="noopener"
-              className="flex items-center gap-1 text-accent text-xs hover:underline"
-            >
-              <ExternalLink size={11} /> pipeline.log
-            </a>
-          </div>
-        )}
-      </div>
+            </Fact>
+          )}
+          {!isColdStored && (
+            <Fact label="Pipeline Log">
+              <a
+                href={`/data/${runPath}/logs/pipeline.log`}
+                target="_blank"
+                rel="noopener"
+                className="inline-flex items-center gap-1 text-accent hover:underline"
+              >
+                <FileText size={12} aria-hidden="true" /> pipeline.log
+                <span className="sr-only"> (opens in a new tab)</span>
+              </a>
+            </Fact>
+          )}
+          {meta.run_options?.skip_config && (
+            <SkipConfigInfo snapshot={meta.run_options.skip_config} />
+          )}
+          {(meta.run_options?.custom_cmake_args?.length ?? 0) > 0 && (
+            <Fact label="Custom CMake Args" wide>
+              <pre className="mt-1 rounded-md border border-border bg-bg px-3 py-2 text-xs text-fg overflow-x-auto">
+                {meta.run_options.custom_cmake_args.join("\n")}
+              </pre>
+            </Fact>
+          )}
+        </FactGrid>
+      </section>
 
       {/* Unit tests */}
       {!isColdStored && unit.tests.length > 0 && (
-        <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <button
-            onClick={() => setShowUnitDetails(!showUnitDetails)}
-            className="w-full flex items-center gap-3 px-5 py-4 hover:bg-border/30 transition-colors text-left"
-          >
-            {showUnitDetails ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <span className="text-fg font-medium">Unit Tests</span>
-            <span className="text-muted text-sm ml-auto">
-              {meta.unit_tests_total - meta.unit_tests_failed}/{meta.unit_tests_total} passed
-              {meta.unit_tests_failed > 0 && (
-                <span className="text-failed ml-2">{meta.unit_tests_failed} failed</span>
-              )}
-              {unitSkipped > 0 && (
-                <span className="text-muted ml-2">· {unitSkipped} skipped</span>
-              )}
-            </span>
-          </button>
+        <section className="bg-surface border border-border rounded-xl overflow-hidden">
+          <h2>
+            <button
+              onClick={() => setShowUnitDetails(!showUnitDetails)}
+              aria-expanded={showUnitDetails}
+              aria-controls="unit-tests-panel"
+              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-border/30 transition-colors text-left"
+            >
+              {showUnitDetails ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+              <span className="text-fg font-medium">Unit Tests</span>
+              <span className="text-muted text-sm font-normal ml-auto">
+                {meta.unit_tests_total - meta.unit_tests_failed}/{meta.unit_tests_total} passed
+                {meta.unit_tests_failed > 0 && (
+                  <span className="text-failed ml-2">{meta.unit_tests_failed} failed</span>
+                )}
+                {unitSkipped > 0 && (
+                  <span className="text-muted ml-2">· {unitSkipped} skipped</span>
+                )}
+              </span>
+            </button>
+          </h2>
           {showUnitDetails && (
-            <div className="border-t border-border p-4 overflow-x-auto">
+            <div id="unit-tests-panel" className="border-t border-border p-4 overflow-x-auto">
               <table className="w-full text-xs">
+                <caption className="sr-only">Unit test results</caption>
                 <thead className="text-muted">
                   <tr>
-                    <th className="text-left pb-2">Test</th>
-                    <th className="text-left pb-2">Status</th>
-                    <th className="text-left pb-2">Duration</th>
+                    <th scope="col" className="text-left pb-2">Test</th>
+                    <th scope="col" className="text-left pb-2">Status</th>
+                    <th scope="col" className="text-left pb-2">Duration</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -533,13 +521,13 @@ export function RunDetailPage() {
               </table>
             </div>
           )}
-        </div>
+        </section>
       )}
 
       {/* Regression tests */}
       {!isColdStored && regression.simulations.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-fg font-medium">
+        <section aria-labelledby="regression-heading" className="space-y-3">
+          <h2 id="regression-heading" className="text-fg font-medium">
             Regression Tests
             <span className="text-muted font-normal text-sm ml-2">
               {meta.regression_passed}/{meta.regression_total} passed
@@ -554,16 +542,15 @@ export function RunDetailPage() {
               )}
             </span>
           </h2>
-          {executedSims.map((sim) => (
-            <SimCard
-              key={sim.name}
-              sim={sim}
-              runPath={runPath}
-              seriesSource={{ branch: branch!, arch: arch!, runId: runId! }}
-            />
-          ))}
-          <SkippedSimulationsGroup names={skippedSimNames} />
-        </div>
+          <RegressionTestsBrowser
+            simulations={regression.simulations}
+            runPath={runPath}
+            series={{
+              queryKey: ["run-series", branch, arch, runId],
+              load: () => getRunSeries(branch!, arch!, runId!),
+            }}
+          />
+        </section>
       )}
     </div>
   );

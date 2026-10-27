@@ -1,7 +1,7 @@
 # Compact Series Storage - Design
 
 Date: 2026-10-27
-Status: approved; conversion, runner, frontend and log gzip deployed; prune mode implemented
+Status: done; conversion, runner, frontend, log gzip and prune all run on production (2026-10-27)
 
 ## Progress (2026-10-27)
 
@@ -36,6 +36,17 @@ Status: approved; conversion, runner, frontend and log gzip deployed; prune mode
     verified tarballs and deleted, 1,912 logs gzipped. Run data went from 739 MB to
     90 MB, and integrity results were unchanged.
   - Production backup directory: `/mnt/modern-regsuite-lxc/regsuite-svg-backup`.
+- Production prune (2026-10-27, service stopped, about 6 minutes):
+  - 559 runs pruned. 64,123 stat SVGs (3.22 GB) went into 475 verified tarballs
+    (699 MB), and 13,237 logs were gzipped.
+  - Afterwards: 0 stat SVGs, 0 plain logs and 0 `plot` paths remain.
+  - SSD runs went from 774 MB to 113 MB, and archive runs from 5.0 GB to 789 MB.
+  - Integrity errors from stale manifests went from 106 to 0. A repeat dry run found
+    nothing to prune.
+- Before the prune, at the user's request, 22 failed runs with no runs-index entry
+  were removed (about 33 MB, never shown on the dashboard), including the crashed run
+  with the empty `work/` and the 7 runs holding the 397 unreferenced SVGs. Each was
+  tarred and verified first to `regsuite-svg-backup/deleted-runs/`.
 
 ## Intent
 

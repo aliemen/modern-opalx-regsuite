@@ -56,14 +56,33 @@ export function metricCurves(container: SeriesContainer | undefined, metric: str
   return { ...mergeCurves(s, m.cur, rs, m.ref), diff: m.d ? { x: m.d.s, v: m.d.v } : null };
 }
 
-/** Symmetric y range for the difference panel, at least +-tolerance so a passing check looks flat. */
-export function differenceRange(v: Values, eps: number | null): [number, number] {
+/** Largest absolute value, 0 for an empty or all-null array. */
+export function maxAbs(v: Values): number {
   let max = 0;
   for (const value of v) {
     if (value != null && Math.abs(value) > max) max = Math.abs(value);
   }
-  const half = Math.max(max, eps ?? 0) * 1.1 || 1;
+  return max;
+}
+
+/** Symmetric y range for the difference panel, at least +-tolerance so a passing check looks flat. */
+export function differenceRange(v: Values, eps: number | null): [number, number] {
+  const half = Math.max(maxAbs(v), eps ?? 0) * 1.1 || 1;
   return [-half, half];
+}
+
+/**
+ * The sample at idx, or the closest non-null one. Merged curves of converted runs
+ * have a null wherever only the other curve has a sample.
+ */
+export function nearestValue(v: Values, idx: number): number | null {
+  for (let d = 0; d < v.length; d++) {
+    const before = v[idx - d];
+    if (before != null) return before;
+    const after = v[idx + d];
+    if (after != null) return after;
+  }
+  return null;
 }
 
 /** Compact axis/legend number: plain for ordinary magnitudes, exponential otherwise. */
@@ -72,4 +91,12 @@ export function formatValue(v: number | null | undefined): string {
   if (v === 0) return "0";
   const a = Math.abs(v);
   return a >= 1e-3 && a < 1e5 ? String(Number(v.toPrecision(6))) : v.toExponential(3);
+}
+
+/** Short axis tick: like formatValue, but exponents without trailing zeros (3e-4, 2.5e-4). */
+export function formatTick(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return "";
+  const a = Math.abs(v);
+  if (v === 0 || (a >= 1e-3 && a < 1e5)) return formatValue(v);
+  return Number(v.toPrecision(4)).toExponential();
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { differenceRange, formatValue, mergeCurves, metricCurves } from "./seriesData";
+import { differenceRange, formatTick, formatValue, maxAbs, mergeCurves, metricCurves, nearestValue } from "./seriesData";
 
 describe("mergeCurves", () => {
   it("passes identical grids through", () => {
@@ -50,5 +50,32 @@ describe("formatValue", () => {
     expect(formatValue(4.197e-9)).toBe("4.197e-9");
     expect(formatValue(123456789)).toBe("1.235e+8");
     expect(formatValue(null)).toBe("-");
+  });
+});
+
+describe("nearestValue", () => {
+  it("returns the sample at the index or the closest non-null one", () => {
+    const v = [null, 1, null, null, 4, null];
+    expect(nearestValue(v, 1)).toBe(1);
+    expect(nearestValue(v, 2)).toBe(1); // ties prefer the earlier sample
+    expect(nearestValue(v, 3)).toBe(4);
+    expect(nearestValue(v, 5)).toBe(4);
+    expect(nearestValue([null, null], 0)).toBeNull();
+  });
+});
+
+describe("maxAbs", () => {
+  it("ignores nulls and signs", () => {
+    expect(maxAbs([null, -3, 2])).toBe(3);
+    expect(maxAbs([])).toBe(0);
+  });
+});
+
+describe("formatTick", () => {
+  it("drops trailing zeros from exponents and float noise", () => {
+    expect(formatTick(3e-4)).toBe("3e-4");
+    expect(formatTick(2.5000000000000004e-4)).toBe("2.5e-4");
+    expect(formatTick(0.0025)).toBe("0.0025");
+    expect(formatTick(0)).toBe("0");
   });
 });

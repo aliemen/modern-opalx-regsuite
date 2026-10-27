@@ -19,7 +19,7 @@ from .parsing.regression import (
     _parse_rt_file,
     _read_stat_data,
 )
-from .plotting import _write_stat_plot
+from ..series import RunSeriesWriter
 
 
 def _append_regression_warning(
@@ -124,13 +124,6 @@ def _classify_crash(rc: int, log_path: Path) -> tuple[Optional[str], Optional[st
     return sig_name, crash_summary
 
 
-def _plot_basename(test_name: str, container_id: Optional[str], var_name: str) -> str:
-    """Generate plot filename, preserving legacy single-beam names."""
-    if container_id is None:
-        return f"{test_name}_{var_name}.svg"
-    return f"{test_name}_{container_id}_{var_name}.svg"
-
-
 def _build_container(
     test_name: str,
     container_id: Optional[str],
@@ -138,11 +131,15 @@ def _build_container(
     checks: list[tuple[str, str, float]],
     generated_stat: Path,
     reference_stat: Optional[Path],
-    plots_dir: Path,
     pipeline_log_path: Path,
     test_log_path: Optional[Path],
+    series: Optional[RunSeriesWriter] = None,
 ) -> tuple[RegressionContainer, bool]:
-    """Build one RegressionContainer from a single stat file pair."""
+    """Build one RegressionContainer from a single stat file pair.
+
+    Plottable metrics (both series present, lengths matching their s, more than one
+    row) are handed to *series* at full resolution; returns whether any metric was.
+    """
     metrics: list[RegressionMetric] = []
     any_stat_plots = False
     revision: Optional[str] = None
@@ -186,8 +183,7 @@ def _build_container(
             elif rc != 0:
                 state = "failed"
 
-            plot_rel: Optional[str] = None
-            can_plot = (
+            can_plot = bool(
                 s_vals
                 and values
                 and ref_s_vals
@@ -198,30 +194,8 @@ def _build_container(
             )
             if can_plot:
                 any_stat_plots = True
-                plot_name = _plot_basename(test_name, container_id, var_name)
-                plot_path = plots_dir / plot_name
-                try:
-                    _write_stat_plot(
-                        s_vals=s_vals,
-                        values=values,
-                        ref_s_vals=ref_s_vals,
-                        ref_values=ref_values,
-                        out_path=plot_path,
-                        test_name=test_name,
-                        var_name=var_name,
-                        var_unit=unit or "",
-                    )
-                    plot_rel = f"plots/{plot_name}"
-                except Exception as exc:
-                    tag = (
-                        f"{test_name}:{var_name}"
-                        if container_id is None
-                        else f"{test_name}[{container_id}]:{var_name}"
-                    )
-                    _append_pipeline_line(
-                        pipeline_log_path,
-                        f"[regression] plot failed for {tag}: {exc}",
-                    )
+                if series is not None:
+                    series.add(test_name, container_id, var_name, s_vals, values, ref_s_vals, ref_values)
 
             metrics.append(
                 RegressionMetric(
@@ -232,7 +206,8 @@ def _build_container(
                     state=state,
                     reference_value=ref_values[-1] if ref_values else None,
                     current_value=values[-1] if values else None,
-                    plot=plot_rel,
+                    unit=unit or None,
+                    series=can_plot and series is not None,
                 )
             )
     else:
@@ -254,7 +229,6 @@ def _build_container(
                 state=state,
                 reference_value=None,
                 current_value=None,
-                plot=None,
             )
         )
 
@@ -289,8 +263,13 @@ def _build_simulation(
     input_file: Optional[Path] = None,
     log_path: Optional[Path] = None,
     transport_errors: Optional[list[str]] = None,
+    series: Optional[RunSeriesWriter] = None,
 ) -> RegressionSimulation:
-    """Build the result model for one regression simulation."""
+    """Build the result model for one regression simulation.
+
+    Plot data goes to *series*, which rewrites the run's series.json.gz once this
+    simulation is done; *plots_dir* only receives the beamline files.
+    """
     test_log_path = log_path or work_test_dir / f"{test_name}-RT.log"
     crash_signal, crash_summary = _classify_crash(rc, test_log_path)
 
@@ -319,12 +298,14 @@ def _build_simulation(
             checks=checks,
             generated_stat=generated_stat,
             reference_stat=reference_stat,
-            plots_dir=plots_dir,
             pipeline_log_path=pipeline_log_path,
             test_log_path=test_log_path,
+            series=series,
         )
         containers.append(container)
         any_stat_plots = any_stat_plots or had_plots
+    if series is not None:
+        series.flush(test_name)
 
     sim_state = "passed"
     all_metric_states = [m.state for c in containers for m in c.metrics]

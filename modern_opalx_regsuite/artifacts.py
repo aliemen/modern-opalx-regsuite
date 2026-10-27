@@ -9,6 +9,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from .data_model import RegressionTestsReport, RunMeta, UnitTestsReport
+from .run_logs import log_exists
+from .series import SERIES_FILE
 
 
 MANIFEST_NAME = "artifact-manifest.json"
@@ -76,7 +78,7 @@ def _kind_for(rel_path: str) -> ArtifactKind:
         return "manifest"
     if rel_path.startswith("logs/"):
         return "log"
-    if rel_path.startswith("plots/") and rel_path.endswith(".svg"):
+    if rel_path == SERIES_FILE or (rel_path.startswith("plots/") and rel_path.endswith(".svg")):
         return "plot"
     if rel_path.startswith("plots/") and rel_path.endswith(".json"):
         return "beamline"
@@ -148,7 +150,15 @@ def _referenced_artifacts(regression: RegressionTestsReport) -> set[str]:
                 rel = _safe_rel_path(metric.plot)
                 if rel:
                     refs.add(rel)
+                if metric.series:
+                    refs.add(SERIES_FILE)
     return refs
+
+
+def _artifact_present(run_root: Path, rel: str) -> bool:
+    """Logs count as present when gzipped (``logs/x.log`` as ``logs/x.log.gz``)."""
+    path = run_root / rel
+    return log_exists(path) if rel.endswith(".log") else path.is_file()
 
 
 def check_run_integrity(run_root: Path) -> RunIntegrityReport:
@@ -200,7 +210,7 @@ def check_run_integrity(run_root: Path) -> RunIntegrityReport:
         "logs/pipeline.log",
     ]
     for rel in required:
-        if not (run_root / rel).is_file():
+        if not _artifact_present(run_root, rel):
             issue("error", "required-file-missing", "Required artifact is missing.", rel)
 
     meta: Optional[RunMeta] = None
@@ -229,7 +239,7 @@ def check_run_integrity(run_root: Path) -> RunIntegrityReport:
     del meta, unit
     if regression is not None:
         for rel in sorted(_referenced_artifacts(regression)):
-            if not (run_root / rel).is_file():
+            if not _artifact_present(run_root, rel):
                 issue(
                     "error",
                     "referenced-artifact-missing",

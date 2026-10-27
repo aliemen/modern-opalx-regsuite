@@ -7,7 +7,7 @@ from modern_opalx_regsuite.runner.parsing.regression import (
     _compute_delta,
     _read_stat_data,
 )
-from modern_opalx_regsuite.runner.plotting import _common_s_differences
+from modern_opalx_regsuite.series import common_s_differences as _common_s_differences
 from modern_opalx_regsuite.runner.regression_results import _build_simulation
 
 

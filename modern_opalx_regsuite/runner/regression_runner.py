@@ -15,6 +15,7 @@ from typing import Collection, Optional
 
 from ..config import Connection, SuiteConfig
 from ..data_model import RegressionSimulation, RegressionTestsReport
+from ..series import MAX_POINTS, SERIES_FILE, RunSeriesWriter
 from .execution import RunPaths, _append_pipeline_line, _run_command
 from .parsing.regression import (
     _discover_regression_tests,
@@ -100,12 +101,14 @@ def _run_regression_suite(
     cancel_event: Optional[threading.Event] = None,
     base_env: Optional[dict[str, str]] = None,
     skip_tests: Collection[str] = (),
+    series_max_points: int = MAX_POINTS,
 ) -> RegressionTestsReport:
     """Run regression tests locally."""
     tests_root = cfg.resolved_regtests_repo_root / cfg.regtests_subdir
     tests = _discover_regression_tests(tests_root)
     skip = _active_skips(tests, skip_tests, pipeline_log_path)
     report = RegressionTestsReport(simulations=[])
+    series = RunSeriesWriter(paths.root / SERIES_FILE, series_max_points)
 
     opalx_exe = _find_opalx_executable(build_dir, cfg.opalx_executable_relpath)
     if opalx_exe is None:
@@ -190,6 +193,7 @@ def _run_regression_suite(
             test_start=test_start,
             input_file=in_file,
             log_path=test_log_run,
+            series=series,
         )
         report.simulations.append(sim)
         metric_count = sum(len(c.metrics) for c in sim.containers)
@@ -224,10 +228,11 @@ def _run_regression_suite_remote(
     pipeline_log_path: Path,
     cancel_event: Optional[threading.Event] = None,
     skip_tests: Collection[str] = (),
+    series_max_points: int = MAX_POINTS,
 ) -> RegressionTestsReport:
     """Run regression tests on a remote host via SSH.
 
-    Test discovery and result processing (stat parsing, plots) happen locally.
+    Test discovery and result processing (stat parsing, plot data) happen locally.
     Only the simulation execution happens on the remote.
 
     Sensitive-data rule: every line written to ``reg_lines`` (which becomes
@@ -245,6 +250,7 @@ def _run_regression_suite_remote(
     tests = _discover_regression_tests_remote(remote, remote_tests_root)
     skip = _active_skips(tests, skip_tests, pipeline_log_path)
     report = RegressionTestsReport(simulations=[])
+    series = RunSeriesWriter(paths.root / SERIES_FILE, series_max_points)
 
     # Scratch area for fetched metadata (rt/in/reference) so _build_simulation
     # can parse them locally.  Lives under work_dir so `keep_work_dirs`
@@ -489,6 +495,7 @@ def _run_regression_suite_remote(
             input_file=in_file,
             log_path=test_log_run,
             transport_errors=transport_errors,
+            series=series,
         )
         report.simulations.append(sim)
         metric_count = sum(len(c.metrics) for c in sim.containers)

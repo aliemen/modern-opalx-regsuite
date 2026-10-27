@@ -10,6 +10,7 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
+from ..run_logs import log_exists, read_log_text
 from .tokens import verify_access_token
 from .state import (
     get_active_run,
@@ -72,8 +73,10 @@ def _stream_run(run, run_id: str | None, request: Request, last_id_param: str | 
         # First, replay any lines that exist before the SSE connection.
         log_path = run.log_path
         assert log_path is not None
-        if log_path.exists():
-            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        # A finished run stays here until the next run on its machine; by then
+        # its log may already be gzipped (run_logs.finalize_run_files).
+        if log_exists(log_path):
+            lines = read_log_text(log_path).splitlines()
             for i, ln in enumerate(lines):
                 if i < start_line:
                     continue

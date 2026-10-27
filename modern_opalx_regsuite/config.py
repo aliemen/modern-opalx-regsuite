@@ -103,6 +103,14 @@ class SuiteConfig(BaseModel):
         ge=0,
         description="Default OPALX --info level for generated regression commands.",
     )
+    series_max_points: int = Field(
+        default=100,
+        ge=0,
+        description=(
+            "Rows kept per plotted series in series.json.gz (0 = all). Only seeds "
+            "the public execution settings, which hold the value runs use."
+        ),
+    )
     opalx_executable_relpath: str = Field(
         "src/opalx",
         description=(
@@ -343,6 +351,9 @@ def save_config(cfg: SuiteConfig, path: Optional[Path] = None) -> Path:
     add_kv("build_jobs", data.get("build_jobs", 2))
     add_kv("mpi_ranks", data.get("mpi_ranks", 1))
     add_kv("opalx_info_level", data.get("opalx_info_level", 2))
+    # Written only when changed, so configs stay readable by releases without the key.
+    if data.get("series_max_points", 100) != 100:
+        add_kv("series_max_points", data["series_max_points"])
     add_kv("opalx_executable_relpath", data.get("opalx_executable_relpath", "src/opalx"))
     add_kv("opalx_args", data.get("opalx_args", []))
     add_kv("keep_work_dirs", data.get("keep_work_dirs", False))

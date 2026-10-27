@@ -49,6 +49,8 @@ class TriggerRequest(BaseModel):
     custom_cmake_args: list[str] = Field(default_factory=list)
     mpi_ranks: Optional[int] = Field(default=None, ge=1)
     opalx_info_level: Optional[int] = Field(default=None, ge=0)
+    # Rows per plotted series (0 = all); None uses the global default.
+    series_max_points: Optional[int] = Field(default=None, ge=0)
     slurm_resources: Optional[SlurmResources] = None
     # None or "local" → local execution. Otherwise → load the calling user's
     # named connection from <users_root>/<username>/connections.json.
@@ -364,6 +366,7 @@ async def trigger_run(
         custom_cmake_args=body.custom_cmake_args,
         mpi_ranks=body.mpi_ranks,
         opalx_info_level=body.opalx_info_level,
+        series_max_points=body.series_max_points,
         slurm_resources=body.slurm_resources,
         connection_name=body.connection_name,
         profile_id=body.profile_id,

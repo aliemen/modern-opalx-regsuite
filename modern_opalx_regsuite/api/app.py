@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import shutil
+import stat as stat_module
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
@@ -188,6 +191,29 @@ def _clean_staging_dirs(root: Path) -> int:
     return cleaned
 
 
+class RunDataFiles(StaticFiles):
+    """Static files under data_root; a finished run's ``x.log`` is served from ``x.log.gz``.
+
+    Logs are gzipped once a run has ended (``run_logs.finalize_run_files``). Sending the
+    ``.gz`` with ``Content-Encoding: gzip`` lets the browser show it as plain text, so log
+    links keep their ``.log`` names. Path checks are the parent's ``lookup_path``.
+    """
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        if path.endswith(".log"):
+            _full, plain = await run_in_threadpool(self.lookup_path, path)
+            if plain is None:
+                gz_full, gz = await run_in_threadpool(self.lookup_path, path + ".gz")
+                if gz is not None and stat_module.S_ISREG(gz.st_mode):
+                    return FileResponse(
+                        gz_full,
+                        stat_result=gz,
+                        media_type="text/plain; charset=utf-8",
+                        headers={"Content-Encoding": "gzip"},
+                    )
+        return await super().get_response(path, scope)
+
+
 def _reconcile_archive_layout(data_root: Path, archive_root: Path) -> None:
     """Repair index/archive-layout mismatches left by interrupted moves."""
     cleaned = _clean_staging_dirs(data_root) + _clean_staging_dirs(archive_root)
@@ -361,7 +387,7 @@ def create_app() -> FastAPI:
         cfg = load_config()
         data_root = cfg.resolved_data_root
         if data_root.is_dir():
-            app.mount("/data", StaticFiles(directory=str(data_root)), name="data")
+            app.mount("/data", RunDataFiles(directory=str(data_root)), name="data")
     except Exception:
         pass  # data_root might not exist at app creation time.
 

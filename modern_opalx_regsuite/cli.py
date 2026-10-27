@@ -17,6 +17,7 @@ from .data_model import (
     RunMeta,
     branches_index_path,
     resolve_run_dir,
+    run_dir,
     runs_index_path,
 )
 from .runner import run_pipeline
@@ -202,6 +203,9 @@ def run(
         mpi_ranks=mpi_ranks,
         opalx_info_level=opalx_info_level,
     )
+    from .run_logs import finalize_run_files
+
+    finalize_run_files(run_dir(cfg.resolved_data_root, branch, arch, meta.run_id))
     typer.echo(f"Run {meta.run_id} finished with status={meta.status}")
 
 
@@ -1185,6 +1189,82 @@ def migrate_regression_json_cmd(
         f"Inspected {inspected} regression-tests.json file(s); "
         f"migrated {migrated}."
     )
+
+
+@app.command("migrate-series")
+def migrate_series_cmd(
+    root: str = typer.Option(
+        "data", "--root", help="Which root to convert: data, archive or all."
+    ),
+    run: Optional[list[str]] = typer.Option(
+        None, "--run", help="Only this run, as BRANCH/ARCH/RUN_ID (repeatable)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Parse and verify everything, write nothing."
+    ),
+    max_points: int = typer.Option(
+        100, "--max-points", min=0, help="Rows kept per series (0 = all)."
+    ),
+    report: Optional[Path] = typer.Option(
+        None, "--report", help="Write the full JSON report here."
+    ),
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Convert legacy metric SVGs into series.json.gz (adds files only).
+
+    Writes series.json.gz and sets ``series: true`` on converted metrics; SVGs,
+    ``plot`` paths and logs stay. Already converted and active runs are
+    skipped. Stop the web service first. Exits with status 1 if any plot failed
+    verification (those metrics keep their SVG).
+    """
+    from .migration.series_migration import convert_root
+
+    cfg = _load_config_option(config)
+    if root not in ("data", "archive", "all"):
+        raise typer.BadParameter("--root must be data, archive or all")
+    roots = []
+    if root in ("data", "all"):
+        roots.append(cfg.resolved_data_root)
+    if root in ("archive", "all"):
+        if cfg.resolved_archive_root is None:
+            raise typer.BadParameter("no archive_root configured")
+        roots.append(cfg.resolved_archive_root)
+
+    def _progress(r) -> None:
+        detail = (
+            f"{r.converted}/{r.plots} plots, {r.anchored} anchored, "
+            f"{r.unverifiable} unverifiable, {len(r.failed)} failed"
+        )
+        typer.echo(f"{r.status:9} {r.run}  {r.reason or detail}")
+        for failure in r.failed:
+            typer.echo(f"          failed {failure}")
+
+    reports = []
+    for current in roots:
+        only = None
+        if run:
+            only = []
+            for spec in run:
+                parts = spec.strip("/").split("/")
+                if len(parts) < 3:
+                    raise typer.BadParameter(f"--run {spec!r} is not BRANCH/ARCH/RUN_ID")
+                candidate = current / "runs" / Path(*parts)
+                if candidate.is_dir():
+                    only.append(candidate)
+        typer.echo(f"== {current}{' (dry run)' if dry_run else ''}")
+        rep = convert_root(
+            current, max_points=max_points, dry_run=dry_run, only=only, progress=_progress
+        )
+        reports.append(rep)
+        typer.echo(json.dumps(rep.totals(), indent=2))
+
+    if report is not None:
+        report.write_text(
+            "[" + ",\n".join(r.to_json() for r in reports) + "]\n", encoding="utf-8"
+        )
+        typer.echo(f"Report written to {report}")
+    if any(r.totals().get("failed", 0) for r in reports):
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

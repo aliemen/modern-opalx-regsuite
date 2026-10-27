@@ -163,6 +163,8 @@ class ExecutionSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int = 1
+    # Default rows per plotted series for new runs (0 = all); a run can override it.
+    series_max_points: int = Field(100, ge=0)
     cmake_quick_selections: list[str] = Field(default_factory=list)
     build_presets: list[BuildPreset] = Field(default_factory=list)
     machine_presets: list[MachinePreset] = Field(default_factory=list)
@@ -393,6 +395,7 @@ def _default_settings_from_config(cfg: "SuiteConfig") -> ExecutionSettings:  # t
             )
 
     return ExecutionSettings(
+        series_max_points=cfg.series_max_points,
         build_presets=build_presets,
         machine_presets=machine_presets,
         env_presets=env_presets,
@@ -410,6 +413,14 @@ def load_execution_settings(cfg: "SuiteConfig") -> ExecutionSettings:  # type: i
         return settings
     raw = json.loads(path.read_text(encoding="utf-8"))
     return ExecutionSettings.model_validate(raw)
+
+
+def default_series_max_points(cfg: "SuiteConfig") -> int:  # type: ignore[name-defined]
+    """Global default for rows per plotted series; ``config.toml`` if settings are unreadable."""
+    try:
+        return load_execution_settings(cfg).series_max_points
+    except Exception:
+        return cfg.series_max_points
 
 
 def save_execution_settings(

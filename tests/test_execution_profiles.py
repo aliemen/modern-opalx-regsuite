@@ -222,3 +222,17 @@ def test_run_profiles_referencing_key_finds_private_profile_refs(
         "target-key",
         "gateway-key",
     ]
+
+
+def test_series_max_points_default_seeds_from_config_and_is_editable(tmp_path: Path) -> None:
+    from modern_opalx_regsuite.execution_profiles import default_series_max_points
+
+    cfg = _cfg(tmp_path).model_copy(update={"series_max_points": 250})
+    assert default_series_max_points(cfg) == 250  # seeded into a new settings file
+    settings = load_execution_settings(cfg)
+    save_execution_settings(cfg, settings.model_copy(update={"series_max_points": 0}))
+    assert default_series_max_points(cfg) == 0
+    old = json.loads(public_settings_path(cfg).read_text())
+    old.pop("series_max_points")
+    public_settings_path(cfg).write_text(json.dumps(old))
+    assert load_execution_settings(cfg).series_max_points == 100  # documents from before the field

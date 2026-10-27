@@ -49,6 +49,7 @@ class ActiveRun:
     custom_cmake_args: list[str] = field(default_factory=list)
     mpi_ranks: Optional[int] = None
     opalx_info_level: Optional[int] = None
+    series_max_points: Optional[int] = None
     slurm_resources: Optional["SlurmResources"] = None
     execution_snapshot: Optional["ExecutionSnapshot"] = None
     # Test skip config frozen at trigger time.
@@ -82,6 +83,7 @@ class QueuedRun:
     custom_cmake_args: list[str] = field(default_factory=list)
     mpi_ranks: Optional[int] = None
     opalx_info_level: Optional[int] = None
+    series_max_points: Optional[int] = None
     slurm_resources: Optional["SlurmResources"] = None
     execution_snapshot: Optional["ExecutionSnapshot"] = None
     skip_config: Optional["SkipConfigSnapshot"] = None
@@ -158,6 +160,7 @@ async def acquire_run_slot(
     custom_cmake_args: Optional[list[str]] = None,
     mpi_ranks: Optional[int] = None,
     opalx_info_level: Optional[int] = None,
+    series_max_points: Optional[int] = None,
     slurm_resources: Optional["SlurmResources"] = None,
     execution_snapshot: Optional["ExecutionSnapshot"] = None,
     skip_config: Optional["SkipConfigSnapshot"] = None,
@@ -189,6 +192,7 @@ async def acquire_run_slot(
             custom_cmake_args=list(custom_cmake_args or []),
             mpi_ranks=mpi_ranks,
             opalx_info_level=opalx_info_level,
+            series_max_points=series_max_points,
             slurm_resources=slurm_resources,
             execution_snapshot=execution_snapshot,
             skip_config=skip_config,

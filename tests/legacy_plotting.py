@@ -1,38 +1,13 @@
-"""Matplotlib-based stat comparison plots."""
+"""The SVG writer of the runner before series.json.gz (was runner/plotting.py).
+
+Kept only to generate legacy SVG fixtures for the migration tests; the runner no
+longer draws plots. Unchanged apart from importing the difference helper.
+"""
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
-
-def _common_s_differences(
-    s_vals: list[float],
-    values: list[float],
-    ref_s_vals: list[float],
-    ref_values: list[float],
-) -> tuple[list[float], list[float]]:
-    """Return differences only at s coordinates shared by both series."""
-    s_common: list[float] = []
-    diffs: list[float] = []
-    i = 0
-    j = 0
-    value_count = min(len(s_vals), len(values))
-    ref_value_count = min(len(ref_s_vals), len(ref_values))
-
-    while i < value_count and j < ref_value_count:
-        s = s_vals[i]
-        ref_s = ref_s_vals[j]
-        if math.isclose(s, ref_s, rel_tol=1e-9, abs_tol=1e-12):
-            s_common.append(s)
-            diffs.append(values[i] - ref_values[j])
-            i += 1
-            j += 1
-        elif s < ref_s:
-            i += 1
-        else:
-            j += 1
-
-    return s_common, diffs
+from modern_opalx_regsuite.series import common_s_differences as _common_s_differences
 
 
 def _write_stat_plot(

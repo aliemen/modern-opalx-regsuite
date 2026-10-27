@@ -19,6 +19,7 @@ from ..data_model import (
     UnitTestsReport,
     RegressionTestsReport,
 )
+from ..execution_profiles import default_series_max_points
 from ..skip_configs import ctest_command_with_excludes
 from .cmake import build_cmake_command, merge_cmake_args, normalize_custom_cmake_args
 from .execution import (
@@ -62,6 +63,7 @@ def run_pipeline(
     skip_config: Optional[SkipConfigSnapshot] = None,
     gateway_password: Optional[str] = None,
     gateway_otp: Optional[str] = None,
+    series_max_points: Optional[int] = None,
 ) -> RunMeta:
     """Run the full pipeline for a given branch/architecture.
 
@@ -79,6 +81,14 @@ def run_pipeline(
     Pass *repo_locks* (a dict mapping absolute repo path to
     :class:`threading.Lock`) to serialise git operations on shared local
     repositories when multiple pipelines run concurrently.
+
+    *series_max_points* caps the rows per plotted series in series.json.gz
+    (0 = all); ``None`` uses the global default from the public execution
+    settings. The effective value is recorded in ``run_options``.
+
+    Log gzip and the final manifest happen after this returns, in
+    ``run_logs.finalize_run_files`` (callers run it once nothing writes the
+    logs any more).
     """
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -99,6 +109,9 @@ def run_pipeline(
         slurm_resources=slurm_resources,
     )
     ac = run_options.arch_config
+    effective_series_max_points = (
+        series_max_points if series_max_points is not None else default_series_max_points(cfg)
+    )
 
     # SENSITIVE-DATA RULE: write only the compatibility label plus safe public
     # execution snapshot fields. Never write SSH user/key or work_dir here.
@@ -120,6 +133,7 @@ def run_pipeline(
             opalx_info_level=run_options.opalx_info_level,
             slurm_resources=run_options.persisted_slurm_resources,
             skip_config=skip_config,
+            series_max_points=effective_series_max_points,
         ),
         execution_snapshot=execution_snapshot,
         rerun_of=rerun_of,
@@ -447,6 +461,7 @@ def run_pipeline(
                     pipeline_log_path=paths.pipeline_log_path,
                     cancel_event=cancel_event,
                     skip_tests=skip_regression_names,
+                    series_max_points=effective_series_max_points,
                 )
             else:
                 reg_report = _run_regression_suite(
@@ -459,6 +474,7 @@ def run_pipeline(
                     cancel_event=cancel_event,
                     base_env=module_env,
                     skip_tests=skip_regression_names,
+                    series_max_points=effective_series_max_points,
                 )
             meta.regression_total = reg_report.total
             meta.regression_passed = reg_report.passed

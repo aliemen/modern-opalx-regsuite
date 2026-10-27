@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..archive_service import (
@@ -25,8 +26,10 @@ from ..data_model import (
     UnitTestsReport,
     branches_index_path,
     resolve_run_dir,
+    run_dir,
     runs_index_path,
 )
+from ..series import SERIES_FILE
 from .deps import BranchPath, get_config, require_auth
 from .state import get_active_run
 
@@ -307,6 +310,33 @@ def get_run(
         unit=UnitTestsReport.model_validate(unit_data) if unit_data else UnitTestsReport(),
         regression=RegressionTestsReport.model_validate(reg_data) if reg_data else RegressionTestsReport(),
         archived_on_cold_storage=archived and archive_root is not None,
+    )
+
+
+@router.get("/branches/{branch:path}/archs/{arch}/runs/{run_id}/series")
+def get_run_series(
+    branch: BranchPath,
+    arch: str,
+    run_id: str,
+    _user: Annotated[str, Depends(require_auth)],
+    cfg: SuiteConfig = Depends(get_config),
+) -> FileResponse:
+    """The run's ``series.json.gz`` as JSON; the browser undoes the gzip encoding.
+
+    Cold-stored runs return 404 like their other details (unarchive to view).
+    """
+    data_root = cfg.resolved_data_root
+    index_entry = _index_entry_for_run(data_root, branch, arch, run_id)
+    archived = bool(index_entry and index_entry.get("archived", False))
+    if index_entry is None or (archived and cfg.resolved_archive_root is not None):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    path = run_dir(data_root, branch, arch, run_id) / SERIES_FILE
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run has no series data.")
+    return FileResponse(
+        path,
+        media_type="application/json",
+        headers={"Content-Encoding": "gzip", "Cache-Control": "private, no-cache"},
     )
 
 

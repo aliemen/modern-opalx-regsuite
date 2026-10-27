@@ -37,7 +37,9 @@ class RegressionMetric(BaseModel):
     state: str  # "passed" | "failed" | "broken"
     reference_value: Optional[float] = None
     current_value: Optional[float] = None
-    plot: Optional[str] = None  # relative path, e.g. "plots/foo.svg"
+    unit: Optional[str] = None  # unit of the .stat column, e.g. "m"
+    plot: Optional[str] = None  # legacy SVG, relative path, e.g. "plots/foo.svg"
+    series: bool = False  # plot data is in the run's series.json.gz (see series.py)
 
 
 class RegressionContainer(BaseModel):
@@ -149,6 +151,9 @@ class RunOptions(BaseModel):
     opalx_info_level: int = Field(2, ge=0)
     slurm_resources: Optional[SlurmResources] = None
     skip_config: Optional[SkipConfigSnapshot] = None
+    # Rows kept per plotted series in series.json.gz (0 = all). None on runs from
+    # before the series format; set to the effective value for new runs.
+    series_max_points: Optional[int] = Field(None, ge=0)
 
 
 class BuildPresetSnapshot(BaseModel):

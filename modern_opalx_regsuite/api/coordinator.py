@@ -12,11 +12,14 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from ..config import SuiteConfig
+from ..data_model import run_dir
+from ..run_logs import finalize_run_files
 from ..runner import run_pipeline
 from .state import (
     ActiveRun,
@@ -104,6 +107,7 @@ class RunCoordinator:
                 gateway_otp=active.gateway_otp,
                 mpi_ranks=active.mpi_ranks,
                 opalx_info_level=active.opalx_info_level,
+                series_max_points=active.series_max_points,
                 slurm_resources=active.slurm_resources,
                 execution_snapshot=active.execution_snapshot,
                 skip_config=active.skip_config,
@@ -156,6 +160,19 @@ class RunCoordinator:
 
             # Release slot and auto-start next queued run.
             next_queued = await release_run_slot(active.machine_id, final_status)
+
+            # Only now has every writer of pipeline.log finished (the remote
+            # cleanup in run_pipeline's finally, the error lines above, the
+            # tailer's last flush), so the logs can be gzipped.
+            try:
+                await asyncio.to_thread(
+                    finalize_run_files,
+                    run_dir(cfg.resolved_data_root, active.branch, active.arch, active.run_id),
+                )
+            except Exception:
+                logging.getLogger("opalx.coordinator").exception(
+                    "Finalizing run files failed for %s", active.run_id
+                )
             if next_queued is not None:
                 await self._start_queued_run(next_queued)
 
@@ -174,6 +191,7 @@ class RunCoordinator:
             custom_cmake_args=queued.custom_cmake_args,
             mpi_ranks=queued.mpi_ranks,
             opalx_info_level=queued.opalx_info_level,
+            series_max_points=queued.series_max_points,
             slurm_resources=queued.slurm_resources,
             execution_snapshot=queued.execution_snapshot,
             skip_config=queued.skip_config,

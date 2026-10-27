@@ -1,14 +1,36 @@
 import { lazy, Suspense, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
-import type { RegressionSimulation } from "../../api/results";
+import { getRunSeries, type RegressionMetric, type RegressionSimulation } from "../../api/results";
 import { StatusBadge } from "../../components/StatusBadge";
+import { metricCurves } from "../../lib/seriesData";
 import { fmtDuration, fmtNum } from "./runDetailFormat";
 
 const BeamlineViewer = lazy(() =>
   import("../../components/BeamlineViewer").then((m) => ({ default: m.BeamlineViewer }))
 );
+const SeriesPlot = lazy(() =>
+  import("../../components/SeriesPlot").then((m) => ({ default: m.SeriesPlot }))
+);
 
-export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: string }) {
+/** Identifies the run whose series.json.gz holds this card's plot data. */
+export interface SeriesSource {
+  branch: string;
+  arch: string;
+  runId: string;
+}
+
+const PLOT_PLACEHOLDER = "h-[330px] animate-pulse bg-surface rounded border border-border";
+
+export function SimCard({
+  sim,
+  runPath,
+  seriesSource,
+}: {
+  sim: RegressionSimulation;
+  runPath: string;
+  seriesSource?: SeriesSource;
+}) {
   const [open, setOpen] = useState(false);
   const [cIdx, setCIdx] = useState(0);
   const [beamlineView, setBeamlineView] = useState<"3d" | "2d">(
@@ -25,6 +47,45 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
   const isMulti = containers.length > 1 && containers.some((c) => c.id !== null);
   const safeIdx = Math.min(cIdx, Math.max(0, containers.length - 1));
   const active = containers[safeIdx];
+
+  // One fetch per run, shared by all cards through the query cache.
+  const series = useQuery({
+    queryKey: ["run-series", seriesSource?.branch, seriesSource?.arch, seriesSource?.runId],
+    queryFn: () => getRunSeries(seriesSource!.branch, seriesSource!.arch, seriesSource!.runId),
+    enabled: open && !!seriesSource && allMetrics.some((m) => m.series),
+    staleTime: Infinity,
+  });
+  const seriesContainer = series.data?.sims[sim.name]?.[active?.id ?? "_"];
+  const plotted = active ? active.metrics.filter((m) => m.series || m.plot) : [];
+
+  function renderPlot(m: RegressionMetric) {
+    const curves = m.series ? metricCurves(seriesContainer, m.metric) : null;
+    if (curves) {
+      return (
+        <Suspense fallback={<div className={PLOT_PLACEHOLDER} />}>
+          <SeriesPlot
+            metric={m.metric}
+            unit={m.unit}
+            curves={curves}
+            eps={m.eps}
+            syncKey={`${runPath}/${sim.name}/${active?.id ?? "_"}`}
+          />
+        </Suspense>
+      );
+    }
+    if (m.series && series.isPending) return <div className={PLOT_PLACEHOLDER} />;
+    if (m.plot) {
+      return (
+        <img
+          src={`/data/${runPath}/${m.plot}`}
+          alt={`${sim.name} ${m.metric}`}
+          className="w-full rounded border border-border"
+          loading="lazy"
+        />
+      );
+    }
+    return <p className="text-muted text-xs">Plot data unavailable.</p>;
+  }
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -206,21 +267,14 @@ export function SimCard({ sim, runPath }: { sim: RegressionSimulation; runPath: 
             </div>
           )}
 
-          {active && active.metrics.filter((m) => m.plot).length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {active.metrics
-                .filter((m) => m.plot)
-                .map((m) => (
-                  <div key={m.metric}>
-                    <p className="text-muted text-xs mb-1">{m.metric}</p>
-                    <img
-                      src={`/data/${runPath}/${m.plot}`}
-                      alt={`${sim.name} ${m.metric}`}
-                      className="w-full rounded border border-border"
-                      loading="lazy"
-                    />
-                  </div>
-                ))}
+          {plotted.length > 0 && (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {plotted.map((m) => (
+                <div key={m.metric} className="min-w-0">
+                  <p className="text-muted text-xs mb-1">{m.metric}</p>
+                  {renderPlot(m)}
+                </div>
+              ))}
             </div>
           )}
         </div>

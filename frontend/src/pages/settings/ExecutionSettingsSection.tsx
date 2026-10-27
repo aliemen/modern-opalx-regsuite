@@ -7,6 +7,7 @@ import {
   Database,
   Edit3,
   Layers3,
+  LineChart,
   Plus,
   RotateCcw,
   Save,
@@ -186,6 +187,10 @@ export function ExecutionSettingsSection() {
     );
   }
 
+  const saveSeriesMaxPoints = async (value: number) => {
+    await persist({ ...data, series_max_points: value });
+  };
+
   const saveCmakeQuickSelections = async (selections: string[]) => {
     await persist({
       ...data,
@@ -272,6 +277,11 @@ export function ExecutionSettingsSection() {
         )}
       </div>
 
+      <PlotDataCard
+        value={data.series_max_points ?? 100}
+        saving={saveMut.isPending}
+        onSave={saveSeriesMaxPoints}
+      />
       <CmakeQuickSelectionsCard
         selections={data.cmake_quick_selections}
         saving={saveMut.isPending}
@@ -336,6 +346,76 @@ function Header({
 }
 
 const CMAKE_QUICK_SELECTION_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function PlotDataCard({
+  value,
+  saving,
+  onSave,
+}: {
+  value: number;
+  saving: boolean;
+  onSave: (value: number) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [error, setError] = useState<string | null>(null);
+  const parsed = Number(draft.trim());
+  const valid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= 0;
+
+  async function save() {
+    if (saving) return;
+    if (!valid) {
+      setError("Enter a whole number, 0 or greater.");
+      return;
+    }
+    setError(null);
+    try {
+      await onSave(parsed);
+    } catch {
+      // The page-level settings error keeps the failed save visible.
+    }
+  }
+
+  return (
+    <div className="space-y-4 rounded-xl border border-border bg-surface p-4 sm:p-6">
+      <h3 className="text-fg text-base font-medium flex items-center gap-2">
+        <LineChart size={18} />
+        Plot Data
+      </h3>
+      <p className="text-xs text-muted">
+        Rows stored per plotted curve of a new run; the browser draws the plots from them.
+        0 keeps every row. Pass/fail always uses all rows. A run can override this in its
+        advanced options.
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <Field label="Plot points per series">
+          <input
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={draft}
+            disabled={saving}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (error) setError(null);
+            }}
+            className={`${inputCls} sm:w-40`}
+          />
+        </Field>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || !valid || parsed === value}
+          className={actionButtonCls("primary")}
+        >
+          <Save size={14} />
+          Save
+        </button>
+      </div>
+      {error && <p className="text-sm text-failed">{error}</p>}
+    </div>
+  );
+}
 
 function CmakeQuickSelectionsCard({
   selections,

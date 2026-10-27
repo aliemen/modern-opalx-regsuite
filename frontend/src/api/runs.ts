@@ -31,6 +31,8 @@ export interface TriggerRequest {
   custom_cmake_args?: string[];
   mpi_ranks?: number;
   opalx_info_level?: number;
+  /** Rows per plotted series (0 = all); omitted uses the global default. */
+  series_max_points?: number;
   slurm_resources?: SlurmResources | null;
   /**
    * Legacy compatibility path. New triggers use `profile_id`; legacy callers

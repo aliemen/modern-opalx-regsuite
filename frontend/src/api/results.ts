@@ -50,7 +50,11 @@ export interface RegressionMetric {
   state: string;
   reference_value: number | null;
   current_value: number | null;
+  unit?: string | null;
+  /** Legacy SVG plot (runs from before series.json.gz, until pruned). */
   plot: string | null;
+  /** Plot data is in the run's series.json.gz (see getRunSeries). */
+  series?: boolean;
 }
 
 export interface RegressionContainer {
@@ -114,6 +118,8 @@ export interface RunOptions {
   opalx_info_level: number;
   slurm_resources: SlurmResources | null;
   skip_config?: SkipConfigSnapshot | null;
+  /** Rows kept per plotted series (0 = all); absent on runs before series.json.gz. */
+  series_max_points?: number | null;
 }
 
 /** Test skip config frozen at trigger time (stored with the run). */
@@ -264,6 +270,42 @@ export async function getAllRuns(
   const res = await api.get<PaginatedRuns>("/api/results/all-runs", {
     params: paramsWithUser({ limit, offset, view }, triggeredBy),
   });
+  return res.data;
+}
+
+/** One metric's curves in series.json.gz (layout: modern_opalx_regsuite/series.py). */
+export interface SeriesMetric {
+  cur: (number | null)[];
+  ref: (number | null)[];
+  /** Per-metric x; overrides the container's (runs converted from SVGs). */
+  s?: number[];
+  rs?: number[];
+  /** current - reference at common s, reduced keeping per-bucket extremes. */
+  d?: { s: number[]; v: (number | null)[] };
+}
+
+export interface SeriesContainer {
+  s?: number[];
+  rs?: number[];
+  m: Record<string, SeriesMetric>;
+}
+
+export interface RunSeries {
+  schema: number;
+  source: "runner" | "svg";
+  max_points: number;
+  /** test name -> container id ("_" for single-beam) -> curves */
+  sims: Record<string, Record<string, SeriesContainer>>;
+}
+
+export async function getRunSeries(
+  branch: string,
+  arch: string,
+  runId: string
+): Promise<RunSeries> {
+  const res = await api.get<RunSeries>(
+    `/api/results/branches/${encodeURIComponent(branch)}/archs/${encodeURIComponent(arch)}/runs/${encodeURIComponent(runId)}/series`
+  );
   return res.data;
 }
 

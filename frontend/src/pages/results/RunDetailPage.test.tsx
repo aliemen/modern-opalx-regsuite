@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunDetailPage } from "./RunDetailPage";
-import { getRunDetail, type RunDetail } from "../../api/results";
+import { getRunDetail, getRunSeries, type RunDetail } from "../../api/results";
 import { getRunIntegrity } from "../../api/integrity";
 
 vi.mock("../../api/results", async () => {
@@ -13,12 +13,20 @@ vi.mock("../../api/results", async () => {
   return {
     ...actual,
     getRunDetail: vi.fn(),
+    getRunSeries: vi.fn(),
     archiveRun: vi.fn(),
     restoreRun: vi.fn(),
     deleteRun: vi.fn(),
     setRunVisibility: vi.fn(),
   };
 });
+
+// uPlot needs a canvas, which jsdom lacks; the chart itself is not under test here.
+vi.mock("../../components/SeriesPlot", () => ({
+  SeriesPlot: ({ metric, curves }: { metric: string; curves: { x: number[] } }) => (
+    <div data-testid="series-plot">{`${metric}:${curves.x.length}`}</div>
+  ),
+}));
 
 vi.mock("../../api/integrity", () => ({
   getRunIntegrity: vi.fn(),
@@ -205,5 +213,55 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("Slow on CPU")).toBeInTheDocument();
     expect(screen.getByText("Skipped (1)")).toBeInTheDocument();
     expect(screen.getAllByText(/· 1 skipped/)).toHaveLength(2); // unit + regression headers
+  });
+
+  it("draws metrics from series.json.gz and falls back to the legacy SVG", async () => {
+    const detail = detailFixture();
+    detail.regression = {
+      simulations: [
+        {
+          name: "Drift",
+          description: null,
+          state: "passed",
+          log_file: null,
+          containers: [
+            {
+              id: null,
+              state: "passed",
+              revision: null,
+              metrics: [
+                { metric: "rms_x", mode: "last", eps: 1e-6, delta: 0, state: "passed",
+                  reference_value: 1, current_value: 1, plot: "plots/Drift_rms_x.svg", series: true },
+                { metric: "energy", mode: "avg", eps: 1e-3, delta: 0, state: "passed",
+                  reference_value: 1, current_value: 1, plot: "plots/Drift_energy.svg" },
+              ],
+            },
+          ],
+          duration_seconds: 1,
+          beamline_plot: null,
+          beamline_3d_data: null,
+          exit_code: 0,
+          crash_signal: null,
+          crash_summary: null,
+        },
+      ],
+    };
+    vi.mocked(getRunDetail).mockResolvedValue(detail);
+    vi.mocked(getRunIntegrity).mockResolvedValue({ status: "ok", issues: [], manifest: null });
+    vi.mocked(getRunSeries).mockResolvedValue({
+      schema: 2,
+      source: "svg",
+      max_points: 100,
+      sims: { Drift: { _: { m: { rms_x: { s: [0, 1, 2], cur: [1, 2, 3], rs: [0, 1, 2], ref: [1, 2, 3] } } } } },
+    });
+
+    renderPage();
+    (await screen.findByText("Drift")).click();
+
+    expect(await screen.findByTestId("series-plot")).toHaveTextContent("rms_x:3");
+    expect(getRunSeries).toHaveBeenCalledWith("master", "cpu-serial", "source");
+    const img = screen.getByAltText("Drift energy");
+    expect(img.getAttribute("src")).toBe("/data/runs/master/cpu-serial/source/plots/Drift_energy.svg");
+    expect(screen.queryByAltText("Drift rms_x")).not.toBeInTheDocument();
   });
 });

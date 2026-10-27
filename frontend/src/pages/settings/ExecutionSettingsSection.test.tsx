@@ -35,6 +35,7 @@ vi.mock("./RunProfilesSection", () => ({
 function settingsFixture(): ExecutionSettings {
   return {
     version: 1,
+    series_max_points: 100,
     cmake_quick_selections: [],
     build_presets: [
       {

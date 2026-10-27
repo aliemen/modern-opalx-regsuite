@@ -54,6 +54,7 @@ function executionSettingsFixture(
 ): ExecutionSettings {
   return {
     version: 1,
+    series_max_points: 100,
     cmake_quick_selections: cmakeQuickSelections,
     build_presets: [],
     machine_presets: [],
@@ -291,6 +292,30 @@ describe("TriggerPage rerun prefill", () => {
         })
       );
     });
+  });
+
+  it("sends a plot point override and omits it when left empty", async () => {
+    vi.mocked(triggerRun).mockResolvedValue({
+      run_id: "20260507-120000",
+      queued: true,
+      queue_id: "queue-1",
+      position: 1,
+    });
+    const user = userEvent.setup();
+
+    renderPage("/trigger?branch=master&regtests_branch=master&arch=cpu-serial&series_max_points=250");
+
+    await user.click(screen.getByLabelText(/Show advanced options/));
+    expect(screen.getByLabelText("Plot points per series")).toHaveValue(250);
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+    await waitFor(() => {
+      expect(triggerRun).toHaveBeenCalledWith(expect.objectContaining({ series_max_points: 250 }));
+    });
+
+    await user.clear(screen.getByLabelText("Plot points per series"));
+    await user.click(screen.getByRole("button", { name: /Start Run/i }));
+    await waitFor(() => expect(triggerRun).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(triggerRun).mock.calls[1][0]).not.toHaveProperty("series_max_points");
   });
 
   it("keeps manually edited MPI ranks for local runs", async () => {

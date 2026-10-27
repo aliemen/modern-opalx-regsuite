@@ -19,6 +19,10 @@ interface AdvancedRunFieldsProps {
   } | null;
   mpiRanks: number;
   opalxInfoLevel: number;
+  /** Raw input; empty uses defaultSeriesMaxPoints. */
+  seriesMaxPoints: string;
+  defaultSeriesMaxPoints: number;
+  onSeriesMaxPointsChange: (value: string) => void;
   slurmForm: SlurmResourceForm;
   slurmOverrideDirty: boolean;
   onMpiRanksChange: (value: number) => void;
@@ -49,6 +53,9 @@ export function AdvancedRunFields({
   selectedRunConfig,
   mpiRanks,
   opalxInfoLevel,
+  seriesMaxPoints,
+  defaultSeriesMaxPoints,
+  onSeriesMaxPointsChange,
   slurmForm,
   slurmOverrideDirty,
   onMpiRanksChange,
@@ -82,6 +89,25 @@ export function AdvancedRunFields({
         onMpiRanksChange={onMpiRanksChange}
         onOpalxInfoLevelChange={onOpalxInfoLevelChange}
       />
+      <div>
+        <label htmlFor="series-max-points" className="block text-sm text-muted mb-1">
+          Plot points per series
+        </label>
+        <input
+          id="series-max-points"
+          type="number"
+          min={0}
+          step={1}
+          inputMode="numeric"
+          value={seriesMaxPoints}
+          onChange={(e) => onSeriesMaxPointsChange(e.target.value)}
+          placeholder={`Default (${defaultSeriesMaxPoints})`}
+          className="w-40 bg-bg border border-border rounded-md px-3 py-2 text-fg text-sm focus:outline-none focus:border-accent"
+        />
+        <p className="text-muted text-xs mt-1">
+          Rows stored per plotted curve; 0 keeps every row. Pass/fail always uses all rows.
+        </p>
+      </div>
       <div>
         {cmakeQuickSelections.length > 0 && (
           <div className="mb-3">

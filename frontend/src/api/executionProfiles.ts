@@ -64,6 +64,8 @@ export interface SlurmPreset {
 
 export interface ExecutionSettings {
   version: number;
+  /** Default rows per plotted series for new runs (0 = all). */
+  series_max_points: number;
   cmake_quick_selections: string[];
   build_presets: BuildPreset[];
   machine_presets: MachinePreset[];

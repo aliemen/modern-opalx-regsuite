@@ -181,6 +181,9 @@ export function RunDetailPage() {
     rerun_arch: meta.arch,
     rerun_id: meta.run_id,
   });
+  if (meta.run_options?.series_max_points != null) {
+    rerunParams.set("series_max_points", String(meta.run_options.series_max_points));
+  }
   const slurmResources = meta.run_options?.slurm_resources ?? null;
   if (executionSnapshot) {
     if (executionSnapshot.build?.id) {
@@ -437,6 +440,13 @@ export function RunDetailPage() {
             {meta.run_options?.mpi_ranks ?? 1} rank
             {(meta.run_options?.mpi_ranks ?? 1) === 1 ? "" : "s"} / info{" "}
             {meta.run_options?.opalx_info_level ?? 2}
+            {meta.run_options?.series_max_points != null && (
+              <>
+                {" "}/ {meta.run_options.series_max_points === 0
+                  ? "all plot points"
+                  : `${meta.run_options.series_max_points} plot points`}
+              </>
+            )}
           </p>
         </div>
         <SlurmResourceSummary resources={slurmResources} />
@@ -545,7 +555,12 @@ export function RunDetailPage() {
             </span>
           </h2>
           {executedSims.map((sim) => (
-            <SimCard key={sim.name} sim={sim} runPath={runPath} />
+            <SimCard
+              key={sim.name}
+              sim={sim}
+              runPath={runPath}
+              seriesSource={{ branch: branch!, arch: arch!, runId: runId! }}
+            />
           ))}
           <SkippedSimulationsGroup names={skippedSimNames} />
         </div>

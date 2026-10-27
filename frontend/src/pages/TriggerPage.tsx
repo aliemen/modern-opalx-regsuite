@@ -72,6 +72,10 @@ export function TriggerPage() {
   const [opalxInfoLevel, setOpalxInfoLevel] = useState(() =>
     parseNonNegativeIntParam(searchParams.get("opalx_info_level"), 2)
   );
+  // Empty means "use the global default" (Settings > public execution settings).
+  const [seriesMaxPoints, setSeriesMaxPoints] = useState(
+    () => searchParams.get("series_max_points") ?? ""
+  );
   const [slurmOverrideDirty, setSlurmOverrideDirty] = useState(() =>
     hasSlurmQueryParams(searchParams)
   );
@@ -283,6 +287,15 @@ export function TriggerPage() {
       setError("OPALX info level must be 0 or greater.");
       return;
     }
+    const seriesMaxPointsValue =
+      seriesMaxPoints.trim() === "" ? null : Number(seriesMaxPoints.trim());
+    if (
+      seriesMaxPointsValue !== null &&
+      (!Number.isInteger(seriesMaxPointsValue) || seriesMaxPointsValue < 0)
+    ) {
+      setError("Plot points per series must be a whole number, 0 or greater.");
+      return;
+    }
     if (slurmOverrideDirty) {
       if (!selectedRunConfig?.slurm_overrides_supported) {
         setError("This run config does not support manual Slurm overrides.");
@@ -308,6 +321,9 @@ export function TriggerPage() {
         mpi_ranks: mpiRanks,
         opalx_info_level: opalxInfoLevel,
       };
+      if (seriesMaxPointsValue !== null) {
+        body.series_max_points = seriesMaxPointsValue;
+      }
       if (slurmOverrideDirty) {
         body.slurm_resources = slurmResourcesFromForm(slurmForm);
       }
@@ -611,6 +627,9 @@ export function TriggerPage() {
               selectedRunConfig={selectedRunConfig}
               mpiRanks={mpiRanks}
               opalxInfoLevel={opalxInfoLevel}
+              seriesMaxPoints={seriesMaxPoints}
+              defaultSeriesMaxPoints={executionSettings?.series_max_points ?? 100}
+              onSeriesMaxPointsChange={setSeriesMaxPoints}
               slurmForm={slurmForm}
               slurmOverrideDirty={slurmOverrideDirty}
               onMpiRanksChange={setMpiRanks}

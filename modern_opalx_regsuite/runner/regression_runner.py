@@ -20,6 +20,7 @@ from .execution import RunPaths, _append_pipeline_line, _run_command
 from .parsing.regression import (
     _discover_regression_tests,
     _discover_regression_tests_remote,
+    _parse_rt_file,
 )
 from .regression_results import _build_simulation
 
@@ -448,6 +449,24 @@ def _run_regression_suite_remote(
                     pipeline_log_path,
                     f"[regression] WARNING: transport error fetching reference {fname}: {detail}",
                 )
+
+        # JSON files named by "<file>.json <path> <eps>" lines in the .rt, from
+        # the run and from reference/. The parser only admits plain file names,
+        # so the local targets stay inside the work and reference directories.
+        # An absent file is left to the verdict (failed or broken).
+        json_files = dict.fromkeys(f for f, _, _ in _parse_rt_file(rt_file).json)
+        for fname in json_files:
+            for label, remote_path, local_path in (
+                ("generated", f"{remote_test_work}/{fname}", work_test_dir / fname),
+                ("reference", f"{remote_test_src}/reference/{fname}", local_reference_dir / fname),
+            ):
+                status, detail = remote.fetch_file_status(remote_path, local_path)
+                if status == "transport_error":
+                    transport_errors.append(f"{label} {fname}: {detail}")
+                    _append_pipeline_line(
+                        pipeline_log_path,
+                        f"[regression] WARNING: transport error fetching {label} {fname}: {detail}",
+                    )
 
         # Try to fetch the element positions files for beamline visualization.
         # Attempt both the legacy single-beam name and any per-container

@@ -1,9 +1,12 @@
 import { api } from "./client";
 
 export interface CatalogMetricCheck {
+  /** .stat column, or the dotted JSON path when `file` is set */
   metric: string;
   mode: string;
   eps: number | null;
+  /** JSON file of a `<file>.json <path> <eps>` check */
+  file?: string | null;
 }
 
 export interface CatalogTestEntry {

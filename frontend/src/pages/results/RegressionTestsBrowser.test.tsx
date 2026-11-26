@@ -35,7 +35,11 @@ function Search() {
   return <output data-testid="search">{useLocation().search}</output>;
 }
 
-function renderBrowser(simulations: RegressionSimulation[], url = "/run") {
+function renderBrowser(
+  simulations: RegressionSimulation[],
+  url = "/run",
+  load: () => Promise<RunSeries> = () => Promise.resolve(SERIES),
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -48,7 +52,7 @@ function renderBrowser(simulations: RegressionSimulation[], url = "/run") {
                 <RegressionTestsBrowser
                   simulations={simulations}
                   runPath="runs/master/cpu/r1"
-                  series={{ queryKey: ["s"], load: () => Promise.resolve(SERIES) }}
+                  series={{ queryKey: ["s"], load }}
                 />
                 <Search />
               </>
@@ -141,6 +145,41 @@ describe("RegressionTestsBrowser", () => {
     expect(await screen.findByTestId("beamline-3d")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "2D" }));
     expect(screen.getByAltText("Quad beamline diagram")).toBeInTheDocument();
+  });
+
+  it("shows JSON value checks as a table named after their file, without loading plot data", () => {
+    const load = vi.fn(() => Promise.resolve(SERIES));
+    const json = { ...metric("root.orbits.0.optics.full_tunes.vertical", "passed", false), mode: "json" };
+    renderBrowser(
+      [sim("DBA-COF-JSON", "passed", [], { containers: [{ id: "orbit.json", state: "passed", revision: null, metrics: [json] }] })],
+      "/run",
+      load,
+    );
+    const table = screen.getByRole("table", { name: "Checks of DBA-COF-JSON, orbit.json" });
+    expect(within(table).getByText("root.orbits.0.optics.full_tunes.vertical")).toBeInTheDocument();
+    expect(within(table).getByText("json")).toBeInTheDocument();
+    expect(screen.queryByTestId("series-plot")).not.toBeInTheDocument();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it("labels the stat checks and the JSON file of a mixed test in the container switcher", () => {
+    const json = { ...metric("root.orbits.0.solution.section_coordinates.0", "failed", false), mode: "json" };
+    renderBrowser([
+      sim("DBA-COF-Track", "failed", [], {
+        containers: [
+          { id: null, state: "passed", revision: null, metrics: [metric("rms_x")] },
+          { id: "orbit.json", state: "failed", revision: null, metrics: [json] },
+        ],
+      }),
+    ]);
+    const group = screen.getByRole("group", { name: "Container" });
+    expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      expect.stringContaining("stat"),
+      expect.stringContaining("orbit.json"),
+    ]);
+    expect(screen.getByRole("table", { name: "Checks of DBA-COF-Track, stat" })).toBeInTheDocument();
+    fireEvent.click(within(group).getByRole("button", { name: /orbit\.json/ }));
+    expect(screen.getByRole("table", { name: "Checks of DBA-COF-Track, orbit.json" })).toBeInTheDocument();
   });
 
   it("lists skipped tests apart from the executed ones", () => {

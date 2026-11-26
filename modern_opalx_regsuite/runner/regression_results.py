@@ -19,6 +19,10 @@ from .parsing.regression import (
     _enumerate_stat_containers,
     _parse_rt_file,
     _read_stat_data,
+    _verdict,
+    _worst,
+    json_value,
+    load_json,
 )
 from ..series import RunSeriesWriter
 
@@ -175,14 +179,7 @@ def _build_container(
                     grid_warning,
                 )
             delta = _compute_delta(mode, values, ref_values)
-
-            state = "broken"
-            if delta is not None:
-                state = "passed" if delta < eps else "failed"
-            elif rc < 0:
-                state = "crashed"
-            elif rc != 0:
-                state = "failed"
+            state = _verdict(delta, eps, rc)
 
             can_plot = bool(
                 s_vals
@@ -233,23 +230,57 @@ def _build_container(
             )
         )
 
-    container_state = "passed"
-    if any(m.state == "failed" for m in metrics):
-        container_state = "failed"
-    elif any(m.state == "crashed" for m in metrics):
-        container_state = "crashed"
-    elif any(m.state == "broken" for m in metrics):
-        container_state = "broken"
-
     return (
         RegressionContainer(
             id=container_id,
-            state=container_state,
+            state=_worst([m.state for m in metrics]),
             metrics=metrics,
             revision=revision,
         ),
         any_stat_plots,
     )
+
+
+def _build_json_containers(
+    checks: list[tuple[str, str, float]],
+    rc: int,
+    work_test_dir: Path,
+    reference_dir: Path,
+) -> list[RegressionContainer]:
+    """One container per JSON file named in the .rt (id = file name), holding
+    its checks in .rt order; each compares one number with reference/<file>.
+
+    A missing reference value is ``broken`` (the test definition is wrong); a
+    reference value the new run lacks is ``failed`` (e.g. COF reports its tunes
+    as unavailable). Same rules as opalx-regression's ``pack_run.py``.
+    """
+    containers: list[RegressionContainer] = []
+    for file in dict.fromkeys(f for f, _, _ in checks):
+        new, ref = load_json(work_test_dir / file), load_json(reference_dir / file)
+        metrics: list[RegressionMetric] = []
+        for _, path, eps in (c for c in checks if c[0] == file):
+            cur, ref_value = json_value(new, path), json_value(ref, path)
+            delta = abs(cur - ref_value) if cur is not None and ref_value is not None else None
+            state = _verdict(delta, eps, rc)
+            if state == "broken" and ref_value is not None:
+                state = "failed"
+            metrics.append(
+                RegressionMetric(
+                    metric=path,
+                    mode="json",
+                    eps=eps,
+                    delta=delta,
+                    state=state,
+                    reference_value=ref_value,
+                    current_value=cur,
+                )
+            )
+        containers.append(
+            RegressionContainer(
+                id=file, state=_worst([m.state for m in metrics]), metrics=metrics
+            )
+        )
+    return containers
 
 
 def _build_simulation(
@@ -274,17 +305,23 @@ def _build_simulation(
     test_log_path = log_path or work_test_dir / f"{test_name}-RT.log"
     crash_signal, crash_summary = _classify_crash(rc, test_log_path)
 
-    description, checks = _parse_rt_file(rt_file)
+    rt = _parse_rt_file(rt_file)
+    description, checks = rt.description, rt.stat
     generated_pairs = _enumerate_stat_containers(work_test_dir, test_name)
     reference_pairs = _enumerate_stat_containers(reference_dir, test_name)
     ref_by_id: dict[Optional[str], Path] = {cid: p for cid, p in reference_pairs}
 
-    if generated_pairs:
-        pairs = generated_pairs
-    elif reference_pairs:
-        pairs = [(cid, work_test_dir / p.name) for cid, p in reference_pairs]
+    if checks or not rt.json:
+        if generated_pairs:
+            pairs = generated_pairs
+        elif reference_pairs:
+            pairs = [(cid, work_test_dir / p.name) for cid, p in reference_pairs]
+        else:
+            pairs = [(None, work_test_dir / f"{test_name}.stat")]
     else:
-        pairs = [(None, work_test_dir / f"{test_name}.stat")]
+        # JSON checks only: no stat containers, and in particular no "presence"
+        # metric, which would be broken for a run that writes no .stat.
+        pairs = []
 
     containers: list[RegressionContainer] = []
     any_stat_plots = False
@@ -308,14 +345,20 @@ def _build_simulation(
     if series is not None:
         series.flush(test_name)
 
-    sim_state = "passed"
-    all_metric_states = [m.state for c in containers for m in c.metrics]
-    if any(s == "failed" for s in all_metric_states):
-        sim_state = "failed"
-    elif any(s == "crashed" for s in all_metric_states):
-        sim_state = "crashed"
-    elif any(s == "broken" for s in all_metric_states):
-        sim_state = "broken"
+    containers += _build_json_containers(rt.json, rc, work_test_dir, reference_dir)
+    if rt.invalid:
+        containers.append(
+            RegressionContainer(
+                id=f"{test_name}.rt",
+                state="broken",
+                metrics=[
+                    RegressionMetric(metric=line, mode="invalid", state="broken")
+                    for line in rt.invalid
+                ],
+            )
+        )
+
+    sim_state = _worst([m.state for c in containers for m in c.metrics])
 
     if transport_errors:
         if sim_state in ("passed", "broken"):

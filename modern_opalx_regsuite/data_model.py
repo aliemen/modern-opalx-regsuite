@@ -48,6 +48,9 @@ class RegressionContainer(BaseModel):
     Single-beam runs produce exactly one container with ``id=None`` wrapping
     the single {test}.stat file. Multi-beam runs produce N containers with
     ids "c0", "c1", ... matching OPALX's {test}_c0.stat, {test}_c1.stat, ...
+    Any other id is a file, not a beam: "<file>.json" holds the JSON value
+    checks of that file (mode "json", no series), and "<test>.rt" holds .rt
+    lines that could not be parsed (mode "invalid", always broken).
     """
 
     id: Optional[str] = None

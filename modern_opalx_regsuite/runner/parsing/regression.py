@@ -1,4 +1,4 @@
-"""Regression test discovery and SDDS .stat file parsing."""
+"""Regression test discovery, SDDS .stat parsing, and check verdicts."""
 from __future__ import annotations
 
 import math
@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from ...rt_checks import RtChecks, json_value, load_json, parse_rt_text  # noqa: F401 (re-exported)
 from ...data_model import (
     RegressionContainer,
     RegressionMetric,
@@ -47,9 +48,10 @@ def _parse_regression_output(output: str) -> RegressionTestsReport:
 _CONTAINER_STAT_RE = re.compile(r"_c(\d+)\.stat$")
 
 
-def _has_reference_stat(entry: Path, test: str) -> bool:
-    """Test qualifies if either the legacy single {test}.stat exists or at
-    least one multi-beam {test}_c*.stat exists in reference/."""
+def _has_reference(entry: Path, test: str) -> bool:
+    """Test qualifies if reference/ holds the single-beam {test}.stat, a
+    multi-beam {test}_c*.stat, or a JSON file (a test may check only JSON
+    values, e.g. a COF-only input that writes no .stat)."""
     ref_dir = entry / "reference"
     if not ref_dir.is_dir():
         return False
@@ -58,7 +60,7 @@ def _has_reference_stat(entry: Path, test: str) -> bool:
     for candidate in ref_dir.glob(f"{test}_c*.stat"):
         if _CONTAINER_STAT_RE.search(candidate.name):
             return True
-    return False
+    return any(p.is_file() for p in ref_dir.glob("*.json"))
 
 
 def _discover_regression_tests(tests_root: Path) -> list[str]:
@@ -73,7 +75,7 @@ def _discover_regression_tests(tests_root: Path) -> list[str]:
             continue
         if not (entry / f"{test}.in").is_file():
             continue
-        if not _has_reference_stat(entry, test):
+        if not _has_reference(entry, test):
             continue
         tests.append(test)
     return tests
@@ -130,7 +132,7 @@ def _discover_regression_tests_remote(
         f"( find {quoted_root} -mindepth 1 -maxdepth 1 -type d -print "
         f"; find {quoted_root} -mindepth 2 -maxdepth 3 -type f "
         f"\\( -name disabled -o -name '*.in' "
-        f"-o -path '*/reference/*.stat' \\) -print ) || true"
+        f"-o -path '*/reference/*.stat' -o -path '*/reference/*.json' \\) -print ) || true"
     )
     result = remote.conn.run(cmd, hide=True, warn=True)
     if result.return_code != 0:
@@ -167,6 +169,13 @@ def _discover_regression_tests_remote(
             fname = tail[len("reference/") :]
             if fname.startswith(head + "_c"):
                 has_ref.add(head)
+        elif (
+            tail.startswith("reference/")
+            and tail.endswith(".json")
+            and "/" not in tail[len("reference/") :]
+        ):
+            # A JSON reference qualifies a test whose .rt checks JSON values only.
+            has_ref.add(head)
 
     tests = sorted(
         name for name in dirs
@@ -175,28 +184,24 @@ def _discover_regression_tests_remote(
     return tests
 
 
-def _parse_rt_file(rt_path: Path) -> tuple[Optional[str], list[tuple[str, str, float]]]:
+def _parse_rt_file(rt_path: Path) -> RtChecks:
     if not rt_path.is_file():
-        return None, []
-    lines = [l.strip() for l in rt_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    if not lines:
-        return None, []
-    description = lines[0].strip().strip('"')
-    checks: list[tuple[str, str, float]] = []
-    for line in lines[1:]:
-        if not line.startswith("stat"):
-            continue
-        m = re.match(r'^stat\s+"([^"]+)"\s+(\S+)\s+(\S+)\s*$', line)
-        if not m:
-            continue
-        var = m.group(1)
-        mode = m.group(2)
-        try:
-            eps = float(m.group(3))
-        except ValueError:
-            continue
-        checks.append((var, mode, eps))
-    return description, checks
+        return RtChecks()
+    return parse_rt_text(rt_path.read_text(encoding="utf-8"))
+
+
+def _verdict(delta: Optional[float], eps: float, rc: int) -> str:
+    """A check without a delta has no data or no reference: crashed (killed or
+    timed out), failed (non-zero exit) or broken (clean exit)."""
+    if delta is not None:
+        return "passed" if delta < eps else "failed"
+    if rc < 0:
+        return "crashed"
+    return "failed" if rc != 0 else "broken"
+
+
+def _worst(states: list[str]) -> str:
+    return next((s for s in ("failed", "crashed", "broken") if s in states), "passed")
 
 
 def _parse_sdds_kv(block: str, key: str) -> Optional[str]:

@@ -40,6 +40,15 @@ interface SimDetailProps {
  * beamline, plots. Tests without plots (single-step
  * .stat files such as the Dist-* tests) show only their checks.
  */
+/**
+ * Switcher label of a container: beams are `null` (single-beam .stat) or
+ * `c<N>`; any other id is a file holding non-stat checks (`orbit.json` for
+ * JSON value checks, `<test>.rt` for unreadable .rt lines).
+ */
+function containerLabel(id: string | null): string {
+  return id ?? "stat";
+}
+
 export function SimDetail({ sim, runPath, series, onPrev, onNext }: SimDetailProps) {
   const [cIdx, setCIdx] = useState(0);
   const plotRefs = useRef(new Map<string, HTMLElement>());
@@ -160,7 +169,7 @@ export function SimDetail({ sim, runPath, series, onPrev, onNext }: SimDetailPro
                 }`}
               >
                 <StatusIcon status={c.state} size={12} />
-                {c.id ?? "-"}
+                {containerLabel(c.id)}
                 <span className="sr-only">({c.state})</span>
               </button>
             ))}
@@ -178,7 +187,9 @@ export function SimDetail({ sim, runPath, series, onPrev, onNext }: SimDetailPro
             <div className="min-w-0 max-w-5xl [grid-area:checks] min-[1460px]:max-w-none">
               <ChecksTable
                 metrics={active.metrics}
-                caption={`Checks of ${sim.name}${isMulti ? `, container ${active.id}` : ""}`}
+                caption={`Checks of ${sim.name}${
+                  isMulti || active.id !== null ? `, ${containerLabel(active.id)}` : ""
+                }`}
                 onJump={(m) => (m.series || m.plot ? () => jumpToPlot(m.metric) : undefined)}
               />
             </div>
@@ -256,7 +267,7 @@ function ChecksTable({
             const jump = onJump(m);
             const within = m.delta !== null && m.eps !== null && m.delta < m.eps;
             return (
-              <tr key={m.metric} className={`border-t border-border/60 ${m.state !== "passed" ? "bg-failed/10" : ""}`}>
+              <tr key={`${m.metric}:${m.mode}`} className={`border-t border-border/60 ${m.state !== "passed" ? "bg-failed/10" : ""}`}>
                 <th scope="row" className="px-2 py-1 text-left font-mono font-normal text-fg">
                   <span className="flex items-center gap-1.5" title={m.state}>
                     <StatusIcon status={m.state} size={12} />

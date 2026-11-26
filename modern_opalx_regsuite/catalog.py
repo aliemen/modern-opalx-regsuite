@@ -7,11 +7,14 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .rt_checks import RtChecks, parse_rt_text
+
 
 class CatalogMetricCheck(BaseModel):
-    metric: str
+    metric: str  # .stat column, or the dotted JSON path when ``file`` is set
     mode: str
     eps: Optional[float] = None
+    file: Optional[str] = None  # JSON file of a "<file>.json <path> <eps>" check
 
 
 class CatalogTestEntry(BaseModel):
@@ -100,27 +103,16 @@ def github_commit_url(repo_url: Optional[str], commit: Optional[str]) -> Optiona
     return f"{url}/commit/{commit}"
 
 
-def _parse_rt_text(text: Optional[str]) -> tuple[Optional[str], list[CatalogMetricCheck]]:
-    if not text:
-        return None, []
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    description = lines[0].strip().strip('"') if lines else None
-    metrics: list[CatalogMetricCheck] = []
-    for line in lines[1:]:
-        if not line.startswith("stat"):
-            continue
-        m = re.match(r'^stat\s+"([^"]+)"\s+(\S+)\s+(\S+)\s*$', line)
-        if not m:
-            continue
-        eps: Optional[float]
-        try:
-            eps = float(m.group(3))
-        except ValueError:
-            eps = None
-        metrics.append(
-            CatalogMetricCheck(metric=m.group(1), mode=m.group(2), eps=eps)
-        )
-    return description, metrics
+def _rt_warnings(rt: RtChecks, rel_files: list[str], reference_stats: list[str]) -> list[str]:
+    """Problems of a test's .rt and reference/ that make its checks unusable."""
+    warnings: list[str] = []
+    if not reference_stats and (rt.stat or not rt.json):
+        warnings.append("missing reference .stat file")
+    for file in dict.fromkeys(f for f, _, _ in rt.json):
+        if f"reference/{file}" not in rel_files:
+            warnings.append(f"missing reference/{file}")
+    warnings += [f"unreadable .rt line: {line}" for line in rt.invalid]
+    return warnings
 
 
 _CONTAINER_STAT_RE = re.compile(r"_c(\d+)\.stat$")
@@ -165,7 +157,11 @@ def list_catalog_tests(
         has_input = f"{name}.in" in file_names
         has_local = f"{name}.local" in file_names
         rt_path = f"{root}/{name}.rt"
-        description, metrics = _parse_rt_text(_show_text(repo, ref, rt_path))
+        rt = parse_rt_text(_show_text(repo, ref, rt_path))
+        metrics = [CatalogMetricCheck(metric=m, mode=mode, eps=eps) for m, mode, eps in rt.stat] + [
+            CatalogMetricCheck(metric=path, mode="json", eps=eps, file=file)
+            for file, path, eps in rt.json
+        ]
         reference_stats = [
             f for f in rel_files
             if f.startswith("reference/") and f.endswith(".stat")
@@ -179,14 +175,13 @@ def list_catalog_tests(
             warnings.append("missing .in file")
         if f"{name}.rt" not in file_names:
             warnings.append("missing .rt file")
-        if not reference_stats:
-            warnings.append("missing reference .stat file")
+        warnings += _rt_warnings(rt, rel_files, reference_stats)
         out.append(
             CatalogTestEntry(
                 name=name,
                 enabled=enabled,
                 path=root,
-                description=description,
+                description=rt.description,
                 metrics=metrics,
                 has_input=has_input,
                 has_local=has_local,
